@@ -121,6 +121,51 @@ function setupEventListeners() {
     if (syncHoldingsToWatchlist) {
         syncHoldingsToWatchlist.addEventListener('click', handleSyncHoldings);
     }
+
+    // 주문 모드 토글 이벤트 리스너
+    const testOrderRealMode = document.getElementById('testOrderRealMode');
+    if (testOrderRealMode) {
+        testOrderRealMode.addEventListener('change', handleTestOrderModeToggle);
+    }
+}
+
+// ========== 주문 모드 토글 ==========
+function handleTestOrderModeToggle() {
+    const checkbox = document.getElementById('testOrderRealMode');
+    const label = document.getElementById('testOrderModeLabel');
+    const warning = document.getElementById('testOrderWarning');
+
+    if (checkbox.checked) {
+        // 실제 주문 모드
+        label.textContent = '🔥 실제주문';
+        label.style.color = '#c92a2a';
+        label.style.fontWeight = 'bold';
+        warning.innerHTML = `
+            <div style="background: #ffe3e3; border-left: 4px solid #c92a2a; padding: 16px; margin-top: 12px; border-radius: 6px;">
+                <div style="color: #c92a2a; font-weight: bold; font-size: 15px; margin-bottom: 8px;">⚠️ 실제 주문 모드 활성화됨</div>
+                <div style="color: #495057; font-size: 13px;">
+                    - 실제 계좌에 주문이 실행됩니다<br>
+                    - 주문 전 반드시 종목, 수량, 가격을 확인하세요<br>
+                    - 시장 상황에 따라 체결 가격이 다를 수 있습니다
+                </div>
+            </div>
+        `;
+    } else {
+        // 시뮬레이션 모드
+        label.textContent = '🔒 시뮬레이션';
+        label.style.color = '#868e96';
+        label.style.fontWeight = 'normal';
+        warning.innerHTML = `
+            <div style="background: #e9ecef; border-left: 4px solid #868e96; padding: 16px; margin-top: 12px; border-radius: 6px;">
+                <div style="color: #495057; font-weight: bold; font-size: 15px; margin-bottom: 8px;">ℹ️ 시뮬레이션 모드</div>
+                <div style="color: #868e96; font-size: 13px;">
+                    - 실제 주문이 실행되지 않습니다<br>
+                    - 주문 API 테스트 및 동작 확인 용도<br>
+                    - 실제 주문을 원하시면 위 토글을 켜주세요
+                </div>
+            </div>
+        `;
+    }
 }
 
 // ========== 감시리스트 (통합) ==========
@@ -1028,7 +1073,11 @@ async function handleTestPlaceBuy() {
         return;
     }
 
-    if (!confirm(`매수 주문을 실행하시겠습니까?\n\n종목: ${code}\n수량: ${qty}주\n타입: ${orderType}\n가격: ${price || '시장가'}원`)) {
+    // 시뮬레이션 모드 확인
+    const isRealMode = document.getElementById('testOrderRealMode').checked;
+    const modeText = isRealMode ? '🔥 실제 주문' : '🔒 시뮬레이션 주문';
+
+    if (!confirm(`${modeText}을 실행하시겠습니까?\n\n종목: ${code}\n수량: ${qty}주\n타입: ${orderType}\n가격: ${price || '시장가'}원`)) {
         return;
     }
 
@@ -1043,7 +1092,8 @@ async function handleTestPlaceBuy() {
                 code: code,
                 quantity: qty,
                 order_type: orderType,
-                price: price
+                price: price,
+                simulation_mode: !isRealMode  // checkbox 체크 안되면 simulation
             })
         });
 
@@ -1090,8 +1140,12 @@ async function handleTestPlaceSell() {
         return;
     }
 
+    // 시뮬레이션 모드 확인
+    const isRealMode = document.getElementById('testOrderRealMode').checked;
+    const modeText = isRealMode ? '🔥 실제 주문' : '🔒 시뮬레이션 주문';
+
     const qtyText = qty ? `${qty}주` : '전량';
-    if (!confirm(`매도 주문을 실행하시겠습니까?\n\n종목: ${code}\n수량: ${qtyText}\n타입: ${orderType}\n가격: ${price || '시장가'}원`)) {
+    if (!confirm(`${modeText}을 실행하시겠습니까?\n\n종목: ${code}\n수량: ${qtyText}\n타입: ${orderType}\n가격: ${price || '시장가'}원`)) {
         return;
     }
 
@@ -1106,7 +1160,8 @@ async function handleTestPlaceSell() {
                 code: code,
                 quantity: qty,
                 order_type: orderType,
-                price: price
+                price: price,
+                simulation_mode: !isRealMode  // checkbox 체크 안되면 simulation
             })
         });
 

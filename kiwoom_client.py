@@ -421,7 +421,8 @@ class KiwoomClient:
         symbol: str,
         quantity: int,
         price: int = 0,
-        order_type: str = "market"
+        order_type: str = "market",
+        simulation_mode: bool = None
     ) -> Dict[str, Any]:
         """
         매수 주문 (kt10000 API 사용)
@@ -431,6 +432,7 @@ class KiwoomClient:
             quantity: 매수 수량
             price: 지정가 (order_type="limit"일 때)
             order_type: "market" (시장가) 또는 "limit" (지정가)
+            simulation_mode: True=시뮬레이션, False=실제주문, None=환경변수 사용
 
         Returns:
             {
@@ -443,8 +445,10 @@ class KiwoomClient:
         self._ensure_valid_token()
 
         try:
-            # 시뮬레이션 모드 체크
-            if os.getenv("ORDER_SIMULATION_MODE") == "1":
+            # 시뮬레이션 모드 체크 (파라미터가 우선, 없으면 환경변수 사용)
+            is_simulation = simulation_mode if simulation_mode is not None else (os.getenv("ORDER_SIMULATION_MODE") == "1")
+
+            if is_simulation:
                 logger.info(f"[시뮬레이션] 매수 주문: {symbol} | {quantity}주 | {order_type} | {price if price > 0 else '시장가'}")
                 return {
                     "success": True,
@@ -536,7 +540,8 @@ class KiwoomClient:
         symbol: str,
         quantity: int = None,
         price: int = 0,
-        order_type: str = "market"
+        order_type: str = "market",
+        simulation_mode: bool = None
     ) -> Dict[str, Any]:
         """
         매도 주문 (kt10001 API 사용)
@@ -546,6 +551,7 @@ class KiwoomClient:
             quantity: 매도 수량 (None이면 보유수량 전량 매도)
             price: 지정가 (order_type="limit"일 때)
             order_type: "market" (시장가) 또는 "limit" (지정가)
+            simulation_mode: True=시뮬레이션, False=실제주문, None=환경변수 사용
 
         Returns:
             {
@@ -558,8 +564,10 @@ class KiwoomClient:
         self._ensure_valid_token()
 
         try:
-            # 시뮬레이션 모드 체크
-            if os.getenv("ORDER_SIMULATION_MODE") == "1":
+            # 시뮬레이션 모드 체크 (파라미터가 우선, 없으면 환경변수 사용)
+            is_simulation = simulation_mode if simulation_mode is not None else (os.getenv("ORDER_SIMULATION_MODE") == "1")
+
+            if is_simulation:
                 qty_text = f"{quantity}주" if quantity else "전량"
                 logger.info(f"[시뮬레이션] 매도 주문: {symbol} | {qty_text} | {order_type} | {price if price > 0 else '시장가'}")
                 return {

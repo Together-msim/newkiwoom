@@ -403,10 +403,20 @@
                 </div>
 
                 <div class="test-section" style="border: 2px solid #ff6b6b; background: #fff5f5;">
-                    <h3>⚠️ 실제 주문 테스트 (주의!)</h3>
-                    <div style="background: #ffe3e3; padding: 12px; border-radius: 6px; margin-bottom: 16px;">
-                        <strong>⚠️ 경고:</strong> 이 기능은 <strong>실제 매매</strong>가 실행됩니다!<br>
-                        시뮬레이션 모드를 활성화하려면 <code>.env</code>에 <code>ORDER_SIMULATION_MODE=1</code>을 추가하세요.
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                        <h3 style="margin: 0;">⚠️ 주문 테스트</h3>
+                        <div style="display: flex; align-items: center; gap: 12px; background: white; padding: 12px 20px; border-radius: 8px; border: 2px solid #dee2e6;">
+                            <span style="font-weight: 600; font-size: 14px;">주문 모드:</span>
+                            <label style="display: flex; align-items: center; cursor: pointer;">
+                                <input type="checkbox" id="testOrderRealMode" style="width: 18px; height: 18px; margin-right: 8px; cursor: pointer;">
+                                <span id="testOrderModeLabel" style="font-weight: bold; font-size: 15px; color: #495057;">
+                                    🔒 시뮬레이션
+                                </span>
+                            </label>
+                        </div>
+                    </div>
+                    <div id="testOrderWarning" style="background: #e7f5ff; padding: 12px; border-radius: 6px; margin-bottom: 16px; border-left: 4px solid #228be6;">
+                        <strong>ℹ️ 시뮬레이션 모드:</strong> 주문이 실제로 실행되지 않습니다. 안전하게 테스트할 수 있습니다.
                     </div>
 
                     <!-- 매수 주문 -->

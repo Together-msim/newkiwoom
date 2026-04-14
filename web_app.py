@@ -850,6 +850,7 @@ def place_buy_order():
         quantity = data.get('quantity')
         order_type = data.get('order_type', 'market')
         price = data.get('price', 0)
+        simulation_mode = data.get('simulation_mode', None)  # None이면 환경변수 사용
 
         if not code:
             return jsonify({
@@ -866,12 +867,13 @@ def place_buy_order():
         # 종목코드 정규화
         code = normalize_stock_code(code)
 
-        # 주문 실행
+        # 주문 실행 (simulation_mode가 제공되면 환경변수보다 우선)
         result = kiwoom_client.place_buy_order(
             symbol=code,
             quantity=quantity,
             price=price,
-            order_type=order_type
+            order_type=order_type,
+            simulation_mode=simulation_mode
         )
 
         return jsonify(result)
@@ -902,6 +904,7 @@ def place_sell_order():
         order_type = data.get('order_type', 'market')
         price = data.get('price', 0)
         mode = data.get('mode', '').strip()  # mode1 or mode2
+        simulation_mode = data.get('simulation_mode', None)  # None이면 환경변수 사용
 
         if not code:
             return jsonify({
@@ -912,12 +915,13 @@ def place_sell_order():
         # 종목코드 정규화
         code = normalize_stock_code(code)
 
-        # 주문 실행
+        # 주문 실행 (simulation_mode가 제공되면 환경변수보다 우선)
         result = kiwoom_client.place_sell_order(
             symbol=code,
             quantity=quantity,
             price=price,
-            order_type=order_type
+            order_type=order_type,
+            simulation_mode=simulation_mode
         )
 
         # 주문 성공 시 manager에 기록
