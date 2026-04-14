@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>자동매매 시스템</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- 네비게이션 -->
+        <nav class="main-nav">
+            <div class="nav-brand">🚀 자동매매 시스템</div>
+            <div class="nav-menu">
+                <button class="nav-item active" data-page="watchlist">📊 감시리스트</button>
+                <button class="nav-item" data-page="mode1">📈 Mode1</button>
+                <button class="nav-item" data-page="mode2">📉 Mode2</button>
+                <button class="nav-item" data-page="tradelog">💰 매매일지</button>
+                <button class="nav-item" data-page="test">🧪 Test</button>
+            </div>
+        </nav>
+
+        <!-- 페이지 컨테이너 -->
+        <div id="pageContainer">
+            <!-- 감시리스트 페이지 -->
+            <div id="watchlistPage" class="page active">
+                <div class="page-header">
+                    <h2>📊 감시리스트 (Mode1 + Mode2)</h2>
+                    <div class="page-controls">
+                        <select id="filterMode" class="filter-select">
+                            <option value="">전체 Mode</option>
+                            <option value="mode1">Mode1</option>
+                            <option value="mode2">Mode2</option>
+                        </select>
+                        <select id="filterStatus" class="filter-select">
+                            <option value="">전체 상태</option>
+                            <option value="waiting_buy">매수대기</option>
+                            <option value="waiting_sell">매도대기</option>
+                            <option value="auto_sold">자동매도</option>
+                            <option value="manual_sold">수동매도</option>
+                        </select>
+                        <input type="date" id="filterDate" class="filter-input" placeholder="등록일">
+                        <button id="refreshWatchlist" class="btn btn-secondary">🔄</button>
+                        <button id="loadAccountPositions" class="btn btn-primary">💼 보유 종목 조회</button>
+                        <button id="syncHoldingsToWatchlist" class="btn btn-primary" style="background: #667eea;">🔄 보유수량 동기화</button>
+                    </div>
+                </div>
+
+                <!-- 보유 종목 표시 섹션 -->
+                <div id="accountPositionsSection" style="display:none; margin-bottom: 24px;">
+                    <div style="background: #f8f9fa; padding: 16px; border-radius: 8px; border-left: 4px solid #667eea;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                            <h3 style="margin: 0; color: #495057;">💼 계좌 보유 종목</h3>
+                            <button onclick="closeAccountPositions()" class="btn btn-secondary" style="padding: 4px 12px; font-size: 12px;">닫기</button>
+                        </div>
+
+                        <!-- 계좌 요약 -->
+                        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px;">
+                            <div style="background: white; padding: 12px; border-radius: 6px;">
+                                <div style="font-size: 12px; color: #868e96;">총 평가금액</div>
+                                <div id="accountTotalValue" style="font-size: 18px; font-weight: bold; color: #212529;">-</div>
+                            </div>
+                            <div style="background: white; padding: 12px; border-radius: 6px;">
+                                <div style="font-size: 12px; color: #868e96;">총 평가손익</div>
+                                <div id="accountTotalProfit" style="font-size: 18px; font-weight: bold;">-</div>
+                            </div>
+                            <div style="background: white; padding: 12px; border-radius: 6px;">
+                                <div style="font-size: 12px; color: #868e96;">총 수익률</div>
+                                <div id="accountTotalProfitRate" style="font-size: 18px; font-weight: bold;">-</div>
+                            </div>
+                            <div style="background: white; padding: 12px; border-radius: 6px;">
+                                <div style="font-size: 12px; color: #868e96;">예수금</div>
+                                <div id="accountDeposit" style="font-size: 18px; font-weight: bold; color: #212529;">-</div>
+                            </div>
+                        </div>
+
+                        <!-- 보유 종목 테이블 -->
+                        <div style="background: white; border-radius: 6px; overflow: hidden;">
+                            <table style="width: 100%; border-collapse: collapse;">
+                                <thead style="background: #e9ecef;">
+                                    <tr>
+                                        <th style="padding: 10px; text-align: left; font-size: 13px; border-bottom: 2px solid #dee2e6;">종목코드</th>
+                                        <th style="padding: 10px; text-align: left; font-size: 13px; border-bottom: 2px solid #dee2e6;">종목명</th>
+                                        <th style="padding: 10px; text-align: right; font-size: 13px; border-bottom: 2px solid #dee2e6;">수량</th>
+                                        <th style="padding: 10px; text-align: right; font-size: 13px; border-bottom: 2px solid #dee2e6;">매입가</th>
+                                        <th style="padding: 10px; text-align: right; font-size: 13px; border-bottom: 2px solid #dee2e6;">현재가</th>
+                                        <th style="padding: 10px; text-align: right; font-size: 13px; border-bottom: 2px solid #dee2e6;">평가손익</th>
+                                        <th style="padding: 10px; text-align: right; font-size: 13px; border-bottom: 2px solid #dee2e6;">수익률</th>
+                                        <th style="padding: 10px; text-align: right; font-size: 13px; border-bottom: 2px solid #dee2e6;">평가금액</th>
+                                        <th style="padding: 10px; text-align: center; font-size: 13px; border-bottom: 2px solid #dee2e6;">액션</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="accountPositionsTableBody">
+                                    <!-- 데이터 -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="table-container">
+                    <table id="watchlistTable">
+                        <thead>
+                            <tr>
+                                <th>Mode</th>
+                                <th>코드</th>
+                                <th>종목명</th>
+                                <th>등록일</th>
+                                <th>상태</th>
+                                <th>보유수량</th>
+                                <th>현재가</th>
+                                <th>매수가</th>
+                                <th>수익률</th>
+                                <th>액션</th>
+                            </tr>
+                        </thead>
+                        <tbody id="watchlistTableBody">
+                            <!-- 데이터 -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Mode1 페이지 -->
+            <div id="mode1Page" class="page">
+                <div class="page-header">
+                    <h2>📈 Mode1 자동매매 (전일대비 급등 첫 조정)</h2>
+                    <div style="display: flex; gap: 12px; align-items: center;">
+                        <label style="font-size: 13px;">
+                            Polling 주기:
+                            <input type="number" id="globalPollingInterval" value="20" min="5" max="300"
+                                   style="width: 60px; padding: 6px; border: 1px solid #dee2e6; border-radius: 4px; margin-left: 8px;">초
+                        </label>
+                        <button id="addMode1" class="btn btn-primary">+ 종목 추가</button>
+                    </div>
+                </div>
+
+                <div class="form-section" id="mode1Form" style="display:none;">
+                    <h3 style="margin-bottom: 16px;">종목 등록</h3>
+                    <form id="mode1FormElement">
+                        <div class="form-grid-2" style="margin-bottom: 16px;">
+                            <input type="text" id="mode1Code" name="code" placeholder="종목코드 *" required>
+                            <input type="text" id="mode1Name" name="name" placeholder="종목명 (자동조회)" readonly style="background: #f8f9fa;">
+                        </div>
+
+                        <div style="margin-bottom: 16px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600;">모니터링 가격</label>
+                            <input type="number" name="monitoring_price" placeholder="기준 가격 (예: 13000)" style="width: 100%; padding: 10px; border: 1px solid #dee2e6; border-radius: 6px;">
+                        </div>
+
+                        <div style="margin-bottom: 16px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600;">모니터링 조건</label>
+                            <div id="conditionsContainer">
+                                <!-- 조건이 여기에 추가됩니다 -->
+                            </div>
+                            <button type="button" id="addCondition" class="btn btn-secondary" style="margin-top: 8px;">+ 조건 추가</button>
+                        </div>
+
+                        <div class="form-grid-2" style="margin-bottom: 16px;">
+                            <div>
+                                <label style="display: block; margin-bottom: 8px; font-weight: 600;">기대 수익률 (%)</label>
+                                <input type="number" step="0.1" name="expected_profit_rate" placeholder="예: 5.0" style="width: 100%; padding: 10px; border: 1px solid #dee2e6; border-radius: 6px;">
+                            </div>
+                            <div>
+                                <label style="display: block; margin-bottom: 8px; font-weight: 600;">Polling 주기 (초)</label>
+                                <input type="number" name="polling_interval" value="20" min="5" max="300" style="width: 100%; padding: 10px; border: 1px solid #dee2e6; border-radius: 6px;">
+                            </div>
+                        </div>
+
+                        <div style="display: flex; gap: 8px; justify-content: flex-end;">
+                            <button type="submit" class="btn btn-primary">저장</button>
+                            <button type="button" class="btn btn-secondary" onclick="cancelMode1Form()">취소</button>
+                        </div>
+                    </form>
+                </div>
+
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>코드</th>
+                                <th>종목명</th>
+                                <th>모니터링가</th>
+                                <th>모니터링 조건</th>
+                                <th>Polling</th>
+                                <th>인사이트</th>
+                                <th>기대수익률</th>
+                                <th>상태</th>
+                                <th>액션</th>
+                            </tr>
+                        </thead>
+                        <tbody id="mode1TableBody">
+                            <!-- 데이터 -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Mode2 페이지 -->
+            <div id="mode2Page" class="page">
+                <div class="page-header">
+                    <h2>📉 Mode2 자동매매 (저항/지지 레벨)</h2>
+                </div>
+
+                <section class="input-section">
+                    <form id="mode2Form">
+                        <div class="code-input-row">
+                            <input type="text" id="mode2Code" name="code" placeholder="종목코드 (예: 003280)" required>
+                            <input type="text" id="mode2Name" name="name" placeholder="종목명 (자동 조회)" readonly style="width: 150px; background: #f1f3f5;">
+                            <input type="number" id="mode2Budget" name="budget" placeholder="Budget (원)" value="1000000" min="0" step="10000" style="width: 150px;">
+                            <select id="mode2PollingInterval" name="polling_interval" style="width: 120px;">
+                                <option value="5">5초</option>
+                                <option value="10" selected>10초</option>
+                                <option value="15">15초</option>
+                                <option value="20">20초</option>
+                                <option value="30">30초</option>
+                            </select>
+                            <label style="display: flex; align-items: center; gap: 5px; margin-left: 10px;">
+                                <input type="checkbox" id="mode2NotifyOnly" name="notify_only" style="width: 18px; height: 18px;">
+                                <span style="white-space: nowrap;">🔔 알림만</span>
+                            </label>
+                            <button type="submit" class="btn btn-primary">💾 저장</button>
+                        </div>
+
+                        <div class="chart-input-grid">
+                            <div class="chart-area">
+                                <img src="/static/img/mode2_chart.png" alt="Mode2 차트" class="strategy-chart">
+                            </div>
+
+                            <div class="input-levels">
+                                <div class="level-input resistance-2">
+                                    <label>2차 저항</label>
+                                    <div class="input-group">
+                                        <input type="number" name="resistance_2_price" placeholder="가격">
+                                        <input type="number" step="0.1" name="resistance_2_profit_pct" placeholder="익절 %">
+                                    </div>
+                                </div>
+
+                                <div class="level-input resistance-1">
+                                    <label>1차 저항</label>
+                                    <div class="input-group">
+                                        <input type="number" name="resistance_1_price" placeholder="가격">
+                                        <input type="number" step="0.1" name="resistance_1_profit_pct" placeholder="익절 %">
+                                    </div>
+                                </div>
+
+                                <div class="level-input buy-target">
+                                    <label>매수 타점</label>
+                                    <div class="input-group">
+                                        <input type="number" name="buy_target_price" placeholder="가격" required>
+                                    </div>
+                                </div>
+
+                                <div class="level-input support-1">
+                                    <label>1차 지지</label>
+                                    <div class="input-group">
+                                        <input type="number" name="support_1_price" placeholder="가격">
+                                        <input type="number" step="0.1" name="support_1_loss_pct" placeholder="손절 %">
+                                    </div>
+                                </div>
+
+                                <div class="level-input support-2">
+                                    <label>2차 지지</label>
+                                    <div class="input-group">
+                                        <input type="number" name="support_2_price" placeholder="가격">
+                                        <input type="number" step="0.1" name="support_2_loss_pct" placeholder="손절 %">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </section>
+
+                <section class="list-section">
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th style="width: 30px;">✓</th>
+                                    <th>코드</th>
+                                    <th>종목명</th>
+                                    <th>매수타점</th>
+                                    <th>Budget</th>
+                                    <th>수량</th>
+                                    <th>2차지지</th>
+                                    <th>1차지지</th>
+                                    <th>1차저항</th>
+                                    <th>2차저항</th>
+                                    <th>Polling</th>
+                                    <th>모드</th>
+                                    <th>상태</th>
+                                    <th>액션</th>
+                                </tr>
+                            </thead>
+                            <tbody id="mode2TableBody">
+                                <!-- 데이터 -->
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+
+            <!-- 매매일지 페이지 -->
+            <div id="tradelogPage" class="page">
+                <div class="page-header">
+                    <h2>💰 매매일지 (확정 손익)</h2>
+                    <div class="page-controls">
+                        <input type="date" id="tradelogStartDate" class="filter-input">
+                        <span>~</span>
+                        <input type="date" id="tradelogEndDate" class="filter-input">
+                        <button id="refreshTradelog" class="btn btn-secondary">조회</button>
+                    </div>
+                </div>
+
+                <div class="stats-cards">
+                    <div class="stat-card">
+                        <div class="stat-label">총 거래</div>
+                        <div class="stat-value" id="totalTrades">0건</div>
+                    </div>
+                    <div class="stat-card profit">
+                        <div class="stat-label">총 수익</div>
+                        <div class="stat-value" id="totalProfit">0원</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">평균 수익률</div>
+                        <div class="stat-value" id="avgProfitRate">0%</div>
+                    </div>
+                </div>
+
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>날짜</th>
+                                <th>Mode</th>
+                                <th>종목</th>
+                                <th>매수가</th>
+                                <th>수량</th>
+                                <th>매도가</th>
+                                <th>손익</th>
+                                <th>수익률</th>
+                                <th>상태</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tradelogTableBody">
+                            <!-- 데이터 -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Test 페이지 -->
+            <div id="testPage" class="page">
+                <div class="page-header">
+                    <h2>🧪 Kiwoom API 테스트</h2>
+                </div>
+
+                <div class="test-section">
+                    <h3>📍 종목 정보 조회</h3>
+                    <div class="test-form">
+                        <input type="text" id="testCode" placeholder="종목코드 (예: 003280)">
+                        <button id="testGetInfo" class="btn btn-primary">조회</button>
+                    </div>
+                    <div class="test-result" id="testInfoResult">
+                        <!-- 결과 -->
+                    </div>
+                </div>
+
+                <div class="test-section">
+                    <h3>📊 일봉차트 정보 조회 (종목명/코드)</h3>
+                    <div class="test-form">
+                        <input type="text" id="testDailyChartInput" placeholder="종목명 또는 종목코드 (예: 롯데케미칼, 011170)">
+                        <button id="testGetDailyChart" class="btn btn-primary">조회</button>
+                    </div>
+                    <div class="test-result" id="testDailyChartResult">
+                        <!-- 결과 -->
+                    </div>
+                </div>
+
+                <div class="test-section">
+                    <h3>📊 분봉 차트 조회</h3>
+                    <div class="test-form">
+                        <input type="text" id="testChartCode" placeholder="종목코드">
+                        <select id="testChartInterval">
+                            <option value="1">1분봉</option>
+                            <option value="3">3분봉</option>
+                            <option value="5">5분봉</option>
+                            <option value="10">10분봉</option>
+                        </select>
+                        <button id="testGetChart" class="btn btn-primary">조회</button>
+                    </div>
+                    <div class="test-result" id="testChartResult">
+                        <!-- 결과 -->
+                    </div>
+                </div>
+
+                <div class="test-section">
+                    <h3>🔄 토큰 상태</h3>
+                    <button id="testCheckToken" class="btn btn-secondary">토큰 확인</button>
+                    <div class="test-result" id="testTokenResult">
+                        <!-- 결과 -->
+                    </div>
+                </div>
+
+                <div class="test-section" style="border: 2px solid #ff6b6b; background: #fff5f5;">
+                    <h3>⚠️ 실제 주문 테스트 (주의!)</h3>
+                    <div style="background: #ffe3e3; padding: 12px; border-radius: 6px; margin-bottom: 16px;">
+                        <strong>⚠️ 경고:</strong> 이 기능은 <strong>실제 매매</strong>가 실행됩니다!<br>
+                        시뮬레이션 모드를 활성화하려면 <code>.env</code>에 <code>ORDER_SIMULATION_MODE=1</code>을 추가하세요.
+                    </div>
+
+                    <!-- 매수 주문 -->
+                    <div style="background: white; padding: 16px; border-radius: 8px; margin-bottom: 16px;">
+                        <h4 style="color: #2b8a3e; margin-bottom: 12px;">📈 매수 주문</h4>
+                        <div class="test-form">
+                            <input type="text" id="testBuyCode" placeholder="종목코드 (예: 003280)" style="flex: 1;">
+                            <input type="number" id="testBuyQty" placeholder="수량" min="1" style="flex: 1;">
+                            <select id="testBuyType" style="flex: 1; padding: 8px; border: 1px solid #dee2e6; border-radius: 4px;">
+                                <option value="market">시장가</option>
+                                <option value="limit">지정가</option>
+                            </select>
+                            <input type="number" id="testBuyPrice" placeholder="가격 (지정가일 때)" style="flex: 1;">
+                            <button id="testPlaceBuy" class="btn btn-primary" style="background: #2b8a3e;">매수 주문</button>
+                        </div>
+                        <div class="test-result" id="testBuyResult">
+                            <!-- 결과 -->
+                        </div>
+                    </div>
+
+                    <!-- 매도 주문 -->
+                    <div style="background: white; padding: 16px; border-radius: 8px;">
+                        <h4 style="color: #c92a2a; margin-bottom: 12px;">📉 매도 주문</h4>
+                        <div class="test-form">
+                            <input type="text" id="testSellCode" placeholder="종목코드 (예: 003280)" style="flex: 1;">
+                            <input type="number" id="testSellQty" placeholder="수량 (비우면 전량)" style="flex: 1;">
+                            <select id="testSellType" style="flex: 1; padding: 8px; border: 1px solid #dee2e6; border-radius: 4px;">
+                                <option value="market">시장가</option>
+                                <option value="limit">지정가</option>
+                            </select>
+                            <input type="number" id="testSellPrice" placeholder="가격 (지정가일 때)" style="flex: 1;">
+                            <button id="testPlaceSell" class="btn btn-primary" style="background: #c92a2a;">매도 주문</button>
+                        </div>
+                        <div class="test-result" id="testSellResult">
+                            <!-- 결과 -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 매도 모달 -->
+    <div id="sellModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center;">
+        <div style="background: white; padding: 24px; border-radius: 12px; width: 90%; max-width: 500px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
+            <h3 style="margin: 0 0 20px 0; color: #c92a2a;">📉 매도 주문</h3>
+
+            <div style="background: #f8f9fa; padding: 12px; border-radius: 6px; margin-bottom: 16px;">
+                <div><strong>종목:</strong> <span id="sellModalName"></span> (<span id="sellModalCode"></span>)</div>
+                <div><strong>보유수량:</strong> <span id="sellModalHoldingQty"></span>주</div>
+                <div><strong>매수가:</strong> <span id="sellModalBuyPrice"></span>원</div>
+            </div>
+
+            <div style="margin-bottom: 16px;">
+                <label style="display: block; margin-bottom: 8px; font-weight: 600;">매도 수량</label>
+                <input type="number" id="sellModalQty" min="1" style="width: 100%; padding: 10px; border: 1px solid #dee2e6; border-radius: 6px;">
+                <div style="font-size: 12px; color: #868e96; margin-top: 4px;">
+                    비우면 전량 매도
+                </div>
+            </div>
+
+            <div style="margin-bottom: 16px;">
+                <label style="display: block; margin-bottom: 8px; font-weight: 600;">주문 타입</label>
+                <select id="sellModalType" style="width: 100%; padding: 10px; border: 1px solid #dee2e6; border-radius: 6px;">
+                    <option value="market">시장가</option>
+                    <option value="limit">지정가</option>
+                </select>
+            </div>
+
+            <div style="margin-bottom: 20px;">
+                <label style="display: block; margin-bottom: 8px; font-weight: 600;">매도 가격 (지정가일 때)</label>
+                <input type="number" id="sellModalPrice" style="width: 100%; padding: 10px; border: 1px solid #dee2e6; border-radius: 6px;">
+            </div>
+
+            <div style="display: flex; gap: 8px; justify-content: flex-end;">
+                <button onclick="closeSellModal()" class="btn btn-secondary">취소</button>
+                <button onclick="executeSellOrder()" class="btn btn-primary" style="background: #c92a2a;">매도 실행</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
