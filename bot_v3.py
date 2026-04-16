@@ -14,6 +14,7 @@ from kiwoom_client import KiwoomClient
 from utils.code import normalize_stock_code
 from price_monitor import PriceMonitor
 from mode2_manager import Mode2Manager
+from server_scheduler import ServerScheduler
 
 logging.basicConfig(
     level=logging.INFO,
@@ -25,6 +26,7 @@ load_dotenv()
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 tactic_mgr = TacticManager()
 mode2_mgr = Mode2Manager()
+server_scheduler = ServerScheduler()
 
 try:
     kiwoom_client = KiwoomClient()
@@ -49,6 +51,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /status - 상태
 /start_monitoring - 감시 시작
 /stop_monitoring - 감시 중지
+
+🖥 서버 제어
+/server - 서버 상태 확인
+/on - 서버 수동 시작
+/off - 서버 수동 중지
+
 /cancel - 취소"""
     await update.message.reply_text(msg)
 
@@ -82,6 +90,41 @@ async def stop_monitoring(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ 가격 모니터링 중지")
     else:
         await update.message.reply_text("⚠️ 모니터링이 실행 중이 아닙니다")
+
+# ========== 서버 제어 ==========
+async def server_status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """서버 상태 확인"""
+    status_msg = server_scheduler.get_status_message()
+    is_running = await server_scheduler.check_server_status()
+
+    actual_status = "🟢 RUNNING" if is_running else "🔴 STOPPED"
+    full_msg = f"{status_msg}\n실제 서버: {actual_status}"
+
+    await update.message.reply_text(full_msg)
+
+async def server_on_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """서버 수동 시작"""
+    await update.message.reply_text("🔄 서버를 시작하는 중...")
+
+    success, message = await server_scheduler.manual_start()
+    await update.message.reply_text(message)
+
+    if success:
+        # 상태 메시지 추가
+        status_msg = server_scheduler.get_status_message()
+        await update.message.reply_text(status_msg)
+
+async def server_off_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """서버 수동 중지"""
+    await update.message.reply_text("🔄 서버를 중지하는 중...")
+
+    success, message = await server_scheduler.manual_stop()
+    await update.message.reply_text(message)
+
+    if success:
+        # 상태 메시지 추가
+        status_msg = server_scheduler.get_status_message()
+        await update.message.reply_text(status_msg)
 
 # ========== Tactic1 ==========
 async def tactic1_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -301,6 +344,10 @@ async def post_init(application: Application):
     else:
         logger.warning("키움 API 미연결 - 가격 모니터링 비활성화")
 
+    # 서버 스케줄러 시작
+    asyncio.create_task(server_scheduler.start_monitoring())
+    logger.info("서버 스케줄러 시작 완료")
+
 def main():
     logger.info("봇 시작")
     app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
@@ -338,6 +385,9 @@ def main():
     app.add_handler(CommandHandler("status", status_command))
     app.add_handler(CommandHandler("start_monitoring", start_monitoring))
     app.add_handler(CommandHandler("stop_monitoring", stop_monitoring))
+    app.add_handler(CommandHandler("server", server_status_command))
+    app.add_handler(CommandHandler("on", server_on_command))
+    app.add_handler(CommandHandler("off", server_off_command))
     app.add_handler(tactic1_conv)
     app.add_handler(tactic2_conv)
     app.add_handler(list_conv)

@@ -110,7 +110,9 @@ templates/index.html
 1. **bot_v3.py** - Telegram bot with ConversationHandler-based flows
    - Multi-step dialogs for registering/updating tactics
    - Commands: /tactic1, /tactic2, /list, /start_monitoring, /stop_monitoring
+   - **Server control**: /server (status), /on (manual start), /off (manual stop)
    - Integrates with PriceMonitor for background monitoring
+   - Integrates with ServerScheduler for automatic server control
 
 2. **tactic_manager.py** - Watchlist persistence and management
    - Stores tactics in `.data/watchers.json`
@@ -212,6 +214,15 @@ templates/index.html
    - Handles exact match and partial match
    - Required for Test page daily chart feature
 
+5. **server_scheduler.py** - GCP server auto-scheduling and control
+   - Auto ON: Weekdays (Mon-Fri) 08:00 KST (market open)
+   - Auto OFF: Weekdays 15:30 KST (market close)
+   - Auto OFF: Weekends (all day)
+   - Manual override: `/on` or `/off` commands
+   - Manual mode persists until turned off
+   - Uses gcloud CLI to control GCP VM instance
+   - **Efficient scheduling**: Sleeps until next scheduled time (08:00 or 15:30), not constant polling
+
 **Data flow:**
 ```
 Web UI → Flask API → Manager (mode1/mode2) → PriceMonitor → KiwoomClient → Telegram Notification
@@ -312,6 +323,11 @@ MONITOR_INTERVAL=10          # Price check interval (seconds)
 ORDER_SIMULATION_MODE=1      # 1=Simulation, 0=Real orders (CAUTION!)
 KIWOOM_DEBUG=0               # 1=Debug mode
 
+# GCP Server Control
+GCP_INSTANCE_NAME=kiwoom-trading-bot  # GCP VM instance name
+GCP_ZONE=asia-northeast3-a            # GCP Zone (Seoul)
+GCP_PROJECT_ID=                       # GCP Project ID (optional, uses default if empty)
+
 # Testing
 TEST_LAST_PRICE=116000       # Bypass API, return fixed price
 IGNORE_MARKET_HOURS=1        # Skip time validation
@@ -329,9 +345,10 @@ IGNORE_MARKET_HOURS=1        # Skip time validation
 ## File Structure
 
 ### Current Production Files
-- **bot_v3.py** - Telegram bot (Tactic1/2) with monitoring
+- **bot_v3.py** - Telegram bot (Tactic1/2) with monitoring + server control
 - **web_app.py** - Flask REST API + multi-page static file server
 - **run_all.py** - Unified launcher (bot + web server in parallel)
+- **server_scheduler.py** - GCP server auto-scheduling (평일 08:00~15:30)
 - **mode1_manager.py** - Mode1 watchlist manager (완료)
 - **mode2_manager.py** - Mode2 watchlist manager (완료)
 - **price_monitor.py** - Unified monitoring engine (Tactic1/2 + Mode1 + Mode2) (완료)
@@ -351,6 +368,7 @@ IGNORE_MARKET_HOURS=1        # Skip time validation
 - `.data/watchers.json` - Tactic1/2 watchlist
 - `.data/mode1_watchers.json` - Mode1 watchlist
 - `.data/mode2_watchers.json` - Mode2 watchlist
+- `.data/manual_server_control.txt` - Manual server control state (on/off)
 - `files/corp_master1.xlsx` - Stock master data (종목코드, 종목명, DART 코드)
 
 ### Legacy Files (Reference Only)
@@ -479,3 +497,148 @@ Key files copied from kiwoom-min:
 - `files/corp_master1.xlsx` (종목 마스터 데이터)
 
 See CHANGES.md for detailed integration notes.
+
+---
+
+## ⚠️ Common Mistakes & Prevention Guide
+
+### 🚨 CRITICAL: Kiwoom API 호출 코드는 절대 함부로 수정 금지!
+
+Kiwoom REST API를 호출하는 모든 서비스는 **프로덕션 환경에서 실제 거래**를 실행합니다. 
+코드 수정으로 인한 임팩트가 발생하면 금전적 손실로 직결됩니다.
+
+**절대 수정 금지 코드**:
+- `kiwoom_client.py` - 토큰 발급, 주문 실행, 계좌 조회
+- `kiwoom_chart.py` - 차트 데이터 조회
+- `kiwoom_token.py` - OAuth2 토큰 관리
+
+**수정 시 반드시 지켜야 할 규칙**:
+1. **로컬 테스트 필수**: 변경 후 로컬에서 충분히 검증
+2. **시뮬레이션 모드 우선**: `ORDER_SIMULATION_MODE=1`로 테스트
+3. **API 호출 횟수 체크**: 과도한 호출로 Rate Limit 방지
+4. **에러 핸들링 유지**: 기존 try-except 구조 절대 제거 금지
+5. **로그 확인**: 변경 후 web_app.log 확인
+
+### 🔐 Authentication 관련 실수 방지
+
+**실수 1: Basic Auth 추가 후 fetch에 credentials 누락**
+```javascript
+// ❌ 잘못된 예
+fetch('/api/endpoint')
+
+// ✅ 올바른 예
+fetch('/api/endpoint', {
+    credentials: 'same-origin'
+})
+```
+
+**해결책**: 
+- 모든 fetch 호출에 `credentials: 'same-origin'` 필수
+- 새로운 API 엔드포인트 추가 시 템플릿 참고
+
+**실수 2: .env 파일 문법 오류**
+```bash
+# ❌ 잘못된 예
+WEB_USERNAME==admin  # 등호 2개
+
+# ✅ 올바른 예
+WEB_USERNAME=admin   # 등호 1개
+```
+
+**해결책**:
+- .env 파일 수정 후 반드시 검증
+- `grep "==" .env` 실행해서 이중 등호 체크
+
+### 📊 데이터 구조 변경 시 주의사항
+
+**실수 3: 기존 데이터 구조 변경 시 마이그레이션 미고려**
+
+Mode1을 `monitoring_conditions` → `step1/step2/step3` 구조로 변경할 때:
+- 기존 `.data/mode1_watchers.json` 파일과 호환성 체크 필요
+- 기존 데이터가 있다면 마이그레이션 스크립트 제공
+
+**해결책**:
+- 데이터 구조 변경 전 기존 파일 백업
+- 호환성 유지 또는 명시적 마이그레이션 제공
+- 변경 사항 CHANGELOG에 기록
+
+### 🌐 Web Server 수정 시 체크리스트
+
+**before_request 같은 글로벌 훅 수정 시**:
+- static 파일 접근 가능 여부 확인
+- API 엔드포인트 전체 영향 검토
+- 브라우저 콘솔에서 401/403 에러 확인
+
+**Frontend 변경 시**:
+- 브라우저 캐시 클리어 (`Cmd+Shift+R`)
+- 개발자 도구 Network 탭으로 API 호출 확인
+- 콘솔 에러 확인
+
+### 🧪 변경 후 필수 확인 사항
+
+**API 변경 시**:
+```bash
+# 1. 서버 로그 확인
+tail -50 web_app.log
+
+# 2. API 테스트
+curl -s -u $USERNAME:$PASSWORD http://localhost:5002/api/test-endpoint
+
+# 3. 에러 체크
+grep ERROR web_app.log
+```
+
+**데이터베이스(JSON 파일) 변경 시**:
+```bash
+# 백업
+cp .data/mode1_watchers.json .data/mode1_watchers.json.backup
+
+# 검증
+python -c "import json; json.load(open('.data/mode1_watchers.json'))"
+```
+
+### 📝 코드 수정 전 체크리스트
+
+- [ ] 이 코드가 Kiwoom API를 직접 호출하는가?
+- [ ] 이 변경이 실제 거래에 영향을 주는가?
+- [ ] 로컬에서 테스트 완료했는가?
+- [ ] 시뮬레이션 모드로 검증했는가?
+- [ ] 에러 핸들링이 유지되는가?
+- [ ] 기존 데이터와 호환되는가?
+- [ ] .env 파일 문법이 올바른가?
+- [ ] fetch에 credentials가 포함되어 있는가?
+
+### 🔄 Rollback 방법
+
+**문제 발생 시 즉시 롤백**:
+```bash
+# 1. Git으로 되돌리기
+git log --oneline -10
+git revert <commit-hash>
+
+# 2. 서버 재시작
+lsof -ti:5002 | xargs kill -9
+source .venv/bin/activate && WEB_PORT=5002 python web_app.py
+
+# 3. 백업 데이터 복원
+cp .data/*.json.backup .data/
+
+# 4. 로그 확인
+tail -100 web_app.log
+```
+
+### 💡 Best Practices
+
+1. **작은 단위로 변경**: 한 번에 하나의 기능만 수정
+2. **로그 먼저 확인**: 변경 후 반드시 로그 체크
+3. **테스트 페이지 활용**: /Test 페이지에서 API 직접 테스트
+4. **사용자 피드백 반영**: 같은 실수 반복 시 CLAUDE.md 업데이트
+5. **문서화**: 중요한 변경사항은 CHANGES.md에 기록
+
+---
+
+**Remember**: 
+- Kiwoom API 호출 코드는 금전적 손실과 직결
+- 의심스러우면 수정하지 말고 사용자에게 먼저 확인
+- 테스트 없이 프로덕션 코드 배포 금지
+- 실수는 학습 기회 → CLAUDE.md에 즉시 기록
