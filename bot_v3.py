@@ -339,7 +339,12 @@ async def post_init(application: Application):
 
     # 가격 모니터 초기화 (Tactic1/2 + Mode2)
     if kiwoom_client:
-        price_monitor = PriceMonitor(tactic_mgr, kiwoom_client, application, mode2_mgr)
+        price_monitor = PriceMonitor(
+            tactic_manager=tactic_mgr,
+            kiwoom_client=kiwoom_client,
+            bot_application=application,
+            mode2_manager=mode2_mgr,
+        )
         await price_monitor.start_monitoring_task()
         logger.info("가격 모니터 초기화 완료 (Tactic1/2 + Mode2)")
     else:

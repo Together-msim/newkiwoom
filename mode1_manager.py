@@ -47,21 +47,32 @@ class Mode1Manager:
 
     def add_watcher(self, data: Dict) -> Dict:
         """
-        Mode1 전략 추가
+        Mode1 전략 추가 (3단계 시스템)
 
         Args:
             data: {
                 "code": str,  # 종목코드
                 "name": str,  # 종목명
                 "monitoring_price": float,  # 모니터링 기준 가격
-                "monitoring_conditions": [  # 모니터링 조건 리스트
-                    {
-                        "interval": str,  # 분봉 (1분, 3분, 5분, 10분)
-                        "trend": str,     # 추세 (상승, 하락)
-                        "count": int,     # 연속 봉 개수
-                        "candle_count": int  # 조회할 총 봉 개수
-                    }
-                ],
+                "step1": {  # 상승 추세 전환
+                    "interval": str,  # 분봉 (1분, 3분, 5분, 10분)
+                    "trend": str,     # 추세 (상승, 하락)
+                    "count": int,     # 연속 봉 개수
+                    "candle_count": int  # 조회할 총 봉 개수
+                },
+                "step2": {  # 첫 조정
+                    "interval": str,
+                    "trend": str,
+                    "count": int,
+                    "candle_count": int
+                },
+                "step3": {  # 재반등
+                    "interval": str,
+                    "trend": str,
+                    "count": int,
+                    "candle_count": int
+                },
+                "auto_buy": bool,  # True=자동매수, False=알림만
                 "expected_profit_rate": float,  # 기대 수익률 (%)
                 "polling_interval": int,  # polling 주기 (초)
             }
@@ -76,7 +87,24 @@ class Mode1Manager:
             "name": data.get("name", ""),
             "mode": "mode1",
             "monitoring_price": data.get("monitoring_price", 0),
-            "monitoring_conditions": data.get("monitoring_conditions", []),
+            "step1": data.get("step1", {
+                "interval": "1분",
+                "trend": "상승",
+                "count": 4
+            }),
+            "step2": data.get("step2", {
+                "interval": "3분",
+                "trend": "하락",
+                "count": 1
+            }),
+            "step3": data.get("step3", {
+                "interval": "1분",
+                "trend": "상승",
+                "count": 2
+            }),
+            "auto_buy": data.get("auto_buy", False),
+            "current_step": 0,  # 0=대기, 1~3=진행중, 4=완료
+            "recommended_buy_price": None,  # Step 3 완료 시 계산
             "expected_profit_rate": data.get("expected_profit_rate", 0),
             "polling_interval": data.get("polling_interval", 20),  # 기본 20초
             "greenlight_status": {},  # 각 조건별 만족 여부

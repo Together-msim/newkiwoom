@@ -246,12 +246,14 @@ class Mode2Manager:
         logger.info(f"Mode2 매수 기록: {code} @ {price:,}원 x {quantity}주")
         return True
 
-    def record_sell(self, code: str, is_auto: bool = True) -> bool:
+    def record_sell(self, code: str, sold_quantity: int = None, sold_reason: str = None, is_auto: bool = True) -> bool:
         """
-        매도 체결 기록
+        매도 체결 기록 (분할 매도 지원)
 
         Args:
             code: 종목코드
+            sold_quantity: 매도 수량 (None이면 전량 매도)
+            sold_reason: 매도 사유 (resistance_1, resistance_2, support_1, support_2)
             is_auto: 자동 매도 여부
 
         Returns:
@@ -260,11 +262,67 @@ class Mode2Manager:
         if code not in self.watchers:
             return False
 
-        status = "auto_sold" if is_auto else "manual_sold"
+        watcher = self.watchers[code]
+        current_qty = watcher.get('bought_quantity', 0)
+
+        # 매도 이력 초기화
+        if 'sold_history' not in watcher:
+            watcher['sold_history'] = []
+
+        # 매도 수량 결정
+        if sold_quantity is None or sold_quantity >= current_qty:
+            # 전량 매도
+            new_qty = 0
+            status = "auto_sold" if is_auto else "manual_sold"
+        else:
+            # 분할 매도
+            new_qty = current_qty - sold_quantity
+            status = "waiting_sell"  # 아직 보유 중이므로 매도 대기 상태 유지
+
+        # 매도 이력 기록
+        if sold_reason and sold_reason not in watcher['sold_history']:
+            watcher['sold_history'].append(sold_reason)
+
         self.watchers[code].update({
+            "bought_quantity": new_qty,
             "status": status,
             "updated_at": datetime.now().isoformat(),
         })
+
+        # 설정된 매도 레벨 목록
+        configured_levels = []
+        if watcher.get('resistance_2_profit_pct', 0) > 0:
+            configured_levels.append('resistance_2')
+        if watcher.get('resistance_1_profit_pct', 0) > 0:
+            configured_levels.append('resistance_1')
+        if watcher.get('support_2_loss_pct', 0) > 0:
+            configured_levels.append('support_2')
+        if watcher.get('support_1_loss_pct', 0) > 0:
+            configured_levels.append('support_1')
+
+        # 설정된 모든 레벨을 소진했는지 체크
+        sold_history = watcher.get('sold_history', [])
+        all_levels_sold = all(level in sold_history for level in configured_levels) if configured_levels else False
+
+        # 모니터링 종료 조건:
+        # 1) bought_quantity = 0 (전량 매도)
+        # 2) 설정된 모든 매도 레벨 소진 (홀딩 포지션 진입)
+        if new_qty == 0:
+            self.watchers[code]["active"] = False
+            logger.info(f"Mode2 전량 매도 완료: {code} - 감시 자동 종료 (bought_quantity=0)")
+        elif all_levels_sold:
+            # 모든 설정된 매도 레벨을 통과했으면 모니터링 종료
+            self.watchers[code]["active"] = False
+            total_sell_ratio = sum([
+                watcher.get('resistance_1_profit_pct', 0),
+                watcher.get('resistance_2_profit_pct', 0),
+                watcher.get('support_1_loss_pct', 0),
+                watcher.get('support_2_loss_pct', 0)
+            ])
+            holding_pct = 100 - total_sell_ratio
+            logger.info(f"Mode2 설정된 매도 완료: {code} - 감시 종료 (홀딩: {holding_pct}%, 잔여: {new_qty}주)")
+        else:
+            logger.info(f"Mode2 분할 매도: {code} - {sold_quantity}주 매도 ({sold_reason}), 잔여: {new_qty}주")
+
         self._save_watchers()
-        logger.info(f"Mode2 매도 기록: {code} - {status}")
         return True

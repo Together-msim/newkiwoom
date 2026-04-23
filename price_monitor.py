@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 from kiwoom_chart import get_minute_chart
 from kiwoom_token import get_token
 from trend_analyzer import check_condition_satisfied, format_candles_summary
+from global_config import get_global_config
 
 load_dotenv()
 
@@ -135,10 +136,10 @@ class PriceMonitor:
             # 매수 대기 중
             if status == 'waiting_buy':
                 target_price = watcher['buy_target_price']
-                # 매수 타점의 ±1% 범위 내
-                if abs(current_price - target_price) / target_price < 0.01:
+                # 현재가가 매수 타점 밑으로 떨어지면 매수 (눌림 매매)
+                if current_price < target_price:
                     mode_tag = "🔔 [알림 전용]" if notify_only else "🤖 [자동매매]"
-                    logger.info(f"Mode2 | {code} | 매수 타이밍: {current_price:,}원 (notify_only={notify_only})")
+                    logger.info(f"Mode2 | {code} | 매수 타이밍: {current_price:,}원 (타점: {target_price:,}원, notify_only={notify_only})")
 
                     await self.send_notification(
                         f"{mode_tag} Mode2 매수 시그널\n"
@@ -162,59 +163,88 @@ class PriceMonitor:
 
                 # 2차 저항 (익절)
                 resistance_2 = watcher.get('resistance_2_price', 0)
-                if resistance_2 > 0 and current_price >= resistance_2:
+                resistance_2_pct = watcher.get('resistance_2_profit_pct', 0)
+                sold_history = watcher.get('sold_history', [])
+
+                # 이미 매도한 레벨은 건너뛰기
+                if resistance_2 > 0 and resistance_2_pct > 0 and current_price >= resistance_2 and 'resistance_2' not in sold_history:
                     profit_pct = ((current_price - bought_price) / bought_price) * 100
-                    logger.info(f"Mode2 | {code} | 2차 저항 도달 익절: {current_price:,}원 ({profit_pct:.1f}%)")
+                    # 현재 보유 수량(모수) 기준 비중 계산
+                    current_bought_qty = watcher.get('bought_quantity', 0)
+                    sell_qty = int(current_bought_qty * resistance_2_pct / 100)
+                    logger.info(f"Mode2 | {code} | 2차 저항 도달 익절: {current_price:,}원 ({profit_pct:.1f}%), 매도: {sell_qty}주 ({resistance_2_pct}%)")
                     await self.send_notification(
                         f"💰 Mode2 익절 시그널 (2차 저항)\n"
                         f"종목: {code}\n"
                         f"매수가: {bought_price:,}원\n"
                         f"현재가: {current_price:,}원\n"
-                        f"수익률: {profit_pct:.1f}%"
+                        f"수익률: {profit_pct:.1f}%\n"
+                        f"매도 수량: {sell_qty}주 ({resistance_2_pct}%)"
                     )
-                    return {'action': 'sell', 'price': current_price, 'reason': 'resistance_2'}
+                    return {'action': 'sell', 'price': current_price, 'quantity': sell_qty, 'reason': 'resistance_2', 'ratio': resistance_2_pct}
 
                 # 1차 저항 (익절)
                 resistance_1 = watcher.get('resistance_1_price', 0)
-                if resistance_1 > 0 and current_price >= resistance_1:
+                resistance_1_pct = watcher.get('resistance_1_profit_pct', 0)
+
+                # 이미 매도한 레벨은 건너뛰기
+                if resistance_1 > 0 and resistance_1_pct > 0 and current_price >= resistance_1 and 'resistance_1' not in sold_history:
                     profit_pct = ((current_price - bought_price) / bought_price) * 100
-                    logger.info(f"Mode2 | {code} | 1차 저항 도달 익절: {current_price:,}원 ({profit_pct:.1f}%)")
+                    # 현재 보유 수량(모수) 기준 비중 계산
+                    current_bought_qty = watcher.get('bought_quantity', 0)
+                    sell_qty = int(current_bought_qty * resistance_1_pct / 100)
+                    logger.info(f"Mode2 | {code} | 1차 저항 도달 익절: {current_price:,}원 ({profit_pct:.1f}%), 매도: {sell_qty}주 ({resistance_1_pct}%)")
                     await self.send_notification(
                         f"💰 Mode2 익절 시그널 (1차 저항)\n"
                         f"종목: {code}\n"
                         f"매수가: {bought_price:,}원\n"
                         f"현재가: {current_price:,}원\n"
-                        f"수익률: {profit_pct:.1f}%"
+                        f"수익률: {profit_pct:.1f}%\n"
+                        f"매도 수량: {sell_qty}주 ({resistance_1_pct}%)"
                     )
-                    return {'action': 'sell', 'price': current_price, 'reason': 'resistance_1'}
+                    return {'action': 'sell', 'price': current_price, 'quantity': sell_qty, 'reason': 'resistance_1', 'ratio': resistance_1_pct}
 
                 # 2차 지지 (손절)
                 support_2 = watcher.get('support_2_price', 0)
-                if support_2 > 0 and current_price <= support_2:
+                support_2_pct = watcher.get('support_2_loss_pct', 0)
+
+                # 이미 매도한 레벨은 건너뛰기
+                if support_2 > 0 and support_2_pct > 0 and current_price <= support_2 and 'support_2' not in sold_history:
                     loss_pct = ((current_price - bought_price) / bought_price) * 100
-                    logger.info(f"Mode2 | {code} | 2차 지지 하락 손절: {current_price:,}원 ({loss_pct:.1f}%)")
+                    # 현재 보유 수량(모수) 기준 비중 계산
+                    current_bought_qty = watcher.get('bought_quantity', 0)
+                    sell_qty = int(current_bought_qty * support_2_pct / 100)
+                    logger.info(f"Mode2 | {code} | 2차 지지 하락 손절: {current_price:,}원 ({loss_pct:.1f}%), 매도: {sell_qty}주 ({support_2_pct}%)")
                     await self.send_notification(
                         f"⚠️ Mode2 손절 시그널 (2차 지지)\n"
                         f"종목: {code}\n"
                         f"매수가: {bought_price:,}원\n"
                         f"현재가: {current_price:,}원\n"
-                        f"손실률: {loss_pct:.1f}%"
+                        f"손실률: {loss_pct:.1f}%\n"
+                        f"매도 수량: {sell_qty}주 ({support_2_pct}%)"
                     )
-                    return {'action': 'sell', 'price': current_price, 'reason': 'support_2'}
+                    return {'action': 'sell', 'price': current_price, 'quantity': sell_qty, 'reason': 'support_2', 'ratio': support_2_pct}
 
                 # 1차 지지 (손절)
                 support_1 = watcher.get('support_1_price', 0)
-                if support_1 > 0 and current_price <= support_1:
+                support_1_pct = watcher.get('support_1_loss_pct', 0)
+
+                # 이미 매도한 레벨은 건너뛰기
+                if support_1 > 0 and support_1_pct > 0 and current_price <= support_1 and 'support_1' not in sold_history:
                     loss_pct = ((current_price - bought_price) / bought_price) * 100
-                    logger.info(f"Mode2 | {code} | 1차 지지 하락 손절: {current_price:,}원 ({loss_pct:.1f}%)")
+                    # 현재 보유 수량(모수) 기준 비중 계산
+                    current_bought_qty = watcher.get('bought_quantity', 0)
+                    sell_qty = int(current_bought_qty * support_1_pct / 100)
+                    logger.info(f"Mode2 | {code} | 1차 지지 하락 손절: {current_price:,}원 ({loss_pct:.1f}%), 매도: {sell_qty}주 ({support_1_pct}%)")
                     await self.send_notification(
                         f"⚠️ Mode2 손절 시그널 (1차 지지)\n"
                         f"종목: {code}\n"
                         f"매수가: {bought_price:,}원\n"
                         f"현재가: {current_price:,}원\n"
-                        f"손실률: {loss_pct:.1f}%"
+                        f"손실률: {loss_pct:.1f}%\n"
+                        f"매도 수량: {sell_qty}주 ({support_1_pct}%)"
                     )
-                    return {'action': 'sell', 'price': current_price, 'reason': 'support_1'}
+                    return {'action': 'sell', 'price': current_price, 'quantity': sell_qty, 'reason': 'support_1', 'ratio': support_1_pct}
 
             return None
 
@@ -273,7 +303,7 @@ class PriceMonitor:
         return False
 
     async def check_mode1_conditions(self, code: str, watcher: dict):
-        """Mode1 조건 체크 (분봉 기반 추세 전환)"""
+        """Mode1 3단계 조건 체크 (상승추세→조정→재반등)"""
         try:
             token = get_token()
             if not token:
@@ -284,82 +314,203 @@ class PriceMonitor:
             if status != 'waiting_buy':
                 return None  # 매수 대기 중일 때만 체크
 
-            monitoring_conditions = watcher.get('monitoring_conditions', [])
-            if not monitoring_conditions:
+            current_step = watcher.get('current_step', 0)
+            step1 = watcher.get('step1', {})
+            step2 = watcher.get('step2', {})
+            step3 = watcher.get('step3', {})
+
+            if not step1 or not step2 or not step3:
+                logger.warning(f"Mode1 | {code} | Step 정보 없음")
                 return None
 
-            # 각 조건마다 체크
-            all_satisfied = True
             insights = []
 
-            for idx, condition in enumerate(monitoring_conditions):
-                interval = condition['interval']
-                trend = condition['trend']
-                required_count = condition['count']
-                candle_count = condition.get('candle_count', 20)
-
-                # 시간 기반 체크 (1분봉은 매번, 나머지는 정시 기준)
-                last_check_key = f"last_check_{idx}"
-                last_check_time = watcher.get(last_check_key)
+            # Step 1: 상승 추세 전환 체크
+            if current_step == 0:
+                interval = step1['interval']
+                last_check_time = watcher.get('last_step1_check')
 
                 if not self.should_check_interval(interval, last_check_time):
-                    # 아직 체크할 시점이 아님 - 이전 결과 유지
-                    prev_status = watcher.get('greenlight_status', {}).get(str(idx), False)
-                    if not prev_status:
-                        all_satisfied = False
-                    continue
+                    return None  # 아직 체크 시점 아님
 
-                # 분봉 데이터 조회
-                candles = get_minute_chart(token, code, interval, candle_count)
-                if not candles or len(candles) == 0:
-                    logger.warning(f"Mode1 | {code} | {interval} 데이터 없음")
-                    all_satisfied = False
-                    continue
+                candles = get_minute_chart(token, code, interval, 20)
+                if not candles:
+                    return None
 
-                # 조건 만족 여부 체크
-                satisfied = check_condition_satisfied(candles, trend, required_count)
+                satisfied = check_condition_satisfied(candles, step1['trend'], step1['count'])
+                watcher['last_step1_check'] = datetime.now(KST).isoformat()
 
-                # greenlight_status 업데이트
-                if self.mode1_mgr:
-                    self.mode1_mgr.update_greenlight_status(code, idx, satisfied)
-
-                # 마지막 체크 시각 기록
-                watcher[last_check_key] = datetime.now(KST).isoformat()
-
-                # 인사이트 수집
                 candle_summary = format_candles_summary(candles, limit=3)
-                insights.append(
-                    f"[{interval}] {trend} {required_count}개: {'✅' if satisfied else '❌'}\n"
-                    f"최근 3개:\n{candle_summary}"
-                )
+                insights.append(f"Step 1: {interval} {step1['trend']} {step1['count']}개 → {'✅' if satisfied else '❌'}\n최근:\n{candle_summary}")
 
-                if not satisfied:
-                    all_satisfied = False
+                if satisfied:
+                    # 현재가 조회
+                    try:
+                        current_price = self.kiwoom.get_last_price(code)
+                    except:
+                        current_price = 0
 
-                logger.info(f"Mode1 | {code} | {interval}/{trend}/{required_count} -> {'만족' if satisfied else '불만족'}")
+                    logger.info(f"✅ Mode1 | {code} | Step 1 완료 (상승 추세 전환) → Step 2 진행")
 
-            # 인사이트 업데이트
-            insight_text = "\n\n".join(insights)
-            if self.mode1_mgr:
-                self.mode1_mgr.update_insight(code, insight_text)
+                    if self.mode1_mgr:
+                        self.mode1_mgr.update_watcher(code, {'current_step': 1})
+                        self.mode1_mgr.update_insight(code, "\n\n".join(insights))
 
-            # 모든 조건 만족 시 그린라이트!
-            if all_satisfied:
-                monitoring_price = watcher.get('monitoring_price', 0)
-                expected_profit = watcher.get('expected_profit_rate', 0)
+                    await self.send_notification(
+                        f"✅ Mode1 Step 1 완료 (상승 추세 전환!)\n\n"
+                        f"종목: {watcher.get('name', code)} ({code})\n"
+                        f"현재가: {current_price:,}원\n\n"
+                        f"✅ Step 1: {step1['interval']} {step1['trend']} {step1['count']}개 완료\n"
+                        f"⏳ Step 2: {step2['interval']} {step2['trend']} {step2['count']}개 대기중\n"
+                        f"⏳ Step 3: {step3['interval']} {step3['trend']} {step3['count']}개 대기중\n\n"
+                        f"📊 최근 봉 상태:\n"
+                        f"{insights[0]}\n\n"
+                        f"💡 다음: 첫 조정({step2['interval']} {step2['trend']}) 대기"
+                    )
+                else:
+                    if self.mode1_mgr:
+                        self.mode1_mgr.update_insight(code, "\n\n".join(insights))
 
-                logger.info(f"🎯 Mode1 그린라이트! {code} - 모든 조건 만족")
-                await self.send_notification(
-                    f"🎯 Mode1 그린라이트!\n\n"
-                    f"종목: {watcher.get('name', code)} ({code})\n"
-                    f"모니터링가: {monitoring_price:,}원\n"
-                    f"기대수익률: {expected_profit}%\n\n"
-                    f"📊 조건 상태:\n"
-                    f"{insight_text}\n\n"
-                    f"💡 수동 매수를 진행하세요!"
-                )
+                return None
 
-                return {'action': 'greenlight', 'code': code}
+            # Step 2: 첫 조정 체크
+            elif current_step == 1:
+                interval = step2['interval']
+                last_check_time = watcher.get('last_step2_check')
+
+                if not self.should_check_interval(interval, last_check_time):
+                    return None
+
+                candles = get_minute_chart(token, code, interval, 20)
+                if not candles:
+                    return None
+
+                satisfied = check_condition_satisfied(candles, step2['trend'], step2['count'])
+                watcher['last_step2_check'] = datetime.now(KST).isoformat()
+
+                candle_summary = format_candles_summary(candles, limit=3)
+                insights.append(f"Step 2: {interval} {step2['trend']} {step2['count']}개 → {'✅' if satisfied else '❌'}\n최근:\n{candle_summary}")
+
+                if satisfied:
+                    # 현재가 조회
+                    try:
+                        current_price = self.kiwoom.get_last_price(code)
+                    except:
+                        current_price = 0
+
+                    # 최근 봉 정보 (매수 타점 참고용)
+                    latest_candle = candles[0] if candles else {}
+                    candle_time = latest_candle.get('time', '')
+                    candle_open = latest_candle.get('open', 0)
+                    candle_close = latest_candle.get('close', 0)
+                    candle_low = latest_candle.get('low', 0)
+
+                    auto_buy = watcher.get('auto_buy', False)
+
+                    # auto_buy=true면 Step 3로 진행, false면 여기서 종료 (수동 매수)
+                    if auto_buy:
+                        logger.info(f"✅ Mode1 | {code} | Step 2 완료 → Step 3 자동매수 모드 진행")
+                        if self.mode1_mgr:
+                            self.mode1_mgr.update_watcher(code, {'current_step': 2})
+                            self.mode1_mgr.update_insight(code, "\n\n".join(insights))
+
+                        await self.send_notification(
+                            f"✅ Mode1 Step 2 완료 (자동매수 모드)\n\n"
+                            f"종목: {watcher.get('name', code)} ({code})\n"
+                            f"현재가: {current_price:,}원\n"
+                            f"조정 저가: {candle_low:,}원\n\n"
+                            f"✅ Step 1 완료\n"
+                            f"✅ Step 2 완료\n"
+                            f"⏳ Step 3 재반등 대기 중...\n\n"
+                            f"🤖 Step 3 완료 시 자동 매수 실행됩니다"
+                        )
+                    else:
+                        # 수동 매수 모드: Step 2가 최종 매수 시그널
+                        logger.info(f"🎯 Mode1 | {code} | Step 2 완료 - 매수 시그널! (수동 매수)")
+
+                        if self.mode1_mgr:
+                            self.mode1_mgr.update_watcher(code, {
+                                'current_step': 4,  # 완료로 표시
+                                'recommended_buy_price': candle_low  # 조정 저가 추천
+                            })
+                            self.mode1_mgr.update_insight(code, "\n\n".join(insights))
+
+                        # 매수 시그널 알림
+                        await self.send_notification(
+                            f"🎯 Mode1 매수 시그널! (Step 2 완료)\n\n"
+                            f"종목: {watcher.get('name', code)} ({code})\n"
+                            f"현재가: {current_price:,}원\n"
+                            f"추천 매수가: {candle_low:,}원 (조정 저가)\n"
+                            f"기대수익률: {watcher.get('expected_profit_rate', 0)}%\n\n"
+                            f"📊 조정 봉 정보:\n"
+                            f"시간: {candle_time}\n"
+                            f"시가: {candle_open:,}원\n"
+                            f"종가: {candle_close:,}원\n"
+                            f"저가: {candle_low:,}원 ← 추천가\n\n"
+                            f"✅ Step 1: {step1['interval']} {step1['trend']} {step1['count']}개 완료\n"
+                            f"✅ Step 2: {step2['interval']} {step2['trend']} {step2['count']}개 완료\n\n"
+                            f"💡 수동 매수를 진행하세요!\n"
+                            f"또는 웹에서 Step 3 조건을 추가하여 자동매수 모드로 전환할 수 있습니다."
+                        )
+                else:
+                    if self.mode1_mgr:
+                        self.mode1_mgr.update_insight(code, "\n\n".join(insights))
+
+                return None
+
+            # Step 3: 재반등 체크 (자동매수 모드에서만)
+            elif current_step == 2:
+                auto_buy = watcher.get('auto_buy', False)
+                if not auto_buy:
+                    # auto_buy=false면 Step 3 체크 안 함
+                    return None
+                interval = step3['interval']
+                last_check_time = watcher.get('last_step3_check')
+
+                if not self.should_check_interval(interval, last_check_time):
+                    return None
+
+                candles = get_minute_chart(token, code, interval, 20)
+                if not candles:
+                    return None
+
+                satisfied = check_condition_satisfied(candles, step3['trend'], step3['count'])
+                watcher['last_step3_check'] = datetime.now(KST).isoformat()
+
+                candle_summary = format_candles_summary(candles, limit=3)
+                insights.append(f"Step 3: {interval} {step3['trend']} {step3['count']}개 → {'✅' if satisfied else '❌'}\n최근:\n{candle_summary}")
+
+                if satisfied:
+                    # n번째 봉의 시가 = 자동 매수가
+                    nth_candle = candles[step3['count'] - 1] if len(candles) >= step3['count'] else candles[0]
+                    buy_price = nth_candle['open']
+
+                    logger.info(f"🤖 Mode1 | {code} | Step 3 완료! 자동 매수: {buy_price:,}원")
+
+                    if self.mode1_mgr:
+                        self.mode1_mgr.update_watcher(code, {
+                            'current_step': 4,
+                            'recommended_buy_price': buy_price
+                        })
+                        self.mode1_mgr.update_insight(code, "\n\n".join(insights))
+
+                    # 자동 매수 실행 알림 (간결하게)
+                    await self.send_notification(
+                        f"🤖 Mode1 자동 매수 실행!\n\n"
+                        f"종목: {watcher.get('name', code)} ({code})\n"
+                        f"매수가: {buy_price:,}원\n"
+                        f"시간: {nth_candle['time']}\n"
+                        f"기대수익률: {watcher.get('expected_profit_rate', 0)}%\n\n"
+                        f"✅ 3단계 완료 → 자동 매수 체결"
+                    )
+
+                    # 자동 매수 시그널 반환
+                    return {'action': 'buy', 'price': buy_price}
+                else:
+                    if self.mode1_mgr:
+                        self.mode1_mgr.update_insight(code, "\n\n".join(insights))
+
+                return None
 
             return None
 
@@ -401,33 +552,76 @@ class PriceMonitor:
 
                 logger.info(f"=== 가격 체크 시작 (Tactic: {len(watchers)}개, Mode1: {len(mode1_watchers)}개, Mode2: {len(mode2_watchers)}개) ===")
 
-                # Mode1 체크 (분봉 기반, 별도 polling 주기)
+                # Mode1 체크 (3단계 시스템)
                 for watcher in mode1_watchers:
                     code = watcher['code']
                     polling_interval = watcher.get('polling_interval', 20)
 
                     try:
-                        # 마지막 체크 시각 확인 (1분봉용)
-                        last_1min_check = watcher.get('last_1min_check')
-                        now = datetime.now(KST)
+                        # current_step에 따라 어떤 step을 체크할지 결정
+                        current_step = watcher.get('current_step', 0)
 
-                        # 1분봉 체크 주기 확인
-                        should_check_1min = True
-                        if last_1min_check:
-                            last_check_dt = datetime.fromisoformat(last_1min_check)
-                            elapsed = (now - last_check_dt).total_seconds()
-                            should_check_1min = elapsed >= polling_interval
+                        # 체크할 interval 결정
+                        check_interval = None
+                        if current_step == 0:
+                            check_interval = watcher.get('step1', {}).get('interval')
+                        elif current_step == 1:
+                            check_interval = watcher.get('step2', {}).get('interval')
+                        elif current_step == 2:
+                            check_interval = watcher.get('step3', {}).get('interval')
 
-                        # 1분봉을 포함하거나, 다른 interval이 체크 시점일 때만 실행
-                        has_1min = any(c['interval'] == '1분' for c in watcher.get('monitoring_conditions', []))
-                        if has_1min and should_check_1min:
-                            watcher['last_1min_check'] = now.isoformat()
+                        if not check_interval:
+                            continue
 
-                        signal = await self.check_mode1_conditions(code, watcher)
+                        # 1분봉은 polling_interval로 체크, 나머지는 정시 체크
+                        should_check = False
+                        if check_interval == "1분":
+                            last_check = watcher.get(f'last_step{current_step}_check')
+                            if not last_check:
+                                should_check = True
+                            else:
+                                last_dt = datetime.fromisoformat(last_check)
+                                elapsed = (datetime.now(KST) - last_dt).total_seconds()
+                                should_check = elapsed >= polling_interval
+                        else:
+                            # 3분/5분/10분봉은 should_check_interval로 판단
+                            should_check = True  # check_mode1_conditions 내부에서 판단
 
-                        if signal and signal['action'] == 'greenlight':
-                            logger.info(f"Mode1 그린라이트: {code}")
-                            # 수동 매수이므로 자동 주문 없음
+                        if should_check:
+                            signal = await self.check_mode1_conditions(code, watcher)
+
+                            if signal:
+                                if signal['action'] == 'buy':
+                                    logger.info(f"Mode1 자동매수 시그널: {code} @ {signal['price']:,}원")
+
+                                    # 주문 모드 확인
+                                    global_config = get_global_config()
+                                    simulation_mode = global_config.is_simulation_mode()
+
+                                    # 자동 매수 실행
+                                    quantity = signal.get('quantity', 1)
+                                    result = self.kiwoom.place_buy_order(
+                                        symbol=code,
+                                        quantity=quantity,
+                                        price=signal['price'],
+                                        order_type="limit",
+                                        simulation_mode=simulation_mode
+                                    )
+
+                                    if result['success'] and self.mode1_mgr:
+                                        # 매수 기록
+                                        self.mode1_mgr.record_buy(code, signal['price'], quantity)
+                                        mode_text = "시뮬레이션" if simulation_mode else "실전"
+                                        await self.send_notification(
+                                            f"✅ Mode1 자동매수 ({mode_text})\n"
+                                            f"종목: {code}\n"
+                                            f"가격: {signal['price']:,}원\n"
+                                            f"수량: {quantity}주\n"
+                                            f"주문번호: {result.get('order_no', 'N/A')}"
+                                        )
+
+                                elif signal['action'] == 'signal':
+                                    logger.info(f"Mode1 알림 시그널: {code} @ {signal['price']:,}원")
 
                     except Exception as e:
                         logger.error(f"Mode1 종목 체크 실패 ({code}): {e}")
@@ -468,6 +662,7 @@ class PriceMonitor:
 
                     # polling 주기가 되었거나 첫 체크
                     self.mode2_last_check[code] = now
+                    logger.info(f"Mode2 종목 체크: {code} (status: {watcher['status']})")
 
                     try:
                         signal = await self.check_mode2_conditions(code, watcher)
@@ -475,50 +670,73 @@ class PriceMonitor:
                         if signal:
                             logger.info(f"Mode2 시그널 발생: {code} - {signal}")
 
+                            # 주문 모드 확인
+                            global_config = get_global_config()
+                            simulation_mode = global_config.is_simulation_mode()
+                            mode_text = "시뮬레이션" if simulation_mode else "실전"
+
                             # 매수 시그널
                             if signal['action'] == 'buy':
                                 result = self.kiwoom.place_buy_order(
                                     symbol=code,
                                     quantity=signal['quantity'],
                                     price=signal['price'],
-                                    order_type="limit"
+                                    order_type="limit",
+                                    simulation_mode=simulation_mode
                                 )
 
                                 if result['success'] and self.mode2_mgr:
                                     # 매수 기록
                                     self.mode2_mgr.record_buy(code, signal['price'], signal['quantity'])
                                     await self.send_notification(
-                                        f"✅ Mode2 매수 체결\n"
+                                        f"✅ Mode2 매수 체결 ({mode_text})\n"
                                         f"종목: {code}\n"
                                         f"가격: {signal['price']:,}원\n"
                                         f"수량: {signal['quantity']}주\n"
-                                        f"주문번호: {result['order_no']}"
+                                        f"주문번호: {result.get('order_no', 'N/A')}"
                                     )
 
                             # 매도 시그널
                             elif signal['action'] == 'sell':
+                                sell_qty = signal.get('quantity', 0)
                                 bought_qty = watcher.get('bought_quantity', 0)
-                                if bought_qty > 0:
+
+                                # 매도 수량이 보유 수량보다 많으면 보유 수량으로 제한
+                                actual_sell_qty = min(sell_qty, bought_qty)
+
+                                if actual_sell_qty > 0:
                                     result = self.kiwoom.place_sell_order(
                                         symbol=code,
-                                        quantity=bought_qty,
+                                        quantity=actual_sell_qty,
                                         price=signal['price'],
-                                        order_type="limit"
+                                        order_type="limit",
+                                        simulation_mode=simulation_mode
                                     )
 
                                     if result['success'] and self.mode2_mgr:
-                                        # 매도 기록
-                                        self.mode2_mgr.record_sell(code, is_auto=True)
+                                        # 매도 기록 (분할 매도 지원)
+                                        self.mode2_mgr.record_sell(
+                                            code,
+                                            sold_quantity=actual_sell_qty,
+                                            sold_reason=signal.get('reason'),
+                                            is_auto=True
+                                        )
+
                                         bought_price = watcher.get('bought_price', 0)
                                         pnl_pct = ((signal['price'] - bought_price) / bought_price * 100) if bought_price > 0 else 0
+
+                                        # 잔여 수량 계산
+                                        remaining_qty = bought_qty - actual_sell_qty
+
                                         await self.send_notification(
-                                            f"✅ Mode2 매도 체결 ({signal['reason']})\n"
+                                            f"✅ Mode2 매도 체결 ({mode_text}, {signal['reason']})\n"
                                             f"종목: {code}\n"
                                             f"매수가: {bought_price:,}원\n"
                                             f"매도가: {signal['price']:,}원\n"
-                                            f"수량: {bought_qty}주\n"
+                                            f"매도 수량: {actual_sell_qty}주 ({signal.get('ratio', 0)}%)\n"
+                                            f"잔여 수량: {remaining_qty}주\n"
                                             f"손익률: {pnl_pct:+.1f}%\n"
-                                            f"주문번호: {result['order_no']}"
+                                            f"주문번호: {result.get('order_no', 'N/A')}"
                                         )
 
                     except Exception as e:

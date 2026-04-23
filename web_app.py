@@ -6,6 +6,8 @@ import os
 import logging
 from flask import Flask, render_template, jsonify, request
 from flask_cors import CORS
+from flask_httpauth import HTTPBasicAuth
+from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
 
 from mode1_manager import Mode1Manager
@@ -15,6 +17,11 @@ from kiwoom_client import KiwoomClient
 from kiwoom_token import get_token
 from kiwoom_chart import get_daily_chart, format_chart_info
 from symbol_resolver import resolve_symbol
+from global_config import get_global_config
+from price_monitor import PriceMonitor
+from tactic_manager import TacticManager
+import asyncio
+import threading
 
 load_dotenv()
 
@@ -27,9 +34,27 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 CORS(app)
 
+# Basic Auth 설정
+auth = HTTPBasicAuth()
+
+# 사용자 인증 정보 (환경변수에서 로드)
+WEB_USERNAME = os.getenv("WEB_USERNAME", "admin")
+WEB_PASSWORD = os.getenv("WEB_PASSWORD", "changeme")
+
+users = {
+    WEB_USERNAME: generate_password_hash(WEB_PASSWORD)
+}
+
+@auth.verify_password
+def verify_password(username, password):
+    if username in users and check_password_hash(users.get(username), password):
+        return username
+    return None
+
 # Manager 초기화
 mode1_mgr = Mode1Manager()
 mode2_mgr = Mode2Manager()
+tactic_mgr = TacticManager()
 
 # Kiwoom Client 초기화
 try:
@@ -39,8 +64,23 @@ except Exception as e:
     logger.warning(f"Kiwoom API 연결 실패: {e}")
     kiwoom_client = None
 
+# PriceMonitor 초기화 (웹 서버에서도 모니터링)
+price_monitor = None
+if kiwoom_client:
+    price_monitor = PriceMonitor(
+        tactic_manager=tactic_mgr,
+        kiwoom_client=kiwoom_client,
+        bot_application=None,  # 웹 서버는 텔레그램 없음
+        mode1_manager=mode1_mgr,
+        mode2_manager=mode2_mgr
+    )
+    logger.info("PriceMonitor 초기화 완료")
+else:
+    logger.warning("Kiwoom API 미연결 - PriceMonitor 비활성화")
+
 
 @app.route('/')
+@auth.login_required
 def index():
     """메인 페이지"""
     return render_template('index.html')
@@ -539,8 +579,33 @@ def test_daily_chart():
         except Exception:
             current_price = float(chart_data.get("today_current", 0))
 
+        # 분봉 요약 조회 (고가/저가 시간 파악)
+        intraday_summary = None
+        try:
+            from kiwoom_chart import get_intraday_summary
+            intraday_summary = get_intraday_summary(token=token, code=symbol_code, tic_scope="10", cnt=50)
+        except Exception as e:
+            logger.warning(f"분봉 요약 조회 실패 (무시): {e}")
+
         # 포맷팅된 메시지 생성
         formatted_msg = format_chart_info(chart_data, current_price)
+
+        # 고가/저가 시간 정보 추가
+        if intraday_summary:
+            high_time = intraday_summary.get("high_time", "")
+            low_time = intraday_summary.get("low_time", "")
+            if high_time and low_time:
+                formatted_msg += f"\n\n⏱️ 당일 시간 정보:"
+                formatted_msg += f"\n고가 시간: {high_time[:2]}:{high_time[2:4]}:{high_time[4:6]}"
+                formatted_msg += f"\n저가 시간: {low_time[:2]}:{low_time[2:4]}:{low_time[4:6]}"
+
+                # 선후 관계 판단
+                if high_time < low_time:
+                    formatted_msg += f"\n📊 고가가 저가보다 먼저 발생"
+                elif low_time < high_time:
+                    formatted_msg += f"\n📊 저가가 고가보다 먼저 발생"
+                else:
+                    formatted_msg += f"\n📊 고가와 저가가 동시 발생"
 
         return jsonify({
             "success": True,
@@ -549,7 +614,8 @@ def test_daily_chart():
                 "name": symbol_name,
                 "chart": chart_data,
                 "current_price": current_price,
-                "formatted_message": formatted_msg
+                "formatted_message": formatted_msg,
+                "intraday_summary": intraday_summary
             }
         })
 
@@ -610,6 +676,103 @@ def test_telegram():
 
     except Exception as e:
         logger.error(f"텔레그램 전송 실패: {e}")
+        import traceback
+
+
+@app.route('/api/test/mode2-monitor', methods=['POST'])
+def test_mode2_monitor():
+    """Mode2 모니터링 테스트 (단일 체크)"""
+    try:
+        if not kiwoom_client:
+            return jsonify({
+                "success": False,
+                "error": "Kiwoom API 미연결"
+            }), 503
+
+        data = request.json
+        code = data.get('code', '').strip()
+
+        if not code:
+            return jsonify({
+                "success": False,
+                "error": "종목코드가 필요합니다"
+            }), 400
+
+        # 종목코드 정규화
+        code = normalize_stock_code(code)
+
+        # Mode2 watcher 조회
+        watcher = mode2_mgr.get_watcher(code)
+        if not watcher:
+            return jsonify({
+                "success": False,
+                "error": f"Mode2 감시 종목이 아닙니다: {code}"
+            }), 404
+
+        # 현재가 조회
+        try:
+            current_price = kiwoom_client.get_last_price(code)
+        except Exception as e:
+            return jsonify({
+                "success": False,
+                "error": f"현재가 조회 실패: {str(e)}"
+            }), 500
+
+        # 매수타점 체크 (현재가가 타점 이상이면 매수)
+        buy_target = watcher.get('buy_target_price', 0)
+        buy_triggered = False
+        if buy_target > 0:
+            buy_triggered = current_price >= buy_target
+
+        # 저항/지지 레벨 체크
+        resist1 = watcher.get('resistance_1_price', 0)
+        resist2 = watcher.get('resistance_2_price', 0)
+        support1 = watcher.get('support_1_price', 0)
+        support2 = watcher.get('support_2_price', 0)
+
+        resist1_triggered = resist1 > 0 and current_price >= resist1
+        resist2_triggered = resist2 > 0 and current_price >= resist2
+        support1_triggered = support1 > 0 and current_price <= support1
+        support2_triggered = support2 > 0 and current_price <= support2
+
+        # 시그널 판단
+        signal = None
+        if watcher['status'] == 'waiting_buy' and buy_triggered:
+            signal = '매수'
+        elif watcher['status'] == 'waiting_sell':
+            if resist2_triggered:
+                signal = '2차저항 익절'
+            elif resist1_triggered:
+                signal = '1차저항 익절'
+            elif support2_triggered:
+                signal = '2차지지 손절'
+            elif support1_triggered:
+                signal = '1차지지 손절'
+
+        return jsonify({
+            "success": True,
+            "data": {
+                "code": code,
+                "name": watcher.get('name', ''),
+                "status": watcher['status'],
+                "current_price": current_price,
+                "buy_target_price": buy_target,
+                "resistance_1": resist1,
+                "resistance_2": resist2,
+                "support_1": support1,
+                "support_2": support2,
+                "buy_triggered": buy_triggered,
+                "resist1_triggered": resist1_triggered,
+                "resist2_triggered": resist2_triggered,
+                "support1_triggered": support1_triggered,
+                "support2_triggered": support2_triggered,
+                "signal": signal,
+                "notify_only": watcher.get('notify_only', False)
+            }
+        })
+
+    except Exception as e:
+        logger.error(f"Mode2 모니터링 테스트 실패: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({
@@ -835,6 +998,67 @@ def update_mode2_status(code):
 
 # ========== Order API ==========
 
+@app.route('/api/config/order-mode', methods=['GET'])
+def get_order_mode():
+    """주문 모드 조회"""
+    try:
+        global_config = get_global_config()
+        config = global_config.get_config()
+
+        return jsonify({
+            "success": True,
+            "data": {
+                "order_mode": config['order_mode'],
+                "updated_at": config.get('updated_at')
+            }
+        })
+    except Exception as e:
+        logger.error(f"주문 모드 조회 실패: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+@app.route('/api/config/order-mode', methods=['PUT'])
+def set_order_mode():
+    """주문 모드 설정"""
+    try:
+        data = request.json
+        mode = data.get('mode', '').strip()
+
+        if mode not in ['simulation', 'real']:
+            return jsonify({
+                "success": False,
+                "error": "주문 모드는 'simulation' 또는 'real'만 가능합니다"
+            }), 400
+
+        global_config = get_global_config()
+        success = global_config.set_order_mode(mode)
+
+        if success:
+            mode_text = "시뮬레이션" if mode == 'simulation' else "실전"
+            return jsonify({
+                "success": True,
+                "message": f"주문 모드가 '{mode_text}'으로 변경되었습니다",
+                "data": {
+                    "order_mode": mode
+                }
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "error": "주문 모드 변경 실패"
+            }), 500
+
+    except Exception as e:
+        logger.error(f"주문 모드 설정 실패: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
 @app.route('/api/order/buy', methods=['POST'])
 def place_buy_order():
     """매수 주문"""
@@ -943,13 +1167,197 @@ def place_sell_order():
         }), 500
 
 
+@app.route('/api/order/pending', methods=['GET'])
+def get_pending_orders():
+    """미체결 주문 조회"""
+    try:
+        if not kiwoom_client:
+            return jsonify({
+                "success": False,
+                "error": "Kiwoom API 미연결"
+            }), 503
+
+        result = kiwoom_client.get_pending_orders()
+        return jsonify(result)
+
+    except Exception as e:
+        logger.error(f"미체결 주문 조회 실패: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+@app.route('/api/order/cancel', methods=['POST'])
+def cancel_order():
+    """주문 취소"""
+    try:
+        if not kiwoom_client:
+            return jsonify({
+                "success": False,
+                "error": "Kiwoom API 미연결"
+            }), 503
+
+        data = request.json
+        order_no = data.get('order_no', '').strip()
+        code = data.get('code', '').strip()
+        quantity = data.get('quantity')
+        order_type = data.get('order_type', 'buy').strip()
+
+        if not order_no:
+            return jsonify({
+                "success": False,
+                "error": "주문번호가 필요합니다"
+            }), 400
+
+        if not code:
+            return jsonify({
+                "success": False,
+                "error": "종목코드가 필요합니다"
+            }), 400
+
+        if not quantity or quantity <= 0:
+            return jsonify({
+                "success": False,
+                "error": "취소 수량이 필요합니다"
+            }), 400
+
+        # 종목코드 정규화
+        code = normalize_stock_code(code)
+
+        # 주문 취소
+        result = kiwoom_client.cancel_order(
+            order_no=order_no,
+            symbol=code,
+            quantity=quantity,
+            order_type=order_type
+        )
+
+        return jsonify(result)
+
+    except Exception as e:
+        logger.error(f"주문 취소 실패: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+# ========== Seeking Signal API ==========
+
+@app.route('/api/seeking-signal/analyze', methods=['POST'])
+def seeking_signal_analyze():
+    """Seeking Signal 종목 분석"""
+    try:
+        from seeking_signal_minho import analyze_with_custom_params
+
+        data = request.json
+        stock_code = normalize_stock_code(data.get('stock_code', ''))
+
+        if not stock_code:
+            return jsonify({
+                "success": False,
+                "error": "종목코드를 입력하세요"
+            }), 400
+
+        # 파라미터 추출 (UI에서 전송)
+        params = {
+            'bbwp_threshold': float(data.get('bbwp_threshold', 25)),
+            'bbwp_consecutive_days': int(data.get('bbwp_consecutive_days', 5)),
+            'pullback_max_pct': float(data.get('pullback_max_pct', 15)),
+            'rally_min_pct': float(data.get('rally_min_pct', 20)),
+            'range_threshold_pct': float(data.get('range_threshold_pct', 7)),
+            'volume_ratio': float(data.get('volume_ratio', 0.5)),
+            'adx_threshold': float(data.get('adx_threshold', 20)),
+        }
+
+        # 분석 실행
+        report = analyze_with_custom_params(stock_code, **params)
+
+        if 'error' in report:
+            return jsonify({
+                "success": False,
+                "error": report['error']
+            }), 500
+
+        return jsonify({
+            "success": True,
+            "data": report
+        })
+
+    except Exception as e:
+        logger.error(f"Seeking Signal 분석 실패: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+@app.route('/api/seeking-signal/defaults', methods=['GET'])
+def seeking_signal_defaults():
+    """기본 파라미터 조회"""
+    try:
+        from seeking_signal_minho.config import TYPE1_DEFAULTS, TYPE2_DEFAULTS, MICRO_DEFAULTS
+
+        return jsonify({
+            "success": True,
+            "data": {
+                "type1": TYPE1_DEFAULTS,
+                "type2": TYPE2_DEFAULTS,
+                "micro": MICRO_DEFAULTS,
+            }
+        })
+    except Exception as e:
+        logger.error(f"기본 파라미터 조회 실패: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+def start_price_monitor():
+    """PriceMonitor를 별도 스레드에서 실행"""
+    if not price_monitor:
+        logger.warning("PriceMonitor가 초기화되지 않음")
+        return
+
+    # 모니터링 활성화
+    price_monitor.start()
+
+    def run_monitor():
+        """asyncio 이벤트 루프에서 PriceMonitor 실행"""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(price_monitor.start_monitoring_task())
+            loop.run_forever()
+        except Exception as e:
+            logger.error(f"PriceMonitor 실행 실패: {e}")
+        finally:
+            loop.close()
+
+    # 별도 스레드로 실행
+    monitor_thread = threading.Thread(target=run_monitor, daemon=True)
+    monitor_thread.start()
+    logger.info("PriceMonitor 백그라운드 시작 완료")
+
+
 def main():
     """웹 서버 실행"""
     port = int(os.getenv("WEB_PORT", "5000"))
     host = os.getenv("WEB_HOST", "0.0.0.0")
 
+    # PriceMonitor 시작
+    start_price_monitor()
+
     logger.info(f"웹 서버 시작: http://{host}:{port}")
-    app.run(host=host, port=port, debug=True)
+    app.run(host=host, port=port, debug=True, use_reloader=False)  # reloader 끄기 (중복 실행 방지)
 
 
 if __name__ == "__main__":

@@ -12,7 +12,16 @@ A dual-interface auto-trading system for Korean stocks via Kiwoom API:
 - **Tactic1**: Gap-up first pullback trades (당일 시가 7%↑ 갭상승 → 첫 조정 매수)
 - **Tactic2**: Split buying at support levels (지지선 분할 매수)
 - **Mode1**: 전일대비 급등 첫 조정 노리기 (분봉 기반, 그린라이트 조건) - 완료
-- **Mode2**: Resistance/Support level-based swing trading (완료)
+- **Mode2**: Resistance/Support level-based swing trading (완료) ⭐ **최우선 기능**
+
+## ⚠️ CRITICAL: Mode2 자동매매 최우선
+
+**Mode2는 가장 중요한 기능입니다. 항상 정상 동작해야 합니다.**
+
+- Web server (web_app.py) 실행 시 **PriceMonitor 자동 시작**
+- Mode2 active=true 종목은 **10초마다 자동 체크**
+- 매수타점/저항/지지 도달 시 **즉시 주문 실행**
+- Telegram bot 없이도 **웹 서버만으로 완전 동작**
 
 ## Essential Commands
 
@@ -120,10 +129,13 @@ templates/index.html
 
 ### Web UI Interface (Mode1/Mode2)
 
-1. **web_app.py** - Flask REST API server
+1. **web_app.py** - Flask REST API server + PriceMonitor ⭐
    - Mode1 endpoints: GET/POST/PUT/DELETE /api/mode1/watchers + PATCH for status/active
    - Mode2 endpoints: GET/POST/PUT/DELETE /api/mode2/watchers + PATCH for status/active
    - Test endpoints: /api/test/stock-info, /api/test/chart, /api/test/daily-chart, /api/test/token
+   - Order mode endpoints: GET/PUT /api/config/order-mode (simulation/real toggle)
+   - **PriceMonitor 통합**: 웹 서버 시작 시 자동으로 백그라운드 모니터링 시작
+   - **독립 실행 가능**: Telegram bot 없이도 Mode1/Mode2 자동매매 완전 동작
    - Serves static HTML/CSS/JS frontend
    - Default port: 5000 (configurable via WEB_PORT, currently running on 5002)
 

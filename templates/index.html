@@ -16,6 +16,7 @@
                 <button class="nav-item" data-page="mode1">📈 Mode1</button>
                 <button class="nav-item" data-page="mode2">📉 Mode2</button>
                 <button class="nav-item" data-page="tradelog">💰 매매일지</button>
+                <button class="nav-item" data-page="seeking-signal">📡 Seeking Signal</button>
                 <button class="nav-item" data-page="test">🧪 Test</button>
             </div>
         </nav>
@@ -26,7 +27,19 @@
             <div id="watchlistPage" class="page active">
                 <div class="page-header">
                     <h2>📊 감시리스트 (Mode1 + Mode2)</h2>
-                    <div class="page-controls">
+                    <div class="page-controls" style="flex-wrap: wrap;">
+                        <!-- 주문 모드 토글 -->
+                        <div style="display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: #f8f9fa; border-radius: 6px; border: 2px solid #dee2e6;">
+                            <span style="font-size: 13px; font-weight: 600; color: #495057;">주문:</span>
+                            <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; font-size: 13px;">
+                                <input type="radio" name="orderMode" value="simulation" checked style="cursor: pointer;">
+                                <span style="color: #228be6;">🧪 시뮬</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; font-size: 13px;">
+                                <input type="radio" name="orderMode" value="real" style="cursor: pointer;">
+                                <span style="color: #f03e3e; font-weight: 600;">⚠️ 실전</span>
+                            </label>
+                        </div>
                         <select id="filterMode" class="filter-select">
                             <option value="">전체 Mode</option>
                             <option value="mode1">Mode1</option>
@@ -108,7 +121,7 @@
                                 <th>등록일</th>
                                 <th>상태</th>
                                 <th>보유수량</th>
-                                <th>현재가</th>
+                                <th>매수타점</th>
                                 <th>매수가</th>
                                 <th>수익률</th>
                                 <th>액션</th>
@@ -136,24 +149,101 @@
                 </div>
 
                 <div class="form-section" id="mode1Form" style="display:none;">
-                    <h3 style="margin-bottom: 16px;">종목 등록</h3>
+                    <h3 id="mode1FormTitle" style="margin-bottom: 16px;">종목 등록</h3>
                     <form id="mode1FormElement">
-                        <div class="form-grid-2" style="margin-bottom: 16px;">
-                            <input type="text" id="mode1Code" name="code" placeholder="종목코드 *" required>
-                            <input type="text" id="mode1Name" name="name" placeholder="종목명 (자동조회)" readonly style="background: #f8f9fa;">
+                        <div style="margin-bottom: 16px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600;">종목코드</label>
+                            <div style="display: flex; gap: 8px;">
+                                <input type="text" id="mode1Code" name="code" placeholder="종목코드 (예: 003280)" required style="flex: 1; padding: 10px; border: 1px solid #dee2e6; border-radius: 6px;">
+                                <button type="button" id="mode1LookupBtn" class="btn btn-secondary">🔍 조회</button>
+                            </div>
+                        </div>
+
+                        <div style="margin-bottom: 16px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600;">종목명</label>
+                            <input type="text" id="mode1Name" name="name" readonly placeholder="종목 조회 후 자동 입력" style="width: 100%; padding: 10px; border: 1px solid #dee2e6; border-radius: 6px; background: #f8f9fa;">
                         </div>
 
                         <div style="margin-bottom: 16px;">
                             <label style="display: block; margin-bottom: 8px; font-weight: 600;">모니터링 가격</label>
-                            <input type="number" name="monitoring_price" placeholder="기준 가격 (예: 13000)" style="width: 100%; padding: 10px; border: 1px solid #dee2e6; border-radius: 6px;">
+                            <input type="number" id="mode1MonitoringPrice" name="monitoring_price" placeholder="종목 조회 후 현재가로 자동 입력" style="width: 100%; padding: 10px; border: 1px solid #dee2e6; border-radius: 6px;">
                         </div>
 
+                        <!-- 3단계 모니터링 조건 -->
                         <div style="margin-bottom: 16px;">
-                            <label style="display: block; margin-bottom: 8px; font-weight: 600;">모니터링 조건</label>
-                            <div id="conditionsContainer">
-                                <!-- 조건이 여기에 추가됩니다 -->
+                            <label style="display: block; margin-bottom: 12px; font-weight: 600; font-size: 15px;">📊 3단계 모니터링 조건</label>
+
+                            <!-- Step 1: 상승 추세 전환 -->
+                            <div style="background: #e7f5ff; padding: 12px; border-radius: 6px; margin-bottom: 12px; border-left: 4px solid #1971c2;">
+                                <div style="font-weight: 600; margin-bottom: 8px; color: #1971c2;">Step 1: 상승 추세 전환</div>
+                                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;">
+                                    <select name="step1_interval" style="padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 14px;">
+                                        <option value="1분">1분봉 (매분 체크)</option>
+                                        <option value="3분">3분봉 (3분마다)</option>
+                                        <option value="5분">5분봉 (5분마다)</option>
+                                        <option value="10분">10분봉 (10분마다)</option>
+                                    </select>
+                                    <select name="step1_trend" style="padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 14px;">
+                                        <option value="상승" selected>상승 (양봉)</option>
+                                        <option value="하락">하락 (음봉)</option>
+                                    </select>
+                                    <input type="number" name="step1_count" value="4" min="1" max="20" placeholder="연속 N개" style="padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 14px;">
+                                </div>
+                                <div style="font-size: 11px; color: #868e96; margin-top: 6px;">
+                                    예: 1분봉 상승 4개 → 최근 4개 봉이 모두 양봉
+                                </div>
                             </div>
-                            <button type="button" id="addCondition" class="btn btn-secondary" style="margin-top: 8px;">+ 조건 추가</button>
+
+                            <!-- Step 2: 첫 조정 -->
+                            <div style="background: #fff3bf; padding: 12px; border-radius: 6px; margin-bottom: 12px; border-left: 4px solid #e67700;">
+                                <div style="font-weight: 600; margin-bottom: 8px; color: #e67700;">Step 2: 첫 조정 (하락)</div>
+                                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;">
+                                    <select name="step2_interval" style="padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 14px;">
+                                        <option value="1분">1분봉 (매분 체크)</option>
+                                        <option value="3분" selected>3분봉 (3분마다)</option>
+                                        <option value="5분">5분봉 (5분마다)</option>
+                                        <option value="10분">10분봉 (10분마다)</option>
+                                    </select>
+                                    <select name="step2_trend" style="padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 14px;">
+                                        <option value="상승">상승 (양봉)</option>
+                                        <option value="하락" selected>하락 (음봉)</option>
+                                    </select>
+                                    <input type="number" name="step2_count" value="1" min="1" max="20" placeholder="연속 N개" style="padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 14px;">
+                                </div>
+                                <div style="font-size: 11px; color: #868e96; margin-top: 6px;">
+                                    예: 3분봉 하락 1개 → 최근 1개 봉이 음봉
+                                </div>
+                            </div>
+
+                            <!-- Step 3: 재반등 -->
+                            <div style="background: #d3f9d8; padding: 12px; border-radius: 6px; margin-bottom: 12px; border-left: 4px solid #2b8a3e;">
+                                <div style="font-weight: 600; margin-bottom: 8px; color: #2b8a3e;">Step 3: 재반등 → 매수 시그널</div>
+                                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;">
+                                    <select name="step3_interval" style="padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 14px;">
+                                        <option value="1분" selected>1분봉 (매분 체크)</option>
+                                        <option value="3분">3분봉 (3분마다)</option>
+                                        <option value="5분">5분봉 (5분마다)</option>
+                                        <option value="10분">10분봉 (10분마다)</option>
+                                    </select>
+                                    <select name="step3_trend" style="padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 14px;">
+                                        <option value="상승" selected>상승 (양봉)</option>
+                                        <option value="하락">하락 (음봉)</option>
+                                    </select>
+                                    <input type="number" name="step3_count" value="2" min="1" max="20" placeholder="연속 N개" style="padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 14px;">
+                                </div>
+                                <div style="margin-top: 8px; font-size: 12px; color: #495057;">
+                                    💡 Step 3 완료 시: <strong>n번째 봉의 시가</strong>가 추천 매수가로 설정됩니다
+                                </div>
+                            </div>
+
+                            <!-- 자동 매수 옵션 -->
+                            <div style="background: #f8f9fa; padding: 12px; border-radius: 6px; border: 1px solid #dee2e6;">
+                                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                    <input type="checkbox" name="auto_buy" style="width: 18px; height: 18px;">
+                                    <span style="font-weight: 600;">🤖 자동 매수</span>
+                                    <span style="font-size: 12px; color: #868e96;">(체크 해제 시: 텔레그램 알림만)</span>
+                                </label>
+                            </div>
                         </div>
 
                         <div class="form-grid-2" style="margin-bottom: 16px;">
@@ -168,7 +258,7 @@
                         </div>
 
                         <div style="display: flex; gap: 8px; justify-content: flex-end;">
-                            <button type="submit" class="btn btn-primary">저장</button>
+                            <button type="submit" class="btn btn-primary" id="mode1SubmitBtn">저장</button>
                             <button type="button" class="btn btn-secondary" onclick="cancelMode1Form()">취소</button>
                         </div>
                     </form>
@@ -178,6 +268,10 @@
                     <table>
                         <thead>
                             <tr>
+                                <th style="width: 40px;">
+                                    <input type="checkbox" id="mode1SelectAll" style="width: 16px; height: 16px; cursor: pointer;">
+                                </th>
+                                <th style="width: 50px;">No</th>
                                 <th>코드</th>
                                 <th>종목명</th>
                                 <th>모니터링가</th>
@@ -206,6 +300,7 @@
                     <form id="mode2Form">
                         <div class="code-input-row">
                             <input type="text" id="mode2Code" name="code" placeholder="종목코드 (예: 003280)" required>
+                            <button type="button" id="mode2LookupBtn" class="btn btn-secondary" style="padding: 8px 16px;">🔍 조회</button>
                             <input type="text" id="mode2Name" name="name" placeholder="종목명 (자동 조회)" readonly style="width: 150px; background: #f1f3f5;">
                             <input type="number" id="mode2Budget" name="budget" placeholder="Budget (원)" value="1000000" min="0" step="10000" style="width: 150px;">
                             <select id="mode2PollingInterval" name="polling_interval" style="width: 120px;">
@@ -225,6 +320,14 @@
                         <div class="chart-input-grid">
                             <div class="chart-area">
                                 <img src="/static/img/mode2_chart.png" alt="Mode2 차트" class="strategy-chart">
+
+                                <!-- 일봉 차트 표시 영역 -->
+                                <div id="mode2ChartContainer" style="display: none; width: 100%; max-width: 900px; margin-top: 0; padding: 16px; background: #ffffff; border-radius: 8px; border: 2px solid #dee2e6; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
+                                    <div style="font-size: 13px; font-weight: 600; color: #495057; margin-bottom: 12px; text-align: center;">📊 일봉 차트 (참고)</div>
+                                    <div style="overflow-x: auto; -webkit-overflow-scrolling: touch;">
+                                        <canvas id="mode2CandlestickChart" width="800" height="300"></canvas>
+                                    </div>
+                                </div>
                             </div>
 
                             <div class="input-levels">
@@ -349,6 +452,164 @@
                 </div>
             </div>
 
+            <!-- Seeking Signal 페이지 -->
+            <div id="seeking-signalPage" class="page">
+                <div class="page-header">
+                    <h2>📡 Seeking Signal - 종목 분석 테스트</h2>
+                </div>
+
+                <!-- 분석 설정 -->
+                <div class="card">
+                    <h3>🔍 종목 입력</h3>
+                    <div style="display: flex; gap: 12px; margin-bottom: 24px;">
+                        <input type="text" id="ssStockCode" placeholder="종목코드 (예: 005930)" style="flex: 1;">
+                        <button id="ssAnalyze" class="btn btn-primary">🚀 분석 실행</button>
+                        <button id="ssReset" class="btn btn-secondary">📋 설정 초기화</button>
+                    </div>
+
+                    <!-- 타입1 파라미터 -->
+                    <div style="margin-bottom: 24px;">
+                        <h4 style="color: #495057; margin-bottom: 12px;">📊 타입1 파라미터 (강한 상승 후 눌림)</h4>
+                        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;">
+                            <div>
+                                <label style="font-size: 13px; color: #868e96;">BBWP 임계값</label>
+                                <input type="number" id="ssBbwpThreshold" value="25" step="1" min="0" max="100">
+                            </div>
+                            <div>
+                                <label style="font-size: 13px; color: #868e96;">연속 일수</label>
+                                <input type="number" id="ssBbwpDays" value="5" step="1" min="1" max="10">
+                            </div>
+                            <div>
+                                <label style="font-size: 13px; color: #868e96;">고점대비 하락 허용(%)</label>
+                                <input type="number" id="ssPullbackMax" value="15" step="1" min="0" max="50">
+                            </div>
+                            <div>
+                                <label style="font-size: 13px; color: #868e96;">60일 상승률 최소(%)</label>
+                                <input type="number" id="ssRallyMin" value="20" step="1" min="0" max="100">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 타입2 파라미터 -->
+                    <div style="margin-bottom: 24px;">
+                        <h4 style="color: #495057; margin-bottom: 12px;">📉 타입2 파라미터 (답보 중인 종목)</h4>
+                        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
+                            <div>
+                                <label style="font-size: 13px; color: #868e96;">Range 임계값(%)</label>
+                                <input type="number" id="ssRangeThreshold" value="7" step="0.1" min="0" max="20">
+                            </div>
+                            <div>
+                                <label style="font-size: 13px; color: #868e96;">거래량 감소 비율</label>
+                                <input type="number" id="ssVolumeRatio" value="0.5" step="0.1" min="0" max="1">
+                            </div>
+                            <div>
+                                <label style="font-size: 13px; color: #868e96;">ADX 임계값</label>
+                                <input type="number" id="ssAdxThreshold" value="20" step="1" min="0" max="50">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 분석 결과 -->
+                <div id="ssResultSection" style="display: none;">
+                    <!-- Enhanced Analysis: 핵심 인사이트 -->
+                    <div class="card">
+                        <h3>🎯 핵심 인사이트 (Enhanced Analysis)</h3>
+
+                        <!-- 1. 강한 상승일 -->
+                        <div id="ssStrongRallySection" style="margin-bottom: 24px;">
+                            <h4 style="color: #495057; margin-bottom: 12px;">📅 강한 상승일 (거래대금 500억+ & 종가 15%+)</h4>
+                            <div id="ssStrongRallyContent" style="padding: 12px; background: #f8f9fa; border-radius: 6px;">
+                                <!-- 동적 렌더링 -->
+                            </div>
+                        </div>
+
+                        <!-- 2. 이평선-현재가 위치 -->
+                        <div id="ssMaAlignmentSection" style="margin-bottom: 24px;">
+                            <h4 style="color: #495057; margin-bottom: 12px;">📊 이동평균선과 현재가 위치 (가격순)</h4>
+                            <div id="ssMaAlignmentContent" style="padding: 12px; background: #f8f9fa; border-radius: 6px;">
+                                <!-- 동적 렌더링 -->
+                            </div>
+                        </div>
+
+                        <!-- 3. 볼린저 밴드 횡보 -->
+                        <div id="ssBollingerSection" style="margin-bottom: 24px;">
+                            <h4 style="color: #495057; margin-bottom: 12px;">📉 볼린저 밴드 기반 횡보 판정</h4>
+                            <div id="ssBollingerContent" style="padding: 12px; background: #f8f9fa; border-radius: 6px;">
+                                <!-- 동적 렌더링 -->
+                            </div>
+                        </div>
+
+                        <!-- 4. 분봉 추세 -->
+                        <div id="ssMinuteTrendSection">
+                            <h4 style="color: #495057; margin-bottom: 12px;">🕐 분봉 추세 (120분봉 이동평균)</h4>
+                            <div id="ssMinuteTrendContent" style="padding: 12px; background: #f8f9fa; border-radius: 6px;">
+                                <!-- 동적 렌더링 -->
+                            </div>
+                            <!-- 전일/당일 가격 흐름 차트 -->
+                            <div id="ssChartsContainer" style="margin-top: 16px; display: none;">
+                                <h5 style="color: #495057; margin-bottom: 8px;">📊 전일/당일 가격 흐름</h5>
+                                <div id="ssDailyFlowChartContainer" style="overflow-x: auto; -webkit-overflow-scrolling: touch;">
+                                    <canvas id="ssDailyFlowChart" width="800" height="300"></canvas>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 판정 요약 -->
+                    <div class="card" id="ssVerdictCard">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <h3 style="margin: 0 0 8px 0;">🎯 판정 결과</h3>
+                                <div id="ssVerdict" style="font-size: 24px; font-weight: bold;"></div>
+                            </div>
+                            <div style="text-align: right;">
+                                <div style="font-size: 13px; color: #868e96;">신뢰도</div>
+                                <div id="ssConfidence" style="font-size: 32px; font-weight: bold;"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 주요 신호 -->
+                    <div class="card">
+                        <h3>✅ 주요 신호</h3>
+                        <ul id="ssKeySignals" style="list-style: none; padding: 0; margin: 0;"></ul>
+                    </div>
+
+                    <!-- 리스크 -->
+                    <div class="card" id="ssRisksCard" style="display: none;">
+                        <h3>⚠️ 리스크</h3>
+                        <ul id="ssRisks" style="list-style: none; padding: 0; margin: 0;"></ul>
+                    </div>
+
+                    <!-- 탭 네비게이션 -->
+                    <div class="card">
+                        <div style="display: flex; gap: 8px; margin-bottom: 16px; border-bottom: 2px solid #e9ecef;">
+                            <button class="ss-tab-btn active" data-tab="type1">타입1</button>
+                            <button class="ss-tab-btn" data-tab="type2">타입2</button>
+                            <button class="ss-tab-btn" data-tab="volume">거래대금</button>
+                            <button class="ss-tab-btn" data-tab="micro">분봉</button>
+                            <button class="ss-tab-btn" data-tab="raw">Raw Data</button>
+                        </div>
+
+                        <!-- 타입1 탭 -->
+                        <div class="ss-tab-content active" data-tab="type1" id="ssType1Content"></div>
+
+                        <!-- 타입2 탭 -->
+                        <div class="ss-tab-content" data-tab="type2" id="ssType2Content"></div>
+
+                        <!-- 거래대금 탭 -->
+                        <div class="ss-tab-content" data-tab="volume" id="ssVolumeContent"></div>
+
+                        <!-- 분봉 탭 -->
+                        <div class="ss-tab-content" data-tab="micro" id="ssMicroContent"></div>
+
+                        <!-- Raw Data 탭 -->
+                        <div class="ss-tab-content" data-tab="raw" id="ssRawContent"></div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Test 페이지 -->
             <div id="testPage" class="page">
                 <div class="page-header">
@@ -375,6 +636,9 @@
                     <div class="test-result" id="testDailyChartResult">
                         <!-- 결과 -->
                     </div>
+                    <div id="dailyChartCanvas" style="display: none; margin-top: 16px; background: white; padding: 16px; border-radius: 8px;">
+                        <canvas id="candlestickChart" width="800" height="400"></canvas>
+                    </div>
                 </div>
 
                 <div class="test-section">
@@ -398,6 +662,44 @@
                     <h3>🔄 토큰 상태</h3>
                     <button id="testCheckToken" class="btn btn-secondary">토큰 확인</button>
                     <div class="test-result" id="testTokenResult">
+                        <!-- 결과 -->
+                    </div>
+                </div>
+
+                <div class="test-section" style="border: 2px solid #228be6; background: #f0f7ff;">
+                    <h3 style="margin-bottom: 16px;">💬 텔레그램 메시지 전송</h3>
+
+                    <!-- 템플릿 선택 -->
+                    <div style="margin-bottom: 16px;">
+                        <label style="display: block; margin-bottom: 8px; font-weight: 600;">알림 템플릿</label>
+                        <select id="telegramTemplate" style="width: 100%; padding: 10px; border: 1px solid #dee2e6; border-radius: 6px; font-size: 14px;">
+                            <option value="">직접 입력</option>
+                            <option value="mode1_signal">Mode1: 매수 시그널</option>
+                            <option value="mode1_buy">Mode1: 매수 체결</option>
+                            <option value="mode2_buy_signal">Mode2: 매수타점 도달 (알림)</option>
+                            <option value="mode2_buy">Mode2: 매수 체결</option>
+                            <option value="mode2_sell">Mode2: 익절/손절 매도</option>
+                            <option value="test">테스트 메시지</option>
+                        </select>
+                    </div>
+
+                    <!-- 메시지 입력 -->
+                    <div style="margin-bottom: 16px;">
+                        <label style="display: block; margin-bottom: 8px; font-weight: 600;">메시지 내용</label>
+                        <textarea id="telegramMessage" rows="8" placeholder="전송할 메시지를 입력하세요" style="width: 100%; padding: 10px; border: 1px solid #dee2e6; border-radius: 6px; font-family: monospace; font-size: 13px; resize: vertical;"></textarea>
+                        <div style="font-size: 12px; color: #868e96; margin-top: 4px;">
+                            💡 템플릿을 선택하면 샘플 메시지가 자동 입력됩니다
+                        </div>
+                    </div>
+
+                    <!-- 전송 버튼 -->
+                    <div style="display: flex; gap: 8px;">
+                        <button id="testSendTelegram" class="btn btn-primary">📤 텔레그램 전송</button>
+                        <button id="testClearTelegram" class="btn btn-secondary">🗑️ 초기화</button>
+                    </div>
+
+                    <!-- 결과 -->
+                    <div class="test-result" id="testTelegramResult" style="margin-top: 16px;">
                         <!-- 결과 -->
                     </div>
                 </div>
@@ -452,6 +754,89 @@
                         </div>
                         <div class="test-result" id="testSellResult">
                             <!-- 결과 -->
+                        </div>
+                    </div>
+
+                    <!-- 미체결 주문 조회 -->
+                    <div style="background: white; padding: 16px; border-radius: 8px; margin-top: 16px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                            <h4 style="color: #495057; margin: 0;">📋 미체결 주문</h4>
+                            <button id="refreshPendingOrders" class="btn btn-primary" style="font-size: 13px; padding: 6px 12px;">
+                                🔄 조회
+                            </button>
+                        </div>
+                        <div id="pendingOrdersTable" style="overflow-x: auto;">
+                            <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                                <thead>
+                                    <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
+                                        <th style="padding: 10px; text-align: left;">주문번호</th>
+                                        <th style="padding: 10px; text-align: left;">종목코드</th>
+                                        <th style="padding: 10px; text-align: left;">종목명</th>
+                                        <th style="padding: 10px; text-align: center;">구분</th>
+                                        <th style="padding: 10px; text-align: right;">주문수량</th>
+                                        <th style="padding: 10px; text-align: right;">주문가격</th>
+                                        <th style="padding: 10px; text-align: right;">미체결</th>
+                                        <th style="padding: 10px; text-align: right;">체결</th>
+                                        <th style="padding: 10px; text-align: center;">주문시각</th>
+                                        <th style="padding: 10px; text-align: center;">액션</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="pendingOrdersBody">
+                                    <tr>
+                                        <td colspan="10" style="padding: 20px; text-align: center; color: #868e96;">
+                                            조회 버튼을 클릭하세요
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Mode2 모니터링 로그 -->
+                    <div style="background: white; padding: 16px; border-radius: 8px; margin-top: 16px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                            <h4 style="color: #495057; margin: 0;">🔍 Mode2 모니터링 로그</h4>
+                            <div style="display: flex; gap: 8px; align-items: center;">
+                                <label style="font-size: 13px; font-weight: 600;">종목 선택:</label>
+                                <select id="monitorCodeSelect" style="padding: 6px 12px; border: 1px solid #dee2e6; border-radius: 6px; font-size: 13px;">
+                                    <option value="">-- 선택 --</option>
+                                </select>
+                                <button id="clearMonitorLog" class="btn btn-secondary" style="font-size: 13px; padding: 6px 12px;">
+                                    🗑️ 초기화
+                                </button>
+                                <button id="toggleMonitorLog" class="btn btn-primary" style="font-size: 13px; padding: 6px 12px;">
+                                    ▶️ 시작
+                                </button>
+                            </div>
+                        </div>
+                        <div style="background: #f8f9fa; padding: 12px; border-radius: 6px; margin-bottom: 12px; font-size: 13px;">
+                            <div style="display: flex; gap: 16px; flex-wrap: wrap;">
+                                <div>
+                                    <strong>종목:</strong> <span id="monitorCode">-</span>
+                                    <span id="monitorName" style="color: #868e96;"></span>
+                                </div>
+                                <div>
+                                    <strong>상태:</strong>
+                                    <span id="monitorStatus" style="color: #868e96;">대기 중</span>
+                                </div>
+                                <div>
+                                    <strong>현재가:</strong>
+                                    <span id="monitorCurrentPrice" style="color: #228be6; font-weight: 600;">-</span>
+                                </div>
+                                <div>
+                                    <strong>매수타점:</strong>
+                                    <span id="monitorBuyTarget" style="color: #228be6;">270,500</span>
+                                </div>
+                                <div>
+                                    <strong>1차저항:</strong>
+                                    <span id="monitorResist1" style="color: #12b886;">273,000</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="monitorLogContainer" style="background: #212529; color: #adb5bd; padding: 12px; border-radius: 6px; font-family: 'Courier New', monospace; font-size: 12px; height: 400px; overflow-y: auto;">
+                            <div style="color: #868e96; text-align: center; padding: 20px;">
+                                시작 버튼을 클릭하면 실시간 모니터링이 시작됩니다
+                            </div>
                         </div>
                     </div>
                 </div>

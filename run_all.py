@@ -20,11 +20,9 @@ logger = logging.getLogger(__name__)
 
 def run_web_server():
     """웹 서버 실행 (별도 스레드)"""
-    from web_app import app
-    port = int(os.getenv("WEB_PORT", "5000"))
-    host = os.getenv("WEB_HOST", "0.0.0.0")
-    logger.info(f"웹 서버 시작: http://{host}:{port}")
-    app.run(host=host, port=port, debug=False, use_reloader=False)
+    from web_app import main
+    logger.info("웹 서버 시작 (PriceMonitor 포함)")
+    main()
 
 
 def run_telegram_bot():

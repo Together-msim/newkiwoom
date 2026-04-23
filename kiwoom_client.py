@@ -177,6 +177,16 @@ class KiwoomClient:
             # 종목명 추출
             stock_name = data.get("stk_nm", "").strip()
 
+            # 종목명이 비어있으면 symbol_resolver로 조회
+            if not stock_name:
+                try:
+                    from symbol_resolver import resolve_symbol
+                    resolved = resolve_symbol(symbol)
+                    if resolved:
+                        stock_name = resolved.get("corp_name", "")
+                except Exception as e:
+                    logger.warning(f"symbol_resolver fallback 실패: {e}")
+
             # 현재가 추출
             contracts = data.get("cntr_infr", []) or []
             current_price = 0.0
@@ -346,6 +356,7 @@ class KiwoomClient:
         """
         현재 시간에 따라 거래소 구분을 반환합니다.
         - 오전 8시~8시50분: "NXT" (장전 시간외 거래)
+        - 오후 3시30분~6시: "NXT" (장후 야간거래)
         - 기본값: "KRX" (한국거래소)
         """
         from zoneinfo import ZoneInfo
@@ -356,6 +367,9 @@ class KiwoomClient:
 
         # 오전 8시~8시50분: 장전 시간외 거래
         if dt_time(8, 0) <= current_time < dt_time(8, 50):
+            return "NXT"
+        # 오후 3시30분~6시: 장후 야간거래 (NXT)
+        elif dt_time(15, 30) <= current_time < dt_time(18, 0):
             return "NXT"
         # 기본값: KRX
         else:
@@ -445,8 +459,12 @@ class KiwoomClient:
         self._ensure_valid_token()
 
         try:
-            # 시뮬레이션 모드 체크 (파라미터가 우선, 없으면 환경변수 사용)
-            is_simulation = simulation_mode if simulation_mode is not None else (os.getenv("ORDER_SIMULATION_MODE") == "1")
+            # 시뮬레이션 모드 체크 (파라미터가 우선, 없으면 TRADE_MODE 환경변수 사용)
+            if simulation_mode is not None:
+                is_simulation = simulation_mode
+            else:
+                trade_mode = os.getenv("TRADE_MODE", "mock")
+                is_simulation = (trade_mode != "real")
 
             if is_simulation:
                 logger.info(f"[시뮬레이션] 매수 주문: {symbol} | {quantity}주 | {order_type} | {price if price > 0 else '시장가'}")
@@ -564,8 +582,12 @@ class KiwoomClient:
         self._ensure_valid_token()
 
         try:
-            # 시뮬레이션 모드 체크 (파라미터가 우선, 없으면 환경변수 사용)
-            is_simulation = simulation_mode if simulation_mode is not None else (os.getenv("ORDER_SIMULATION_MODE") == "1")
+            # 시뮬레이션 모드 체크 (파라미터가 우선, 없으면 TRADE_MODE 환경변수 사용)
+            if simulation_mode is not None:
+                is_simulation = simulation_mode
+            else:
+                trade_mode = os.getenv("TRADE_MODE", "mock")
+                is_simulation = (trade_mode != "real")
 
             if is_simulation:
                 qty_text = f"{quantity}주" if quantity else "전량"
@@ -662,5 +684,165 @@ class KiwoomClient:
             return {
                 "success": False,
                 "order_no": None,
+                "message": str(e)
+            }
+
+    def get_pending_orders(self) -> Dict[str, Any]:
+        """
+        미체결 주문 조회 (kt00012 API 사용)
+
+        Returns:
+            {
+                "success": bool,
+                "orders": [
+                    {
+                        "order_no": str,        # 주문번호
+                        "stock_code": str,      # 종목코드
+                        "stock_name": str,      # 종목명
+                        "order_type": str,      # 매수/매도
+                        "order_qty": int,       # 주문수량
+                        "order_price": int,     # 주문가격
+                        "pending_qty": int,     # 미체결수량
+                        "executed_qty": int,    # 체결수량
+                        "order_time": str       # 주문시각
+                    }
+                ]
+            }
+        """
+        self._ensure_valid_token()
+
+        try:
+            url = f"{self.host}/api/dostk/ordr"
+            headers = {
+                "Content-Type": "application/json;charset=UTF-8",
+                "api-id": "kt00012",  # 미체결 주문 조회
+                "authorization": f"Bearer {self.token}",
+            }
+
+            body = {
+                "odno_no": ""  # 빈 값: 전체 조회
+            }
+
+            logger.info("미체결 주문 조회")
+            response = requests.post(url, headers=headers, json=body, timeout=10)
+            data = response.json()
+
+            return_code = data.get("header", {}).get("rsp_cd")
+            return_msg = data.get("header", {}).get("rsp_msg")
+
+            if return_code == "00000":
+                body_data = data.get("body", {})
+                rows = body_data.get("ordr_list", [])
+
+                orders = []
+                for row in rows:
+                    orders.append({
+                        "order_no": row.get("odno_no", ""),
+                        "stock_code": row.get("stk_cd", ""),
+                        "stock_name": row.get("stk_nm", ""),
+                        "order_type": "매수" if row.get("bstp_cd") == "01" else "매도",
+                        "order_qty": int(row.get("ord_qty", 0) or 0),
+                        "order_price": int(row.get("ord_uv", 0) or 0),
+                        "pending_qty": int(row.get("rmnd_qty", 0) or 0),
+                        "executed_qty": int(row.get("cntr_qty", 0) or 0),
+                        "order_time": row.get("ord_tms", "")
+                    })
+
+                logger.info(f"미체결 주문 {len(orders)}건 조회 완료")
+                return {
+                    "success": True,
+                    "orders": orders
+                }
+            else:
+                logger.error(f"미체결 주문 조회 실패: {return_msg}")
+                return {
+                    "success": False,
+                    "orders": [],
+                    "message": return_msg
+                }
+
+        except Exception as e:
+            logger.error(f"미체결 주문 조회 실패: {e}")
+            import traceback
+            traceback.print_exc()
+            return {
+                "success": False,
+                "orders": [],
+                "message": str(e)
+            }
+
+    def cancel_order(
+        self,
+        order_no: str,
+        symbol: str,
+        quantity: int,
+        order_type: str = "buy"
+    ) -> Dict[str, Any]:
+        """
+        주문 취소 (kt10020 API 사용)
+
+        Args:
+            order_no: 주문번호
+            symbol: 종목코드
+            quantity: 취소 수량
+            order_type: "buy" (매수) 또는 "sell" (매도)
+
+        Returns:
+            {
+                "success": bool,
+                "message": str
+            }
+        """
+        symbol = normalize_stock_code(symbol)
+        self._ensure_valid_token()
+
+        try:
+            # 거래소 구분
+            dmst_stex_tp = self._get_dmst_stex_tp()
+
+            # 매매구분 (01:매수, 02:매도)
+            bstp_cd = "01" if order_type.lower() == "buy" else "02"
+
+            body = {
+                "dmst_stex_tp": dmst_stex_tp,
+                "stk_cd": symbol,
+                "odno_no": order_no,
+                "cncl_qty": str(quantity),
+                "bstp_cd": bstp_cd
+            }
+
+            url = f"{self.host}/api/dostk/ordr"
+            headers = {
+                "Content-Type": "application/json;charset=UTF-8",
+                "api-id": "kt10020",  # 주문 취소
+                "authorization": f"Bearer {self.token}",
+            }
+
+            logger.info(f"주문 취소: {order_no} | {symbol} | {quantity}주")
+            response = requests.post(url, headers=headers, json=body, timeout=10)
+            data = response.json()
+
+            return_code = data.get("header", {}).get("rsp_cd")
+            return_msg = data.get("header", {}).get("rsp_msg")
+
+            if return_code == "00000":
+                logger.info(f"주문 취소 완료: {order_no}")
+                return {
+                    "success": True,
+                    "message": "주문 취소 완료"
+                }
+            else:
+                logger.error(f"주문 취소 실패: {return_msg}")
+                return {
+                    "success": False,
+                    "message": return_msg or f"취소 실패 (code={return_code})"
+                }
+
+        except Exception as e:
+            logger.error(f"주문 취소 실패: {e}")
+            import traceback
+            traceback.print_exc()
+            return {
+                "success": False,
                 "message": str(e)
             }
