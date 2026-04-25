@@ -133,6 +133,9 @@ class PriceMonitor:
             status = watcher['status']
             notify_only = watcher.get('notify_only', False)
 
+            # 모니터링 상태 업데이트 (실시간)
+            await self._update_monitoring_status(code, watcher, current_price)
+
             # 매수 대기 중
             if status == 'waiting_buy':
                 target_price = watcher['buy_target_price']
@@ -758,3 +761,51 @@ class PriceMonitor:
 
         self.monitor_task = asyncio.create_task(self.monitor_loop())
         logger.info("모니터링 태스크 생성 완료")
+
+    async def _update_monitoring_status(self, code: str, watcher: dict, current_price: float):
+        """모니터링 상태 실시간 업데이트 및 알림"""
+        old_status = watcher.get('monitoring_status', '')
+        new_status = ''
+
+        buy_target = watcher.get('buy_target_price', 0)
+        support_1 = watcher.get('support_1_price', 0)
+        support_2 = watcher.get('support_2_price', 0)
+        resistance_1 = watcher.get('resistance_1_price', 0)
+        resistance_2 = watcher.get('resistance_2_price', 0)
+
+        # 상태 판정
+        if watcher['status'] == 'waiting_buy':
+            if buy_target > 0 and current_price < buy_target:
+                new_status = '매수타점 도달'
+        elif watcher['status'] == 'waiting_sell':
+            bought_price = watcher.get('bought_price', 0)
+            if bought_price > 0:
+                # 저항선 돌파 체크 (위에서 아래로)
+                if resistance_2 > 0 and current_price >= resistance_2:
+                    new_status = '2차저항 통과 (익절 구간)'
+                elif resistance_1 > 0 and current_price >= resistance_1:
+                    new_status = '1차저항 통과 (익절 구간)'
+                # 지지선 이탈 체크
+                elif support_2 > 0 and current_price <= support_2:
+                    new_status = '2차지지 이탈 (손절 구간)'
+                elif support_1 > 0 and current_price <= support_1:
+                    new_status = '1차지지 이탈 (손절 구간)'
+                else:
+                    # 정상 범위
+                    if support_1 > 0 and resistance_1 > 0:
+                        new_status = f'정상 범위 ({support_1:,}~{resistance_1:,})'
+
+        # 상태 변경 시 업데이트 및 알림
+        if old_status != new_status and new_status:
+            if self.mode2_manager:
+                self.mode2_manager.update_monitoring_status(code, new_status)
+
+            # 중요 상태 변경 시 텔레그램 알림
+            if new_status in ['매수타점 도달', '2차지지 이탈 (손절 구간)', '1차지지 이탈 (손절 구간)',
+                              '2차저항 통과 (익절 구간)', '1차저항 통과 (익절 구간)']:
+                await self.send_notification(
+                    f"📊 Mode2 모니터링 상태 변경\n"
+                    f"종목: {watcher.get('name', code)} ({code})\n"
+                    f"현재가: {current_price:,}원\n"
+                    f"상태: {new_status}"
+                )

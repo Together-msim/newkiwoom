@@ -301,6 +301,212 @@ def update_mode1_status(code):
         }), 500
 
 
+# ========== Mode2 섹션 관리 API ==========
+
+@app.route('/api/mode2/sections', methods=['GET'])
+def get_mode2_sections():
+    """섹션 리스트 조회"""
+    try:
+        sections = mode2_mgr.get_all_sections()
+        return jsonify({
+            "success": True,
+            "data": sections
+        })
+    except Exception as e:
+        logger.error(f"섹션 리스트 조회 실패: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+@app.route('/api/mode2/sections', methods=['POST'])
+def create_mode2_section():
+    """섹션 추가"""
+    try:
+        data = request.json
+        name = data.get('name', '').strip()
+
+        if not name:
+            return jsonify({
+                "success": False,
+                "error": "섹션명을 입력하세요"
+            }), 400
+
+        section = mode2_mgr.add_section(name)
+        return jsonify({
+            "success": True,
+            "data": section
+        })
+    except Exception as e:
+        logger.error(f"섹션 추가 실패: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+@app.route('/api/mode2/sections/<section_id>', methods=['PUT'])
+def update_mode2_section(section_id):
+    """섹션명 변경"""
+    try:
+        data = request.json
+        name = data.get('name', '').strip()
+
+        if not name:
+            return jsonify({
+                "success": False,
+                "error": "섹션명을 입력하세요"
+            }), 400
+
+        if mode2_mgr.update_section(section_id, name):
+            return jsonify({"success": True})
+        else:
+            return jsonify({
+                "success": False,
+                "error": "섹션을 찾을 수 없습니다"
+            }), 404
+    except Exception as e:
+        logger.error(f"섹션 수정 실패: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+@app.route('/api/mode2/sections/<section_id>', methods=['DELETE'])
+def delete_mode2_section(section_id):
+    """섹션 삭제 (종목은 미분류로 이동)"""
+    try:
+        if section_id == 'uncategorized':
+            return jsonify({
+                "success": False,
+                "error": "미분류 섹션은 삭제할 수 없습니다"
+            }), 400
+
+        if mode2_mgr.delete_section(section_id):
+            return jsonify({"success": True})
+        else:
+            return jsonify({
+                "success": False,
+                "error": "섹션을 찾을 수 없습니다"
+            }), 404
+    except Exception as e:
+        logger.error(f"섹션 삭제 실패: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+@app.route('/api/mode2/sections/<section_id>/toggle-collapse', methods=['POST'])
+def toggle_section_collapse(section_id):
+    """섹션 접기/펴기"""
+    try:
+        if mode2_mgr.toggle_section_collapsed(section_id):
+            return jsonify({"success": True})
+        else:
+            return jsonify({
+                "success": False,
+                "error": "섹션을 찾을 수 없습니다"
+            }), 404
+    except Exception as e:
+        logger.error(f"섹션 토글 실패: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+@app.route('/api/mode2/sections/reorder', methods=['POST'])
+def reorder_mode2_sections():
+    """섹션 순서 변경"""
+    try:
+        data = request.json
+        section_orders = data.get('section_orders', [])
+
+        if mode2_mgr.reorder_sections(section_orders):
+            return jsonify({"success": True})
+        else:
+            return jsonify({
+                "success": False,
+                "error": "순서 변경 실패"
+            }), 500
+    except Exception as e:
+        logger.error(f"섹션 순서 변경 실패: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+@app.route('/api/mode2/watchers/<code>/move-section', methods=['POST'])
+def move_watcher_section(code):
+    """종목을 다른 섹션으로 이동"""
+    try:
+        data = request.json
+        section_id = data.get('section_id')
+
+        if not section_id:
+            return jsonify({
+                "success": False,
+                "error": "섹션 ID가 필요합니다"
+            }), 400
+
+        if mode2_mgr.move_watcher_to_section(code, section_id):
+            return jsonify({"success": True})
+        else:
+            return jsonify({
+                "success": False,
+                "error": "종목을 찾을 수 없습니다"
+            }), 404
+    except Exception as e:
+        logger.error(f"종목 이동 실패: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+@app.route('/api/mode2/sections/<section_id>/reorder-watchers', methods=['POST'])
+def reorder_section_watchers(section_id):
+    """섹션 내 종목 순서 변경"""
+    try:
+        data = request.json
+        watcher_orders = data.get('watcher_orders', [])
+
+        if mode2_mgr.reorder_watchers_in_section(section_id, watcher_orders):
+            return jsonify({"success": True})
+        else:
+            return jsonify({
+                "success": False,
+                "error": "순서 변경 실패"
+            }), 500
+    except Exception as e:
+        logger.error(f"종목 순서 변경 실패: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+@app.route('/api/mode2/sections/<section_id>/watchers', methods=['GET'])
+def get_section_watchers(section_id):
+    """특정 섹션의 종목 리스트 조회"""
+    try:
+        watchers = mode2_mgr.get_watchers_by_section(section_id)
+        return jsonify({
+            "success": True,
+            "data": watchers
+        })
+    except Exception as e:
+        logger.error(f"섹션 종목 조회 실패: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
 # ========== Test API ==========
 
 @app.route('/api/test/stock-info/<code>', methods=['GET'])
