@@ -376,9 +376,16 @@ function renderMode2SectionList(sections, allWatchers) {
                 <div class="mode2-section-header ${collapsed ? 'collapsed' : ''}" onclick="toggleSection('${section.id}')">
                     <span class="section-drag-handle" title="드래그하여 섹션 이동" style="cursor: move;">☰</span>
                     <span class="section-toggle ${collapsed ? 'collapsed' : ''}">▼</span>
+                    <input type="checkbox" class="section-select-all" data-section-id="${section.id}"
+                           onclick="event.stopPropagation(); toggleSectionSelectAll('${section.id}')"
+                           title="전체 선택" style="margin: 0 8px; width: 16px; height: 16px; cursor: pointer;">
                     <span class="section-name" data-section-id="${section.id}" ondblclick="editSectionName('${section.id}')">${section.name}</span>
                     <span style="color: #adb5bd; font-size: 13px;">(${watchers.length})</span>
                     <div class="section-actions" onclick="event.stopPropagation()">
+                        <button class="section-btn section-delete-selected" data-section-id="${section.id}"
+                                onclick="deleteSectionSelected('${section.id}')" title="선택 항목 삭제"
+                                style="display: none; background: #c92a2a; color: white;">🗑️ 선택 삭제</button>
+                        <button class="section-btn" onclick="toggleSectionEditMode('${section.id}')" title="섹션 일괄 편집">✏️</button>
                         ${section.id !== 'uncategorized' ?
                             `<button class="section-btn" onclick="deleteSectionConfirm('${section.id}')" title="섹션 삭제">🗑️</button>` :
                             ''
@@ -436,19 +443,19 @@ function renderMode2WatcherRow(w, idx) {
              draggable="true" ondragstart="handleWatcherDragStart(event)" ondragend="handleWatcherDragEnd(event)"
              ondragover="handleWatcherDragOver(event)" ondrop="handleWatcherDrop(event)">
             <div class="watcher-cell">
-                <input type="checkbox" class="watcher-checkbox" value="${w.code}" onchange="handleWatcherCheckboxChange()">
+                <input type="checkbox" class="watcher-checkbox" value="${w.code}" data-section="${w.section}" onchange="handleWatcherCheckboxChange()">
             </div>
             <div class="watcher-drag-handle" style="cursor: move;">☰</div>
             <div class="watcher-cell">${w.record_id || '-'}</div>
             <div class="watcher-cell"><strong>${w.code}</strong></div>
             <div class="watcher-cell">${w.name || '-'}</div>
-            <div class="watcher-cell editable" data-field="buy_target_price">${formatNumber(w.buy_target_price)}</div>
-            <div class="watcher-cell editable" data-field="budget">${formatNumber(w.budget)}</div>
+            <div class="watcher-cell editable" data-field="buy_target_price" ondblclick="enableCellEdit(this, '${w.code}')">${formatNumber(w.buy_target_price)}</div>
+            <div class="watcher-cell editable" data-field="budget" ondblclick="enableCellEdit(this, '${w.code}')">${formatNumber(w.budget)}</div>
             <div class="watcher-cell">${w.quantity}주</div>
-            <div class="watcher-cell editable" data-field="support_2_price">${formatNumber(w.support_2_price)}</div>
-            <div class="watcher-cell editable" data-field="support_1_price">${formatNumber(w.support_1_price)}</div>
-            <div class="watcher-cell editable" data-field="resistance_1_price">${formatNumber(w.resistance_1_price)}</div>
-            <div class="watcher-cell editable" data-field="resistance_2_price">${formatNumber(w.resistance_2_price)}</div>
+            <div class="watcher-cell editable" data-field="support_2_price" ondblclick="enableCellEdit(this, '${w.code}')">${formatNumber(w.support_2_price)}</div>
+            <div class="watcher-cell editable" data-field="support_1_price" ondblclick="enableCellEdit(this, '${w.code}')">${formatNumber(w.support_1_price)}</div>
+            <div class="watcher-cell editable" data-field="resistance_1_price" ondblclick="enableCellEdit(this, '${w.code}')">${formatNumber(w.resistance_1_price)}</div>
+            <div class="watcher-cell editable" data-field="resistance_2_price" ondblclick="enableCellEdit(this, '${w.code}')">${formatNumber(w.resistance_2_price)}</div>
             <div class="watcher-cell">
                 <select onchange="updateWatcherField('${w.code}', 'polling_interval', this.value)">
                     <option value="10" ${w.polling_interval == 10 ? 'selected' : ''}>10초</option>
@@ -467,7 +474,7 @@ function renderMode2WatcherRow(w, idx) {
             </div>
             <div class="watcher-cell"><span class="status-badge status-${w.status}">${getStatusText(w.status)}</span></div>
             <div class="watcher-cell monitoring-status ${getMonitoringStatusClass(w.monitoring_status)}">${w.monitoring_status || '-'}</div>
-            <div class="watcher-cell editable" data-field="note" title="${w.note || ''}">${truncateText(w.note || '', 20)}</div>
+            <div class="watcher-cell editable" data-field="note" title="${w.note || ''}" ondblclick="enableCellEdit(this, '${w.code}')">${truncateText(w.note || '', 20)}</div>
             <div class="watcher-actions">
                 <div class="active-toggle ${w.active ? 'on' : 'off'}" onclick="toggleActive('${w.code}', ${!w.active})">
                     ${w.active ? 'ON' : 'OFF'}
@@ -2003,7 +2010,7 @@ function drawCandlestickChart(data) {
 
         // X축 레이블
         ctx.fillStyle = '#495057';
-        ctx.font = '10px sans-serif';
+        ctx.font = '13px sans-serif';
         const labels = point.label.split('\n');
         labels.forEach((line, i) => {
             ctx.fillText(line, x, chartBottom + 20 + i * 12);
@@ -2047,8 +2054,9 @@ function drawCandlestickChart(data, canvasId, containerId) {
         canvas.width = Math.min(containerWidth, 700);
         canvas.height = 280;
     } else {
-        canvas.width = Math.min(containerWidth, 800);
-        canvas.height = 300;
+        // 전체 폭 사용 (최대 제한 제거)
+        canvas.width = containerWidth;
+        canvas.height = 400;
     }
 
     const ctx = canvas.getContext('2d');
@@ -2064,12 +2072,24 @@ function drawCandlestickChart(data, canvasId, containerId) {
         low: parseFloat(chart.yesterday_low) || 0,
         close: parseFloat(chart.yesterday_close) || 0
     };
+
+    // 장중/장 종료 판단 (평일 09:00~15:30)
+    const now = new Date();
+    const isWeekday = now.getDay() >= 1 && now.getDay() <= 5;
+    const hour = now.getHours();
+    const minute = now.getMinutes();
+    const isMarketOpen = isWeekday && ((hour === 9 && minute >= 0) || (hour > 9 && hour < 15) || (hour === 15 && minute <= 30));
+
     const today = {
         open: parseFloat(chart.today_open) || 0,
         high: parseFloat(chart.today_high) || 0,
         low: parseFloat(chart.today_low) || 0,
-        close: parseFloat(chart.today_current) || 0
+        close: isMarketOpen ? parseFloat(chart.today_current) || 0 : parseFloat(chart.today_close) || parseFloat(chart.today_current) || 0
     };
+
+    // 감시 레벨 데이터 추출
+    const levels = data.levels || {};
+    const currentPrice = today.close; // 현재가 (장중: today_current, 장 종료: today_close)
 
     // 분봉 요약에서 시간 정보 추출
     const summary = data.intraday_summary || {};
@@ -2096,8 +2116,16 @@ function drawCandlestickChart(data, canvasId, containerId) {
     }
     points.push({ x: 7, price: today.close, label: '당일\n종가' });
 
-    // 가격 범위 계산
+    // 가격 범위 계산 (감시 레벨 포함)
     const allPrices = points.map(p => p.price).filter(p => p > 0);
+
+    // 감시 레벨 가격들도 범위에 포함
+    if (levels.buy_target > 0) allPrices.push(levels.buy_target);
+    if (levels.resistance_1 > 0) allPrices.push(levels.resistance_1);
+    if (levels.resistance_2 > 0) allPrices.push(levels.resistance_2);
+    if (levels.support_1 > 0) allPrices.push(levels.support_1);
+    if (levels.support_2 > 0) allPrices.push(levels.support_2);
+
     if (allPrices.length === 0) {
         return;
     }
@@ -2109,7 +2137,7 @@ function drawCandlestickChart(data, canvasId, containerId) {
 
     // 차트 영역
     const chartLeft = 80;
-    const chartRight = canvas.width - 100;  // 우측 여유 공간 확보 (최고/최저 레이블용)
+    const chartRight = canvas.width - 150;  // 우측 여유 공간 확보 (레벨 레이블용)
     const chartTop = 30;
     const chartBottom = canvas.height - 60;
     const chartWidth = chartRight - chartLeft;
@@ -2143,7 +2171,7 @@ function drawCandlestickChart(data, canvasId, containerId) {
         // 가격 레이블
         const price = maxPrice + padding - ((maxPrice + padding - minPrice - padding) / gridLines) * i;
         ctx.fillStyle = '#868e96';
-        ctx.font = '10px sans-serif';
+        ctx.font = '13px sans-serif';
         ctx.textAlign = 'right';
         ctx.fillText(Math.round(price).toLocaleString(), chartLeft - 10, y + 4);
     }
@@ -2174,7 +2202,7 @@ function drawCandlestickChart(data, canvasId, containerId) {
 
     // 최고점 레이블
     ctx.fillStyle = '#ff6b6b';
-    ctx.font = 'bold 10px sans-serif';
+    ctx.font = 'bold 13px sans-serif';
     ctx.textAlign = 'left';
     ctx.fillText(`최고 ${maxPrice.toLocaleString()}`, chartRight + 5, highY + 4);
 
@@ -2189,11 +2217,47 @@ function drawCandlestickChart(data, canvasId, containerId) {
 
     // 최저점 레이블
     ctx.fillStyle = '#339af0';
-    ctx.font = 'bold 10px sans-serif';
+    ctx.font = 'bold 13px sans-serif';
     ctx.textAlign = 'left';
     ctx.fillText(`최저 ${minPrice.toLocaleString()}`, chartRight + 5, lowY + 4);
 
     ctx.setLineDash([]);
+
+    // 감시 레벨 수평선 그리기
+    const levelConfig = [
+        { price: levels.resistance_2, label: '2차저항', color: '#c92a2a' },
+        { price: levels.resistance_1, label: '1차저항', color: '#e03131' },
+        { price: levels.buy_target, label: '매수타점', color: '#fab005' },
+        { price: levels.support_1, label: '1차지지', color: '#1971c2' },
+        { price: levels.support_2, label: '2차지지', color: '#1864ab' }
+    ];
+
+    levelConfig.forEach(level => {
+        if (level.price > 0 && currentPrice > 0) {
+            const levelY = priceToY(level.price);
+
+            // 수평선 그리기
+            ctx.strokeStyle = level.color;
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([6, 3]);
+            ctx.beginPath();
+            ctx.moveTo(chartLeft, levelY);
+            ctx.lineTo(chartRight, levelY);
+            ctx.stroke();
+
+            // 등락율 계산
+            const changeRate = ((level.price - currentPrice) / currentPrice * 100);
+            const changeRateText = changeRate >= 0 ? `+${changeRate.toFixed(1)}%` : `${changeRate.toFixed(1)}%`;
+
+            // 레이블 (레벨명 + 가격 + 등락율)
+            ctx.fillStyle = level.color;
+            ctx.font = 'bold 13px sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText(`${level.label} ${level.price.toLocaleString()} (${changeRateText})`, chartRight + 5, levelY + 4);
+
+            ctx.setLineDash([]);
+        }
+    });
 
     // 꺾은선 그래프
     ctx.strokeStyle = '#228be6';
@@ -2239,12 +2303,12 @@ function drawCandlestickChart(data, canvasId, containerId) {
 
         // 등락율 표시
         ctx.fillStyle = changeColor;
-        ctx.font = 'bold 11px sans-serif';
+        ctx.font = 'bold 14px sans-serif';
         ctx.fillText(changeRateText, x, y - 9);
 
         // X축 레이블
         ctx.fillStyle = '#495057';
-        ctx.font = '9px sans-serif';
+        ctx.font = '12px sans-serif';
         const labels = point.label.split('\n');
         labels.forEach((line, i) => {
             ctx.fillText(line, x, chartBottom + 15 + i * 10);
@@ -2260,7 +2324,7 @@ function drawCandlestickChart(data, canvasId, containerId) {
     // 시간 순서 표시
     if (summary.high_time && summary.low_time) {
         ctx.fillStyle = '#868e96';
-        ctx.font = '9px sans-serif';
+        ctx.font = '12px sans-serif';
         ctx.textAlign = 'right';
         const timeText = todayHighFirst ? '당일: 고가 → 저가' : '당일: 저가 → 고가';
         ctx.fillText(timeText, canvas.width - 10, 20);
@@ -3556,7 +3620,7 @@ function draw120MinChart(data) {
         // 가격 레이블
         const price = maxPrice + padding - ((maxPrice + padding - minPrice - padding) / gridLines) * i;
         ctx.fillStyle = '#868e96';
-        ctx.font = '10px sans-serif';
+        ctx.font = '13px sans-serif';
         ctx.textAlign = 'right';
         ctx.fillText(Math.round(price).toLocaleString(), chartLeft - 10, y + 4);
     }
@@ -3620,7 +3684,7 @@ function draw120MinChart(data) {
 
     // X축 시간 레이블 (일부만 표시)
     ctx.fillStyle = '#495057';
-    ctx.font = '9px sans-serif';
+    ctx.font = '12px sans-serif';
     ctx.textAlign = 'center';
 
     const labelStep = Math.max(1, Math.floor(candles.length / 5));
@@ -3769,7 +3833,7 @@ async function deleteSectionConfirm(sectionId) {
 }
 
 // 종목 편집 모드
-function editWatcherRow(code) {
+async function editWatcherRow(code) {
     const row = document.querySelector(`.mode2-watcher-row[data-code="${code}"]`);
     if (!row) return;
 
@@ -3780,35 +3844,10 @@ function editWatcherRow(code) {
         saveWatcherRow(code);
     } else {
         // 편집 모드로 전환
-        row.setAttribute('data-edit-mode', 'true');
-        row.classList.add('editing');
+        enterEditMode(row, code);
 
-        // editable 필드를 input으로 변경
-        row.querySelectorAll('.editable').forEach(cell => {
-            const field = cell.getAttribute('data-field');
-            const value = cell.textContent.replace(/,/g, '').replace(/원/g, '').replace(/주/g, '').trim();
-
-            if (field === 'note') {
-                const textarea = document.createElement('textarea');
-                textarea.value = cell.getAttribute('title') || '';
-                textarea.maxLength = 500;
-                cell.innerHTML = '';
-                cell.appendChild(textarea);
-            } else {
-                const input = document.createElement('input');
-                input.type = 'number';
-                input.value = value;
-                cell.innerHTML = '';
-                cell.appendChild(input);
-            }
-        });
-
-        // 액션 버튼 변경
-        const actions = row.querySelector('.watcher-actions');
-        actions.innerHTML = `
-            <button class="watcher-action-btn save" onclick="saveWatcherRow('${code}')">✓</button>
-            <button class="watcher-action-btn cancel" onclick="cancelWatcherEdit('${code}')">✗</button>
-        `;
+        // 차트 조회 및 표시
+        await loadWatcherChart(code);
     }
 }
 
@@ -3817,39 +3856,108 @@ function cancelWatcherEdit(code) {
     loadMode2List(); // 다시 로드하여 원래 상태로
 }
 
+// 종목 차트 조회 및 표시
+async function loadWatcherChart(code) {
+    try {
+        // 종목 데이터 조회
+        const watcherResponse = await fetch(`/api/mode2/watchers/${code}`, {
+            credentials: 'same-origin'
+        });
+        const watcherResult = await watcherResponse.json();
+
+        if (!watcherResult.success) {
+            console.error('종목 데이터 조회 실패');
+            return;
+        }
+
+        const watcher = watcherResult.data;
+
+        // 차트 데이터 조회
+        const chartResponse = await fetch('/api/test/daily-chart', {
+            credentials: 'same-origin',
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ symbol: code })
+        });
+
+        const chartResult = await chartResponse.json();
+
+        if (chartResult.success) {
+            const chartContainer = document.getElementById('mode2ChartContainer');
+            chartContainer.style.display = 'block';
+
+            // 차트 데이터에 감시 레벨 추가
+            const chartDataWithLevels = {
+                ...chartResult.data,
+                levels: {
+                    buy_target: watcher.buy_target_price || 0,
+                    resistance_1: watcher.resistance_1_price || 0,
+                    resistance_2: watcher.resistance_2_price || 0,
+                    support_1: watcher.support_1_price || 0,
+                    support_2: watcher.support_2_price || 0
+                }
+            };
+
+            // 차트 그리기
+            window.lastMode2ChartData = chartDataWithLevels;
+            drawMode2CandlestickChart(chartDataWithLevels);
+
+            // 차트 위치로 스크롤
+            chartContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    } catch (error) {
+        console.error('차트 조회 실패:', error);
+    }
+}
+
 // 종목 편집 저장
 async function saveWatcherRow(code) {
     const row = document.querySelector(`.mode2-watcher-row[data-code="${code}"]`);
     if (!row) return;
 
     const data = {};
+    let hasChanges = false;
+
     row.querySelectorAll('.editable').forEach(cell => {
         const field = cell.getAttribute('data-field');
         const input = cell.querySelector('input, textarea');
 
         if (input) {
+            const originalValue = input.getAttribute('data-original-value');
+            const currentValue = input.value;
+
+            // 변경사항 체크
+            if (originalValue !== currentValue) {
+                hasChanges = true;
+            }
+
             if (field === 'note') {
-                data[field] = input.value;
+                data[field] = currentValue;
             } else {
-                data[field] = parseInt(input.value) || 0;
+                data[field] = parseInt(currentValue) || 0;
             }
         }
     });
 
     try {
-        const response = await fetch(`/api/mode2/watchers/${code}`, {
-            credentials: 'same-origin',
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data)
-        });
+        if (hasChanges) {
+            const response = await fetch(`/api/mode2/watchers/${code}`, {
+                credentials: 'same-origin',
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
 
-        const result = await response.json();
-        if (result.success) {
-            showToast('✓ 저장 완료', 'success');
-            loadMode2List();
+            const result = await response.json();
+            if (result.success) {
+                showToast('✓ 저장 완료', 'success');
+                loadMode2List();
+            } else {
+                showToast(result.error, 'error');
+            }
         } else {
-            showToast(result.error, 'error');
+            showToast('변경사항이 없습니다', 'info');
+            loadMode2List();
         }
     } catch (error) {
         showToast('요청 실패: ' + error.message, 'error');
@@ -3875,6 +3983,420 @@ async function updateWatcherField(code, field, value) {
         }
     } catch (error) {
         console.error('업데이트 실패:', error);
+    }
+}
+
+// ========== 셀 더블클릭 인라인 편집 ==========
+
+function enableCellEdit(cell, code) {
+    // 이미 편집 중이면 무시
+    if (cell.querySelector('input, textarea')) return;
+
+    const field = cell.getAttribute('data-field');
+    const isNote = field === 'note';
+    const originalValue = isNote ? cell.getAttribute('title') : cell.textContent.replace(/,/g, '').replace(/원/g, '').trim();
+
+    // input 또는 textarea 생성
+    const input = document.createElement(isNote ? 'textarea' : 'input');
+
+    if (isNote) {
+        input.value = originalValue || '';
+        input.maxLength = 500;
+        input.style.width = '100%';
+        input.style.minHeight = '40px';
+        input.style.resize = 'vertical';
+    } else {
+        input.type = 'number';
+        input.value = originalValue;
+        input.style.width = '100%';
+    }
+
+    input.style.padding = '4px';
+    input.style.border = '2px solid #228be6';
+    input.style.borderRadius = '4px';
+    input.style.fontSize = '13px';
+
+    // 저장 함수
+    const saveEdit = async () => {
+        const newValue = input.value.trim();
+
+        // 변경사항 체크
+        if (newValue === originalValue) {
+            cell.innerHTML = isNote ? truncateText(originalValue, 20) : formatNumber(originalValue);
+            if (isNote) cell.setAttribute('title', originalValue);
+            return;
+        }
+
+        // API 호출
+        try {
+            const data = {};
+            data[field] = isNote ? newValue : (parseInt(newValue) || 0);
+
+            const response = await fetch(`/api/mode2/watchers/${code}`, {
+                credentials: 'same-origin',
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+
+            const result = await response.json();
+            if (result.success) {
+                showToast('✓ 저장 완료', 'success');
+                loadMode2List();
+            } else {
+                showToast(result.error || '저장 실패', 'error');
+                cell.innerHTML = isNote ? truncateText(originalValue, 20) : formatNumber(originalValue);
+                if (isNote) cell.setAttribute('title', originalValue);
+            }
+        } catch (error) {
+            showToast('저장 실패: ' + error.message, 'error');
+            cell.innerHTML = isNote ? truncateText(originalValue, 20) : formatNumber(originalValue);
+            if (isNote) cell.setAttribute('title', originalValue);
+        }
+    };
+
+    // 취소 함수
+    const cancelEdit = () => {
+        cell.innerHTML = isNote ? truncateText(originalValue, 20) : formatNumber(originalValue);
+        if (isNote) cell.setAttribute('title', originalValue);
+    };
+
+    // 이벤트 리스너
+    input.addEventListener('blur', saveEdit);
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !isNote) {
+            e.preventDefault();
+            input.blur(); // blur 이벤트로 저장
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            cancelEdit();
+        }
+    });
+
+    // DOM 교체 및 포커스
+    cell.innerHTML = '';
+    cell.appendChild(input);
+    input.focus();
+    input.select();
+}
+
+// ========== 섹션별 일괄 편집 ==========
+
+function toggleSectionEditMode(sectionId) {
+    const section = document.querySelector(`.mode2-section[data-section-id="${sectionId}"]`);
+    if (!section) return;
+
+    const sectionBody = section.querySelector('.mode2-section-body');
+    const rows = sectionBody.querySelectorAll('.mode2-watcher-row');
+
+    // 첫 번째 row의 edit 상태 확인
+    if (rows.length === 0) return;
+    const firstRow = rows[0];
+    const isEditMode = firstRow.getAttribute('data-edit-mode') === 'true';
+
+    if (isEditMode) {
+        // 저장 모드: 모든 row 저장
+        saveSectionWatchers(sectionId, rows);
+    } else {
+        // 편집 모드: 모든 row를 편집 모드로 전환
+        rows.forEach(row => {
+            const code = row.getAttribute('data-code');
+            enterEditMode(row, code);
+        });
+
+        // 섹션 버튼 아이콘 변경
+        const editBtn = section.querySelector('.section-actions .section-btn[onclick*="toggleSectionEditMode"]');
+        if (editBtn) {
+            editBtn.textContent = '💾';
+            editBtn.title = '섹션 일괄 저장';
+        }
+    }
+}
+
+function enterEditMode(row, code) {
+    row.setAttribute('data-edit-mode', 'true');
+    row.classList.add('editing');
+
+    // editable 필드를 input으로 변경
+    row.querySelectorAll('.editable').forEach(cell => {
+        const field = cell.getAttribute('data-field');
+        const value = cell.textContent.replace(/,/g, '').replace(/원/g, '').replace(/주/g, '').trim();
+
+        if (field === 'note') {
+            const textarea = document.createElement('textarea');
+            textarea.value = cell.getAttribute('title') || '';
+            textarea.maxLength = 500;
+            textarea.setAttribute('data-original-value', textarea.value); // 원본 값 저장
+            cell.innerHTML = '';
+            cell.appendChild(textarea);
+        } else {
+            const input = document.createElement('input');
+            input.type = 'number';
+            input.value = value;
+            input.setAttribute('data-original-value', value); // 원본 값 저장
+            cell.innerHTML = '';
+            cell.appendChild(input);
+        }
+    });
+
+    // 액션 버튼 변경
+    const actions = row.querySelector('.watcher-actions');
+    actions.innerHTML = `
+        <button class="watcher-action-btn save" onclick="saveWatcherRow('${code}')">✓</button>
+        <button class="watcher-action-btn cancel" onclick="cancelWatcherEdit('${code}')">✗</button>
+    `;
+}
+
+async function saveSectionWatchers(sectionId, rows) {
+    const savePromises = [];
+
+    rows.forEach(row => {
+        const code = row.getAttribute('data-code');
+        const data = {};
+        let hasChanges = false;
+
+        row.querySelectorAll('.editable').forEach(cell => {
+            const field = cell.getAttribute('data-field');
+            const input = cell.querySelector('input, textarea');
+
+            if (input) {
+                const originalValue = input.getAttribute('data-original-value');
+                const currentValue = input.value;
+
+                // 변경사항 체크
+                if (originalValue !== currentValue) {
+                    hasChanges = true;
+                }
+
+                if (field === 'note') {
+                    data[field] = currentValue;
+                } else {
+                    data[field] = parseInt(currentValue) || 0;
+                }
+            }
+        });
+
+        // 변경사항이 있는 경우에만 저장
+        if (hasChanges) {
+            const promise = fetch(`/api/mode2/watchers/${code}`, {
+                credentials: 'same-origin',
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            savePromises.push(promise);
+        }
+    });
+
+    try {
+        if (savePromises.length > 0) {
+            await Promise.all(savePromises);
+            showToast(`✓ ${savePromises.length}개 종목 저장 완료`, 'success');
+        } else {
+            showToast('변경사항이 없습니다', 'info');
+        }
+        loadMode2List();
+    } catch (error) {
+        showToast('저장 실패: ' + error.message, 'error');
+    }
+}
+
+// ========== 벌크 등록 ==========
+
+function openBulkAddModal() {
+    document.getElementById('bulkAddModal').style.display = 'block';
+    document.getElementById('bulkAddInput').value = '';
+    document.getElementById('bulkAddResult').style.display = 'none';
+}
+
+function closeBulkAddModal() {
+    document.getElementById('bulkAddModal').style.display = 'none';
+}
+
+async function executeBulkAdd() {
+    const input = document.getElementById('bulkAddInput').value.trim();
+    const resultDiv = document.getElementById('bulkAddResult');
+
+    if (!input) {
+        alert('입력 내용이 없습니다.');
+        return;
+    }
+
+    // 줄 단위로 분리
+    const lines = input.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+
+    if (lines.length < 2) {
+        alert('최소 헤더 1줄 + 데이터 1줄 이상 입력하세요.');
+        return;
+    }
+
+    // 첫 줄은 헤더 (무시)
+    const dataLines = lines.slice(1);
+
+    resultDiv.style.display = 'block';
+    resultDiv.innerHTML = '<p style="color: #228be6;">⏳ 등록 중...</p>';
+
+    const results = {
+        success: [],
+        skipped: [],
+        failed: []
+    };
+
+    // 기존 종목 코드 조회
+    const existingCodesResponse = await fetch('/api/mode2/watchers', { credentials: 'same-origin' });
+    const existingCodesResult = await existingCodesResponse.json();
+    const existingCodes = new Set(existingCodesResult.data.map(w => w.code));
+
+    // 각 줄 처리
+    for (const line of dataLines) {
+        const parts = line.split(',').map(p => p.trim());
+
+        if (parts.length < 2) {
+            results.failed.push({ line, reason: '최소 2개 컬럼 필요 (종목코드, 매수타점)' });
+            continue;
+        }
+
+        const [code, buy_target, support_1, resistance_1, support_2, resistance_2, sectionName] = parts;
+
+        // 종목코드 검증
+        if (!code) {
+            results.failed.push({ line, reason: '종목코드 누락' });
+            continue;
+        }
+
+        // 이미 등록된 종목이면 스킵
+        if (existingCodes.has(code)) {
+            results.skipped.push(code);
+            continue;
+        }
+
+        // 매수타점 검증
+        const buyTargetPrice = parseInt(buy_target) || 0;
+        if (buyTargetPrice <= 0) {
+            results.failed.push({ line, reason: '매수타점 필수 (양수)' });
+            continue;
+        }
+
+        // 종목명 조회
+        let stockName = '';
+        try {
+            const nameResponse = await fetch('/api/test/stock-info/' + code, { credentials: 'same-origin' });
+            const nameResult = await nameResponse.json();
+            if (nameResult.success) {
+                stockName = nameResult.data.name || code;
+            } else {
+                stockName = code;
+            }
+        } catch (e) {
+            stockName = code;
+        }
+
+        // 섹션 처리
+        let targetSectionId = 'uncategorized';
+        if (sectionName && sectionName !== '') {
+            // 섹션 존재 여부 확인
+            const sectionsResponse = await fetch('/api/mode2/sections', { credentials: 'same-origin' });
+            const sectionsResult = await sectionsResponse.json();
+
+            if (sectionsResult.success) {
+                const existingSection = sectionsResult.data.find(s => s.name === sectionName);
+                if (existingSection) {
+                    targetSectionId = existingSection.id;
+                } else {
+                    // 섹션 생성
+                    const createSectionResponse = await fetch('/api/mode2/sections', {
+                        credentials: 'same-origin',
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name: sectionName })
+                    });
+                    const createSectionResult = await createSectionResponse.json();
+                    if (createSectionResult.success) {
+                        targetSectionId = createSectionResult.data.id;
+                    }
+                }
+            }
+        }
+
+        // Mode2 종목 등록
+        const data = {
+            code: code,
+            name: stockName,
+            buy_target_price: buyTargetPrice,
+            budget: 300000, // 기본값
+            polling_interval: 180, // 기본값 (3분)
+            notify_only: true, // 기본값 (알림 모드)
+            resistance_1_price: parseInt(resistance_1) || 0,
+            resistance_1_profit_pct: 0,
+            resistance_2_price: parseInt(resistance_2) || 0,
+            resistance_2_profit_pct: 0,
+            support_1_price: parseInt(support_1) || 0,
+            support_1_loss_pct: 0,
+            support_2_price: parseInt(support_2) || 0,
+            support_2_loss_pct: 0,
+            section: targetSectionId
+        };
+
+        try {
+            const response = await fetch('/api/mode2/watchers', {
+                credentials: 'same-origin',
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                results.success.push(`${stockName} (${code})`);
+            } else {
+                results.failed.push({ line, reason: result.error || '등록 실패' });
+            }
+        } catch (error) {
+            results.failed.push({ line, reason: error.message });
+        }
+    }
+
+    // 결과 표시
+    let resultHtml = '<div style="background: #f8f9fa; padding: 12px; border-radius: 6px;">';
+    resultHtml += `<p style="font-weight: 600; margin-bottom: 8px;">📊 등록 결과</p>`;
+
+    if (results.success.length > 0) {
+        resultHtml += `<p style="color: #2f9e44; margin: 4px 0;">✓ 성공: ${results.success.length}개</p>`;
+        resultHtml += `<ul style="font-size: 12px; color: #495057; margin: 4px 0 8px 20px;">`;
+        results.success.forEach(name => {
+            resultHtml += `<li>${name}</li>`;
+        });
+        resultHtml += `</ul>`;
+    }
+
+    if (results.skipped.length > 0) {
+        resultHtml += `<p style="color: #f59f00; margin: 4px 0;">⊘ 스킵 (이미 등록됨): ${results.skipped.length}개</p>`;
+        resultHtml += `<ul style="font-size: 12px; color: #495057; margin: 4px 0 8px 20px;">`;
+        results.skipped.forEach(code => {
+            resultHtml += `<li>${code}</li>`;
+        });
+        resultHtml += `</ul>`;
+    }
+
+    if (results.failed.length > 0) {
+        resultHtml += `<p style="color: #c92a2a; margin: 4px 0;">✗ 실패: ${results.failed.length}개</p>`;
+        resultHtml += `<ul style="font-size: 12px; color: #495057; margin: 4px 0 8px 20px;">`;
+        results.failed.forEach(item => {
+            resultHtml += `<li>${item.line} → ${item.reason}</li>`;
+        });
+        resultHtml += `</ul>`;
+    }
+
+    resultHtml += '</div>';
+    resultDiv.innerHTML = resultHtml;
+
+    // 리스트 리로드
+    if (results.success.length > 0) {
+        setTimeout(() => {
+            loadMode2List();
+            showToast(`✓ ${results.success.length}개 종목 등록 완료`, 'success');
+        }, 1000);
     }
 }
 
@@ -4080,6 +4602,100 @@ function handleWatcherCheckboxChange() {
         updateTargetSectionSelect();
     } else {
         bulkPanel.style.display = 'none';
+    }
+
+    // 섹션별 전체 선택 체크박스 상태 동기화
+    syncSectionSelectAllCheckboxes();
+
+    // 섹션별 선택 삭제 버튼 표시/숨김
+    updateSectionDeleteButtons();
+}
+
+// 섹션별 전체 선택 체크박스 상태 동기화
+function syncSectionSelectAllCheckboxes() {
+    const sections = document.querySelectorAll('.mode2-section');
+
+    sections.forEach(section => {
+        const sectionId = section.getAttribute('data-section-id');
+        const selectAllCheckbox = section.querySelector('.section-select-all');
+        const watcherCheckboxes = section.querySelectorAll('.watcher-checkbox');
+        const checkedCheckboxes = section.querySelectorAll('.watcher-checkbox:checked');
+
+        if (selectAllCheckbox && watcherCheckboxes.length > 0) {
+            // 모두 선택되었으면 전체 선택 체크박스도 체크
+            selectAllCheckbox.checked = (watcherCheckboxes.length === checkedCheckboxes.length);
+            // 일부만 선택되었으면 indeterminate 상태로
+            selectAllCheckbox.indeterminate = (checkedCheckboxes.length > 0 && checkedCheckboxes.length < watcherCheckboxes.length);
+        }
+    });
+}
+
+// 섹션별 전체 선택/해제
+function toggleSectionSelectAll(sectionId) {
+    const section = document.querySelector(`.mode2-section[data-section-id="${sectionId}"]`);
+    if (!section) return;
+
+    const selectAllCheckbox = section.querySelector('.section-select-all');
+    const watcherCheckboxes = section.querySelectorAll('.watcher-checkbox');
+
+    watcherCheckboxes.forEach(cb => {
+        cb.checked = selectAllCheckbox.checked;
+    });
+
+    handleWatcherCheckboxChange();
+}
+
+// 섹션별 선택 삭제 버튼 표시 업데이트
+function updateSectionDeleteButtons() {
+    const sections = document.querySelectorAll('.mode2-section');
+
+    sections.forEach(section => {
+        const sectionId = section.getAttribute('data-section-id');
+        const checkboxes = section.querySelectorAll('.watcher-checkbox:checked');
+        const deleteBtn = section.querySelector('.section-delete-selected');
+
+        if (deleteBtn) {
+            if (checkboxes.length > 0) {
+                deleteBtn.style.display = 'inline-block';
+                deleteBtn.textContent = `🗑️ 선택 삭제 (${checkboxes.length})`;
+            } else {
+                deleteBtn.style.display = 'none';
+            }
+        }
+    });
+}
+
+// 섹션 내 선택 항목 일괄 삭제
+async function deleteSectionSelected(sectionId) {
+    const section = document.querySelector(`.mode2-section[data-section-id="${sectionId}"]`);
+    if (!section) return;
+
+    const checkboxes = section.querySelectorAll('.watcher-checkbox:checked');
+    const codes = Array.from(checkboxes).map(cb => cb.value);
+
+    if (codes.length === 0) {
+        showToast('선택된 종목이 없습니다', 'error');
+        return;
+    }
+
+    if (!confirm(`선택한 ${codes.length}개 종목을 삭제하시겠습니까?`)) {
+        return;
+    }
+
+    try {
+        const deletePromises = codes.map(code =>
+            fetch(`/api/mode2/watchers/${code}`, {
+                credentials: 'same-origin',
+                method: 'DELETE'
+            })
+        );
+
+        await Promise.all(deletePromises);
+
+        showToast(`✓ ${codes.length}개 종목 삭제 완료`, 'success');
+        loadMode2List();
+    } catch (error) {
+        showToast('삭제 실패: ' + error.message, 'error');
     }
 }
 

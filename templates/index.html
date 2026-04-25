@@ -302,33 +302,26 @@
                             <input type="text" id="mode2Code" name="code" placeholder="종목코드 (예: 003280)" required>
                             <button type="button" id="mode2LookupBtn" class="btn btn-secondary" style="padding: 8px 16px;">🔍 조회</button>
                             <input type="text" id="mode2Name" name="name" placeholder="종목명 (자동 조회)" readonly style="width: 150px; background: #f1f3f5;">
-                            <input type="number" id="mode2Budget" name="budget" placeholder="Budget (원)" value="1000000" min="0" step="10000" style="width: 150px;">
+                            <input type="number" id="mode2Budget" name="budget" placeholder="Budget (원)" value="300000" min="0" step="10000" style="width: 150px;">
                             <select id="mode2PollingInterval" name="polling_interval" style="width: 120px;">
                                 <option value="10">10초</option>
-                                <option value="30" selected>30초</option>
+                                <option value="30">30초</option>
                                 <option value="60">1분</option>
-                                <option value="180">3분</option>
+                                <option value="180" selected>3분</option>
                                 <option value="300">5분</option>
                                 <option value="600">10분</option>
                             </select>
                             <label style="display: flex; align-items: center; gap: 5px; margin-left: 10px;">
-                                <input type="checkbox" id="mode2NotifyOnly" name="notify_only" style="width: 18px; height: 18px;">
+                                <input type="checkbox" id="mode2NotifyOnly" name="notify_only" checked style="width: 18px; height: 18px;">
                                 <span style="white-space: nowrap;">🔔 알림만</span>
                             </label>
                             <button type="submit" class="btn btn-primary">💾 저장</button>
+                            <button type="button" class="btn btn-secondary" onclick="openBulkAddModal()" style="padding: 8px 16px;">📋 벌크 등록</button>
                         </div>
 
                         <div class="chart-input-grid">
                             <div class="chart-area">
                                 <img src="/static/img/mode2_chart.png" alt="Mode2 차트" class="strategy-chart">
-
-                                <!-- 일봉 차트 표시 영역 -->
-                                <div id="mode2ChartContainer" style="display: none; width: 100%; max-width: 900px; margin-top: 0; padding: 16px; background: #ffffff; border-radius: 8px; border: 2px solid #dee2e6; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
-                                    <div style="font-size: 13px; font-weight: 600; color: #495057; margin-bottom: 12px; text-align: center;">📊 일봉 차트 (참고)</div>
-                                    <div style="overflow-x: auto; -webkit-overflow-scrolling: touch;">
-                                        <canvas id="mode2CandlestickChart" width="800" height="300"></canvas>
-                                    </div>
-                                </div>
                             </div>
 
                             <div class="input-levels">
@@ -370,6 +363,14 @@
                                         <input type="number" step="0.1" name="support_2_loss_pct" placeholder="손절 %">
                                     </div>
                                 </div>
+                            </div>
+                        </div>
+
+                        <!-- 일봉 차트 표시 영역 (폼 밖으로 이동) -->
+                        <div id="mode2ChartContainer" style="display: none; width: 100%; margin-top: 20px; padding: 16px; background: #ffffff; border-radius: 8px; border: 2px solid #dee2e6; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
+                            <div style="font-size: 13px; font-weight: 600; color: #495057; margin-bottom: 12px; text-align: center;">📊 일봉 차트 (참고)</div>
+                            <div style="overflow-x: auto; -webkit-overflow-scrolling: touch;">
+                                <canvas id="mode2CandlestickChart" width="1200" height="400"></canvas>
                             </div>
                         </div>
                     </form>
@@ -873,6 +874,43 @@
             <div style="display: flex; gap: 8px; justify-content: flex-end;">
                 <button onclick="closeSellModal()" class="btn btn-secondary">취소</button>
                 <button onclick="executeSellOrder()" class="btn btn-primary" style="background: #c92a2a;">매도 실행</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 벌크 등록 모달 -->
+    <div id="bulkAddModal" class="modal">
+        <div class="modal-content" style="max-width: 800px;">
+            <div class="modal-header">
+                <h3>📋 Mode2 벌크 등록</h3>
+                <span class="close" onclick="closeBulkAddModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div style="margin-bottom: 16px;">
+                    <p style="margin: 0 0 8px 0; font-size: 14px; color: #495057;">
+                        <strong>입력 형식:</strong> 첫 줄에 헤더, 그 다음 줄부터 종목 정보 입력 (쉼표로 구분)
+                    </p>
+                    <div style="background: #f8f9fa; padding: 12px; border-radius: 6px; font-family: monospace; font-size: 12px; color: #495057; margin-bottom: 12px;">
+                        종목코드,매수타점,1차지지,1차저항,2차지지,2차저항,섹션명<br>
+                        488280,20000,19500,20100,19000,22000,오늘 보자<br>
+                        412350,7500,7000,8000,,9000,<br>
+                        242040,5000,4800,5200,4500,5500,미분류
+                    </div>
+                    <ul style="margin: 0; padding-left: 20px; font-size: 13px; color: #868e96;">
+                        <li>값이 없으면 비워두기 (예: ,,)</li>
+                        <li>섹션명 없으면 "미분류" 섹션에 등록</li>
+                        <li>이미 등록된 종목은 자동 스킵</li>
+                        <li>기본값: Budget 300,000원, Polling 3분, 알림 모드</li>
+                    </ul>
+                </div>
+                <textarea id="bulkAddInput" placeholder="종목코드,매수타점,1차지지,1차저항,2차지지,2차저항,섹션명
+488280,20000,19500,20100,19000,22000,오늘 보자
+412350,7500,7000,8000,,9000," style="width: 100%; min-height: 300px; padding: 12px; border: 1px solid #ced4da; border-radius: 6px; font-family: monospace; font-size: 13px; resize: vertical;"></textarea>
+                <div id="bulkAddResult" style="margin-top: 16px; display: none;"></div>
+            </div>
+            <div class="modal-footer">
+                <button onclick="closeBulkAddModal()" class="btn btn-secondary">취소</button>
+                <button onclick="executeBulkAdd()" class="btn btn-primary">📥 일괄 등록</button>
             </div>
         </div>
     </div>

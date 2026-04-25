@@ -207,15 +207,31 @@ class Mode2Manager:
 
         watcher = self.watchers[code]
 
+        # 변경사항 감지를 위한 비교 필드
+        tracked_fields = [
+            'buy_target_price', 'budget', 'resistance_1_price', 'resistance_1_profit_pct',
+            'resistance_2_price', 'resistance_2_profit_pct', 'support_1_price', 'support_1_loss_pct',
+            'support_2_price', 'support_2_loss_pct', 'polling_interval', 'notify_only', 'note'
+        ]
+
+        has_changes = False
+        for field in tracked_fields:
+            if field in data:
+                old_value = watcher.get(field)
+                new_value = data[field]
+                # note 길이 제한 적용
+                if field == 'note':
+                    new_value = new_value[:500]
+                    data[field] = new_value
+                if old_value != new_value:
+                    has_changes = True
+                    break
+
         # 매수 타점 또는 예산 변경 시 수량 재계산
         if "buy_target_price" in data or "budget" in data:
             buy_price = data.get("buy_target_price", watcher["buy_target_price"])
             budget = data.get("budget", watcher["budget"])
             data["quantity"] = budget // buy_price if buy_price > 0 else 0
-
-        # note 길이 제한
-        if "note" in data:
-            data["note"] = data["note"][:500]
 
         # notify_only 변경 시 polling_interval 기본값 자동 변경
         if "notify_only" in data and "polling_interval" not in data:
@@ -225,18 +241,21 @@ class Mode2Manager:
         watcher.update(data)
         watcher["updated_at"] = datetime.now().isoformat()
 
-        # record_id 갱신 (날짜가 바뀐 경우에만)
-        today = datetime.now().strftime('%y%m%d')
-        current_record_id = watcher.get("record_id", "")
-        current_date = current_record_id.split('-')[0] if '-' in current_record_id else ""
+        # record_id 갱신 (실제 변경사항이 있고 날짜가 바뀐 경우에만)
+        if has_changes:
+            today = datetime.now().strftime('%y%m%d')
+            current_record_id = watcher.get("record_id", "")
+            current_date = current_record_id.split('-')[0] if '-' in current_record_id else ""
 
-        if current_date != today:
-            # 날짜가 달라진 경우에만 record_id 업데이트
-            watcher["record_id"] = f"{today}-{code}"
-            logger.info(f"Mode2 업데이트 (record_id 갱신): {code} ({current_date} → {today})")
+            if current_date != today:
+                # 날짜가 달라진 경우에만 record_id 업데이트
+                watcher["record_id"] = f"{today}-{code}"
+                logger.info(f"Mode2 업데이트 (record_id 갱신): {code} ({current_date} → {today})")
+            else:
+                # 같은 날 수정은 record_id 유지
+                logger.info(f"Mode2 업데이트: {code} (record_id 유지: {watcher['record_id']})")
         else:
-            # 같은 날 수정은 record_id 유지
-            logger.info(f"Mode2 업데이트: {code} (record_id 유지: {watcher['record_id']})")
+            logger.info(f"Mode2 업데이트: {code} (변경사항 없음, record_id 유지)")
 
         self._save_watchers()
         return watcher
