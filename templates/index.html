@@ -378,7 +378,17 @@
                 <section class="list-section">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
                         <h3 style="margin: 0;">📋 감시 리스트</h3>
-                        <button id="addSectionBtn" class="btn btn-secondary">+ 섹션 추가</button>
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <div id="bulkActionsPanel" style="display: none; gap: 8px; align-items: center;">
+                                <span style="font-size: 13px; color: #495057;">선택된 <strong id="selectedCount">0</strong>개</span>
+                                <select id="targetSectionSelect" style="padding: 6px 10px; border: 1px solid #dee2e6; border-radius: 4px;">
+                                    <option value="">이동할 섹션 선택</option>
+                                </select>
+                                <button id="moveBulkBtn" class="btn btn-primary" style="padding: 6px 12px;">이동</button>
+                                <button id="cancelBulkBtn" class="btn btn-secondary" style="padding: 6px 12px;">취소</button>
+                            </div>
+                            <button id="addSectionBtn" class="btn btn-secondary">+ 섹션 추가</button>
+                        </div>
                     </div>
 
                     <div id="mode2SectionsContainer">

@@ -370,9 +370,11 @@ function renderMode2SectionList(sections, allWatchers) {
         const collapsed = section.collapsed || false;
 
         return `
-            <div class="mode2-section" data-section-id="${section.id}">
+            <div class="mode2-section" data-section-id="${section.id}" data-section-order="${section.order}"
+                 draggable="true" ondragstart="handleSectionDragStart(event)" ondragend="handleSectionDragEnd(event)"
+                 ondragover="handleSectionDragOver(event)" ondrop="handleSectionDrop(event)">
                 <div class="mode2-section-header ${collapsed ? 'collapsed' : ''}" onclick="toggleSection('${section.id}')">
-                    <span class="section-drag-handle" title="드래그하여 섹션 이동">☰</span>
+                    <span class="section-drag-handle" title="드래그하여 섹션 이동" style="cursor: move;">☰</span>
                     <span class="section-toggle ${collapsed ? 'collapsed' : ''}">▼</span>
                     <span class="section-name" data-section-id="${section.id}" ondblclick="editSectionName('${section.id}')">${section.name}</span>
                     <span style="color: #adb5bd; font-size: 13px;">(${watchers.length})</span>
@@ -396,6 +398,7 @@ function renderMode2SectionWatchers(sectionId, watchers) {
     // 헤더
     let html = `
         <div class="mode2-header-row">
+            <div>✓</div>
             <div>🔼⬇️</div>
             <div>레코드번호</div>
             <div>코드</div>
@@ -429,8 +432,13 @@ function renderMode2WatcherRow(w, idx) {
     const editMode = false; // 초기값
 
     return `
-        <div class="mode2-watcher-row" data-code="${w.code}" data-edit-mode="false">
-            <div class="watcher-drag-handle">☰</div>
+        <div class="mode2-watcher-row" data-code="${w.code}" data-section="${w.section}" data-edit-mode="false"
+             draggable="true" ondragstart="handleWatcherDragStart(event)" ondragend="handleWatcherDragEnd(event)"
+             ondragover="handleWatcherDragOver(event)" ondrop="handleWatcherDrop(event)">
+            <div class="watcher-cell">
+                <input type="checkbox" class="watcher-checkbox" value="${w.code}" onchange="handleWatcherCheckboxChange()">
+            </div>
+            <div class="watcher-drag-handle" style="cursor: move;">☰</div>
             <div class="watcher-cell">${w.record_id || '-'}</div>
             <div class="watcher-cell"><strong>${w.code}</strong></div>
             <div class="watcher-cell">${w.name || '-'}</div>
@@ -3639,6 +3647,10 @@ function draw120MinChart(data) {
 
 // ========== Mode2 섹션 관리 ==========
 
+// 드래그앤드롭 상태 관리
+let draggedWatcher = null;
+let draggedSection = null;
+
 // 섹션 추가 버튼 이벤트
 document.getElementById('addSectionBtn')?.addEventListener('click', async () => {
     const name = prompt('섹션명을 입력하세요:');
@@ -3865,3 +3877,265 @@ async function updateWatcherField(code, field, value) {
         console.error('업데이트 실패:', error);
     }
 }
+
+// ========== 종목 드래그앤드롭 ==========
+
+function handleWatcherDragStart(event) {
+    const row = event.currentTarget;
+    draggedWatcher = {
+        code: row.getAttribute('data-code'),
+        section: row.getAttribute('data-section')
+    };
+    row.style.opacity = '0.4';
+    event.dataTransfer.effectAllowed = 'move';
+}
+
+function handleWatcherDragEnd(event) {
+    event.currentTarget.style.opacity = '1';
+    draggedWatcher = null;
+}
+
+function handleWatcherDragOver(event) {
+    if (!draggedWatcher) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+}
+
+async function handleWatcherDrop(event) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (!draggedWatcher) return;
+
+    const targetRow = event.currentTarget;
+    const targetCode = targetRow.getAttribute('data-code');
+    const targetSection = targetRow.getAttribute('data-section');
+
+    // 같은 종목이면 무시
+    if (draggedWatcher.code === targetCode) return;
+
+    // 섹션이 다르면 섹션 이동
+    if (draggedWatcher.section !== targetSection) {
+        await moveWatcherToSection(draggedWatcher.code, targetSection);
+        return;
+    }
+
+    // 같은 섹션 내 순서 변경
+    await reorderWatchersInSection(targetSection, draggedWatcher.code, targetCode);
+}
+
+async function reorderWatchersInSection(sectionId, draggedCode, targetCode) {
+    try {
+        // 현재 섹션의 모든 종목 가져오기
+        const response = await fetch(`/api/mode2/sections/${sectionId}/watchers`, {
+            credentials: 'same-origin'
+        });
+        const result = await response.json();
+
+        if (!result.success) return;
+
+        const watchers = result.data;
+        const draggedIdx = watchers.findIndex(w => w.code === draggedCode);
+        const targetIdx = watchers.findIndex(w => w.code === targetCode);
+
+        if (draggedIdx === -1 || targetIdx === -1) return;
+
+        // 순서 재정렬
+        const [draggedItem] = watchers.splice(draggedIdx, 1);
+        watchers.splice(targetIdx, 0, draggedItem);
+
+        // display_order 재할당
+        const watcher_orders = watchers.map((w, idx) => ({
+            code: w.code,
+            display_order: idx + 1
+        }));
+
+        // 서버에 순서 업데이트
+        const updateResponse = await fetch(`/api/mode2/sections/${sectionId}/reorder-watchers`, {
+            credentials: 'same-origin',
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ watcher_orders })
+        });
+
+        if (updateResponse.ok) {
+            loadMode2List();
+        }
+    } catch (error) {
+        console.error('순서 변경 실패:', error);
+    }
+}
+
+async function moveWatcherToSection(code, targetSectionId) {
+    try {
+        const response = await fetch(`/api/mode2/watchers/${code}/move-section`, {
+            credentials: 'same-origin',
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ section_id: targetSectionId })
+        });
+
+        if (response.ok) {
+            showToast('✓ 섹션 이동 완료', 'success');
+            loadMode2List();
+        }
+    } catch (error) {
+        console.error('섹션 이동 실패:', error);
+    }
+}
+
+// ========== 섹션 드래그앤드롭 ==========
+
+function handleSectionDragStart(event) {
+    const section = event.currentTarget;
+    draggedSection = {
+        id: section.getAttribute('data-section-id'),
+        order: parseInt(section.getAttribute('data-section-order'))
+    };
+    section.style.opacity = '0.4';
+    event.dataTransfer.effectAllowed = 'move';
+}
+
+function handleSectionDragEnd(event) {
+    event.currentTarget.style.opacity = '1';
+    draggedSection = null;
+}
+
+function handleSectionDragOver(event) {
+    if (!draggedSection) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+}
+
+async function handleSectionDrop(event) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (!draggedSection) return;
+
+    const targetSection = event.currentTarget;
+    const targetId = targetSection.getAttribute('data-section-id');
+    const targetOrder = parseInt(targetSection.getAttribute('data-section-order'));
+
+    if (draggedSection.id === targetId) return;
+
+    // 섹션 순서 재정렬
+    await reorderSections(draggedSection.id, draggedSection.order, targetId, targetOrder);
+}
+
+async function reorderSections(draggedId, draggedOrder, targetId, targetOrder) {
+    try {
+        // 모든 섹션 가져오기
+        const response = await fetch('/api/mode2/sections', {
+            credentials: 'same-origin'
+        });
+        const result = await response.json();
+
+        if (!result.success) return;
+
+        const sections = result.data;
+        const draggedIdx = sections.findIndex(s => s.id === draggedId);
+        const targetIdx = sections.findIndex(s => s.id === targetId);
+
+        if (draggedIdx === -1 || targetIdx === -1) return;
+
+        // 순서 재정렬
+        const [draggedItem] = sections.splice(draggedIdx, 1);
+        sections.splice(targetIdx, 0, draggedItem);
+
+        // order 재할당
+        const section_orders = sections.map((s, idx) => ({
+            id: s.id,
+            order: idx + 1
+        }));
+
+        // 서버에 순서 업데이트
+        const updateResponse = await fetch('/api/mode2/sections/reorder', {
+            credentials: 'same-origin',
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ section_orders })
+        });
+
+        if (updateResponse.ok) {
+            loadMode2List();
+        }
+    } catch (error) {
+        console.error('섹션 순서 변경 실패:', error);
+    }
+}
+
+// ========== 복수 종목 선택 및 섹션 이동 ==========
+
+function handleWatcherCheckboxChange() {
+    const checkboxes = document.querySelectorAll('.watcher-checkbox:checked');
+    const count = checkboxes.length;
+
+    const bulkPanel = document.getElementById('bulkActionsPanel');
+    const selectedCountSpan = document.getElementById('selectedCount');
+
+    if (count > 0) {
+        bulkPanel.style.display = 'flex';
+        selectedCountSpan.textContent = count;
+        updateTargetSectionSelect();
+    } else {
+        bulkPanel.style.display = 'none';
+    }
+}
+
+async function updateTargetSectionSelect() {
+    const select = document.getElementById('targetSectionSelect');
+    if (!select) return;
+
+    try {
+        const response = await fetch('/api/mode2/sections', {
+            credentials: 'same-origin'
+        });
+        const result = await response.json();
+
+        if (result.success) {
+            select.innerHTML = '<option value="">이동할 섹션 선택</option>' +
+                result.data.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+        }
+    } catch (error) {
+        console.error('섹션 목록 로드 실패:', error);
+    }
+}
+
+// 복수 종목 이동 버튼
+document.getElementById('moveBulkBtn')?.addEventListener('click', async () => {
+    const targetSectionId = document.getElementById('targetSectionSelect').value;
+    if (!targetSectionId) {
+        showToast('섹션을 선택하세요', 'error');
+        return;
+    }
+
+    const checkboxes = document.querySelectorAll('.watcher-checkbox:checked');
+    const codes = Array.from(checkboxes).map(cb => cb.value);
+
+    if (codes.length === 0) return;
+
+    try {
+        // 각 종목을 대상 섹션으로 이동
+        const promises = codes.map(code =>
+            fetch(`/api/mode2/watchers/${code}/move-section`, {
+                credentials: 'same-origin',
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ section_id: targetSectionId })
+            })
+        );
+
+        await Promise.all(promises);
+        showToast(`✓ ${codes.length}개 종목 이동 완료`, 'success');
+        loadMode2List();
+    } catch (error) {
+        showToast('이동 실패: ' + error.message, 'error');
+    }
+});
+
+// 선택 취소 버튼
+document.getElementById('cancelBulkBtn')?.addEventListener('click', () => {
+    document.querySelectorAll('.watcher-checkbox').forEach(cb => cb.checked = false);
+    handleWatcherCheckboxChange();
+});
