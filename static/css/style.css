@@ -954,8 +954,8 @@ tbody tr.inactive {
 
 .mode2-watcher-row {
     display: grid;
-    grid-template-columns: 30px 30px 40px 120px 100px 80px 100px 100px 80px 80px 80px 80px 100px 80px 80px 150px 120px 80px;
-    gap: 8px;
+    grid-template-columns: 30px 30px 70px 90px 100px 80px 90px 70px 80px 80px 80px 80px 90px 70px 70px 200px 90px 180px;
+    gap: 4px;
     align-items: center;
     padding: 10px 16px;
     border-bottom: 1px solid #f1f3f5;
@@ -1056,15 +1056,18 @@ tbody tr.inactive {
 .active-toggle {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 4px 12px;
+    gap: 4px;
+    padding: 3px 10px;
     border: 2px solid #dee2e6;
-    border-radius: 20px;
+    border-radius: 16px;
     cursor: pointer;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 600;
     transition: all 0.2s;
     user-select: none;
+    white-space: nowrap;
+    min-width: 45px;
+    justify-content: center;
 }
 
 .active-toggle.on {
@@ -1085,17 +1088,24 @@ tbody tr.inactive {
 
 .watcher-actions {
     display: flex;
-    gap: 4px;
+    gap: 6px;
+    flex-wrap: nowrap;
+    align-items: center;
 }
 
 .watcher-action-btn {
-    padding: 4px 8px;
+    padding: 4px 10px;
     border: none;
     background: #e9ecef;
     cursor: pointer;
     border-radius: 4px;
-    font-size: 12px;
+    font-size: 14px;
     transition: all 0.2s;
+    line-height: 1;
+    min-width: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .watcher-action-btn:hover {
@@ -1122,7 +1132,7 @@ tbody tr.inactive {
 
 .mode2-header-row {
     display: grid;
-    grid-template-columns: 30px 30px 40px 120px 100px 80px 100px 100px 80px 80px 80px 80px 100px 80px 80px 150px 120px 80px;
+    grid-template-columns: 30px 30px 70px 90px 100px 80px 90px 70px 80px 80px 80px 80px 90px 70px 70px 120px 90px 180px;
     gap: 8px;
     padding: 10px 16px;
     background: #f8f9fa;

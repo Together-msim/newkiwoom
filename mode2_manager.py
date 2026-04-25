@@ -225,12 +225,20 @@ class Mode2Manager:
         watcher.update(data)
         watcher["updated_at"] = datetime.now().isoformat()
 
-        # record_id 갱신 (레코드 수정 날짜 반영)
+        # record_id 갱신 (날짜가 바뀐 경우에만)
         today = datetime.now().strftime('%y%m%d')
-        watcher["record_id"] = f"{today}-{code}"
+        current_record_id = watcher.get("record_id", "")
+        current_date = current_record_id.split('-')[0] if '-' in current_record_id else ""
+
+        if current_date != today:
+            # 날짜가 달라진 경우에만 record_id 업데이트
+            watcher["record_id"] = f"{today}-{code}"
+            logger.info(f"Mode2 업데이트 (record_id 갱신): {code} ({current_date} → {today})")
+        else:
+            # 같은 날 수정은 record_id 유지
+            logger.info(f"Mode2 업데이트: {code} (record_id 유지: {watcher['record_id']})")
 
         self._save_watchers()
-        logger.info(f"Mode2 업데이트: {code} (record_id: {watcher['record_id']})")
         return watcher
 
     def delete_watcher(self, code: str) -> bool:
