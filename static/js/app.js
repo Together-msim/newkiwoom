@@ -86,6 +86,16 @@ function setupEventListeners() {
         mode2LookupBtn.addEventListener('click', handleMode2Lookup);
     }
 
+    // Mode2 notify_only 체크박스 변경 시 polling 자동 조정
+    const mode2NotifyOnly = document.getElementById('mode2NotifyOnly');
+    const mode2PollingInterval = document.getElementById('mode2PollingInterval');
+    if (mode2NotifyOnly && mode2PollingInterval) {
+        mode2NotifyOnly.addEventListener('change', () => {
+            // 알림 전용: 3분(180초), 자동매매: 30초
+            mode2PollingInterval.value = mode2NotifyOnly.checked ? '180' : '30';
+        });
+    }
+
     // Test 페이지
     const testGetInfo = document.getElementById('testGetInfo');
     if (testGetInfo) {
@@ -312,59 +322,166 @@ function renderWatchlist(watchers) {
 // ========== Mode2 ==========
 async function loadMode2List() {
     try {
-        const response = await fetch('/api/mode2/watchers', {
-            credentials: 'same-origin'
-        });
-        const result = await response.json();
+        // 섹션과 종목 데이터 동시 로드
+        const [sectionsRes, watchersRes] = await Promise.all([
+            fetch('/api/mode2/sections', { credentials: 'same-origin' }),
+            fetch('/api/mode2/watchers', { credentials: 'same-origin' })
+        ]);
 
-        if (result.success) {
-            renderMode2Table(result.data);
+        const sectionsResult = await sectionsRes.json();
+        const watchersResult = await watchersRes.json();
+
+        if (sectionsResult.success && watchersResult.success) {
+            renderMode2SectionList(sectionsResult.data, watchersResult.data);
         }
     } catch (error) {
         console.error('Mode2 리스트 로드 실패:', error);
     }
 }
 
-function renderMode2Table(watchers) {
-    const tbody = document.getElementById('mode2TableBody');
-    if (!tbody) return;
+function renderMode2SectionList(sections, allWatchers) {
+    const container = document.getElementById('mode2SectionsContainer');
+    if (!container) return;
 
-    if (watchers.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="14" class="empty-state"><h3>등록된 종목이 없습니다</h3></td></tr>';
+    if (sections.length === 0) {
+        container.innerHTML = '<div class="mode2-empty">섹션을 추가하여 종목을 관리하세요</div>';
         return;
     }
 
-    tbody.innerHTML = watchers.map(w => {
-        const notifyOnly = w.notify_only || false;
-        const modeTag = notifyOnly
-            ? '<span style="background: #ffc107; color: #000; padding: 2px 8px; border-radius: 4px; font-size: 11px;">🔔 알림</span>'
-            : '<span style="background: #28a745; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px;">🤖 자동</span>';
+    // 섹션별로 종목 그룹화
+    const watchersBySection = {};
+    allWatchers.forEach(w => {
+        const sectionId = w.section || 'uncategorized';
+        if (!watchersBySection[sectionId]) {
+            watchersBySection[sectionId] = [];
+        }
+        watchersBySection[sectionId].push(w);
+    });
+
+    // 각 섹션별로 정렬
+    Object.keys(watchersBySection).forEach(sectionId => {
+        watchersBySection[sectionId].sort((a, b) =>
+            (a.display_order || 9999) - (b.display_order || 9999)
+        );
+    });
+
+    container.innerHTML = sections.map(section => {
+        const watchers = watchersBySection[section.id] || [];
+        const collapsed = section.collapsed || false;
 
         return `
-        <tr class="${w.active ? '' : 'inactive'}">
-            <td><input type="checkbox" class="row-checkbox" data-code="${w.code}" onclick="selectMode2Row('${w.code}')"></td>
-            <td><strong>${w.code}</strong></td>
-            <td contenteditable="true" data-field="name" data-code="${w.code}" onblur="updateMode2Field('${w.code}', 'name', this.textContent)">${w.name || '-'}</td>
-            <td contenteditable="true" data-field="buy_target_price" data-code="${w.code}" onblur="updateMode2Field('${w.code}', 'buy_target_price', this.textContent)">${formatNumber(w.buy_target_price)}</td>
-            <td contenteditable="true" data-field="budget" data-code="${w.code}" onblur="updateMode2Field('${w.code}', 'budget', this.textContent)">${formatNumber(w.budget)}</td>
-            <td>${w.quantity}주</td>
-            <td contenteditable="true" data-field="support_2" data-code="${w.code}" onblur="updateMode2LevelField('${w.code}', 'support_2', this.textContent)">${formatNumber(w.support_2_price)} (${w.support_2_loss_pct}%)</td>
-            <td contenteditable="true" data-field="support_1" data-code="${w.code}" onblur="updateMode2LevelField('${w.code}', 'support_1', this.textContent)">${formatNumber(w.support_1_price)} (${w.support_1_loss_pct}%)</td>
-            <td contenteditable="true" data-field="resistance_1" data-code="${w.code}" onblur="updateMode2LevelField('${w.code}', 'resistance_1', this.textContent)">${formatNumber(w.resistance_1_price)} (${w.resistance_1_profit_pct}%)</td>
-            <td contenteditable="true" data-field="resistance_2" data-code="${w.code}" onblur="updateMode2LevelField('${w.code}', 'resistance_2', this.textContent)">${formatNumber(w.resistance_2_price)} (${w.resistance_2_profit_pct}%)</td>
-            <td contenteditable="true" data-field="polling_interval" data-code="${w.code}" onblur="updateMode2Field('${w.code}', 'polling_interval', this.textContent)">${w.polling_interval || 10}초</td>
-            <td onclick="toggleMode2NotifyOnly('${w.code}', ${!notifyOnly})" style="cursor: pointer;" title="클릭하여 모드 변경">${modeTag}</td>
-            <td><span class="status-badge status-${w.status}">${getStatusText(w.status)}</span></td>
-            <td>
-                <button class="btn ${w.active ? 'btn-warning' : 'btn-success'}"
-                        onclick="toggleActive('${w.code}', ${!w.active})">
-                    ${w.active ? 'OFF' : 'ON'}
-                </button>
-                <button class="btn btn-danger" onclick="deleteMode2('${w.code}')">X</button>
-            </td>
-        </tr>
+            <div class="mode2-section" data-section-id="${section.id}">
+                <div class="mode2-section-header ${collapsed ? 'collapsed' : ''}" onclick="toggleSection('${section.id}')">
+                    <span class="section-drag-handle" title="드래그하여 섹션 이동">☰</span>
+                    <span class="section-toggle ${collapsed ? 'collapsed' : ''}">▼</span>
+                    <span class="section-name" data-section-id="${section.id}" ondblclick="editSectionName('${section.id}')">${section.name}</span>
+                    <span style="color: #adb5bd; font-size: 13px;">(${watchers.length})</span>
+                    <div class="section-actions" onclick="event.stopPropagation()">
+                        ${section.id !== 'uncategorized' ?
+                            `<button class="section-btn" onclick="deleteSectionConfirm('${section.id}')" title="섹션 삭제">🗑️</button>` :
+                            ''
+                        }
+                    </div>
+                </div>
+                <div class="mode2-section-body ${collapsed ? 'collapsed' : ''}" id="section-body-${section.id}">
+                    ${watchers.length > 0 ? renderMode2SectionWatchers(section.id, watchers) :
+                        '<div class="mode2-empty">종목이 없습니다</div>'}
+                </div>
+            </div>
         `;
     }).join('');
+}
+
+function renderMode2SectionWatchers(sectionId, watchers) {
+    // 헤더
+    let html = `
+        <div class="mode2-header-row">
+            <div>🔼⬇️</div>
+            <div>레코드번호</div>
+            <div>코드</div>
+            <div>종목명</div>
+            <div>매수타점</div>
+            <div>Budget</div>
+            <div>수량</div>
+            <div>2차지지</div>
+            <div>1차지지</div>
+            <div>1차저항</div>
+            <div>2차저항</div>
+            <div>Polling</div>
+            <div>모드</div>
+            <div>상태</div>
+            <div>모니터링 상태</div>
+            <div>자유노트</div>
+            <div>액션</div>
+        </div>
+    `;
+
+    // 종목 rows
+    watchers.forEach((w, idx) => {
+        html += renderMode2WatcherRow(w, idx);
+    });
+
+    return html;
+}
+
+function renderMode2WatcherRow(w, idx) {
+    const notifyOnly = w.notify_only || false;
+    const editMode = false; // 초기값
+
+    return `
+        <div class="mode2-watcher-row" data-code="${w.code}" data-edit-mode="false">
+            <div class="watcher-drag-handle">☰</div>
+            <div class="watcher-cell">${w.record_id || '-'}</div>
+            <div class="watcher-cell"><strong>${w.code}</strong></div>
+            <div class="watcher-cell">${w.name || '-'}</div>
+            <div class="watcher-cell editable" data-field="buy_target_price">${formatNumber(w.buy_target_price)}</div>
+            <div class="watcher-cell editable" data-field="budget">${formatNumber(w.budget)}</div>
+            <div class="watcher-cell">${w.quantity}주</div>
+            <div class="watcher-cell editable" data-field="support_2_price">${formatNumber(w.support_2_price)}</div>
+            <div class="watcher-cell editable" data-field="support_1_price">${formatNumber(w.support_1_price)}</div>
+            <div class="watcher-cell editable" data-field="resistance_1_price">${formatNumber(w.resistance_1_price)}</div>
+            <div class="watcher-cell editable" data-field="resistance_2_price">${formatNumber(w.resistance_2_price)}</div>
+            <div class="watcher-cell">
+                <select onchange="updateWatcherField('${w.code}', 'polling_interval', this.value)">
+                    <option value="10" ${w.polling_interval == 10 ? 'selected' : ''}>10초</option>
+                    <option value="30" ${w.polling_interval == 30 ? 'selected' : ''}>30초</option>
+                    <option value="60" ${w.polling_interval == 60 ? 'selected' : ''}>1분</option>
+                    <option value="180" ${w.polling_interval == 180 ? 'selected' : ''}>3분</option>
+                    <option value="300" ${w.polling_interval == 300 ? 'selected' : ''}>5분</option>
+                    <option value="600" ${w.polling_interval == 600 ? 'selected' : ''}>10분</option>
+                </select>
+            </div>
+            <div class="watcher-cell">
+                <div class="mode-toggle">
+                    <button class="mode-toggle-btn ${notifyOnly ? 'active' : ''}" onclick="toggleMode2NotifyOnly('${w.code}', true)">🔔</button>
+                    <button class="mode-toggle-btn ${!notifyOnly ? 'active' : ''}" onclick="toggleMode2NotifyOnly('${w.code}', false)">🤖</button>
+                </div>
+            </div>
+            <div class="watcher-cell"><span class="status-badge status-${w.status}">${getStatusText(w.status)}</span></div>
+            <div class="watcher-cell monitoring-status ${getMonitoringStatusClass(w.monitoring_status)}">${w.monitoring_status || '-'}</div>
+            <div class="watcher-cell editable" data-field="note" title="${w.note || ''}">${truncateText(w.note || '', 20)}</div>
+            <div class="watcher-actions">
+                <div class="active-toggle ${w.active ? 'on' : 'off'}" onclick="toggleActive('${w.code}', ${!w.active})">
+                    ${w.active ? 'ON' : 'OFF'}
+                </div>
+                <button class="watcher-action-btn" onclick="editWatcherRow('${w.code}')" title="수정">✏️</button>
+                <button class="watcher-action-btn" onclick="deleteMode2('${w.code}')" title="삭제">🗑️</button>
+            </div>
+        </div>
+    `;
+}
+
+function getMonitoringStatusClass(status) {
+    if (!status) return '';
+    if (status.includes('손절') || status.includes('이탈')) return 'danger';
+    if (status.includes('익절') || status.includes('저항 통과')) return 'success';
+    if (status.includes('매수타점')) return 'warning';
+    return '';
+}
+
+function truncateText(text, maxLen) {
+    if (!text) return '';
+    return text.length > maxLen ? text.substring(0, maxLen) + '...' : text;
 }
 
 async function handleMode2Submit(e) {
@@ -3518,4 +3635,233 @@ function draw120MinChart(data) {
     ctx.textAlign = 'right';
     ctx.fillStyle = '#9c27b0';
     ctx.fillText('━━ 5봉 이동평균', canvas.width - 10, 20);
+}
+
+// ========== Mode2 섹션 관리 ==========
+
+// 섹션 추가 버튼 이벤트
+document.getElementById('addSectionBtn')?.addEventListener('click', async () => {
+    const name = prompt('섹션명을 입력하세요:');
+    if (!name || !name.trim()) return;
+
+    try {
+        const response = await fetch('/api/mode2/sections', {
+            credentials: 'same-origin',
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: name.trim() })
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            showToast('✓ 섹션 추가 완료', 'success');
+            loadMode2List();
+        } else {
+            showToast(result.error, 'error');
+        }
+    } catch (error) {
+        showToast('요청 실패: ' + error.message, 'error');
+    }
+});
+
+// 섹션 접기/펴기
+async function toggleSection(sectionId) {
+    try {
+        const response = await fetch(`/api/mode2/sections/${sectionId}/toggle-collapse`, {
+            credentials: 'same-origin',
+            method: 'POST'
+        });
+
+        if (response.ok) {
+            loadMode2List();
+        }
+    } catch (error) {
+        console.error('섹션 토글 실패:', error);
+    }
+}
+
+// 섹션명 편집
+function editSectionName(sectionId) {
+    event.stopPropagation();
+
+    const sectionHeader = document.querySelector(`[data-section-id="${sectionId}"]`);
+    if (!sectionHeader) return;
+
+    const nameSpan = sectionHeader.querySelector('.section-name');
+    const currentName = nameSpan.textContent;
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = currentName;
+    input.className = 'section-name editing';
+    input.style.width = '200px';
+
+    input.onblur = async () => {
+        const newName = input.value.trim();
+        if (newName && newName !== currentName) {
+            try {
+                const response = await fetch(`/api/mode2/sections/${sectionId}`, {
+                    credentials: 'same-origin',
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: newName })
+                });
+
+                if (response.ok) {
+                    showToast('✓ 섹션명 변경 완료', 'success');
+                    loadMode2List();
+                } else {
+                    nameSpan.textContent = currentName;
+                }
+            } catch (error) {
+                nameSpan.textContent = currentName;
+            }
+        } else {
+            nameSpan.textContent = currentName;
+        }
+    };
+
+    input.onkeydown = (e) => {
+        if (e.key === 'Enter') input.blur();
+        if (e.key === 'Escape') {
+            input.value = currentName;
+            input.blur();
+        }
+    };
+
+    nameSpan.replaceWith(input);
+    input.focus();
+    input.select();
+}
+
+// 섹션 삭제
+async function deleteSectionConfirm(sectionId) {
+    if (!confirm('이 섹션을 삭제하시겠습니까?\n(종목은 미분류로 이동됩니다)')) return;
+
+    try {
+        const response = await fetch(`/api/mode2/sections/${sectionId}`, {
+            credentials: 'same-origin',
+            method: 'DELETE'
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            showToast('✓ 섹션 삭제 완료', 'success');
+            loadMode2List();
+        } else {
+            showToast(result.error, 'error');
+        }
+    } catch (error) {
+        showToast('요청 실패: ' + error.message, 'error');
+    }
+}
+
+// 종목 편집 모드
+function editWatcherRow(code) {
+    const row = document.querySelector(`.mode2-watcher-row[data-code="${code}"]`);
+    if (!row) return;
+
+    const isEditMode = row.getAttribute('data-edit-mode') === 'true';
+
+    if (isEditMode) {
+        // 저장
+        saveWatcherRow(code);
+    } else {
+        // 편집 모드로 전환
+        row.setAttribute('data-edit-mode', 'true');
+        row.classList.add('editing');
+
+        // editable 필드를 input으로 변경
+        row.querySelectorAll('.editable').forEach(cell => {
+            const field = cell.getAttribute('data-field');
+            const value = cell.textContent.replace(/,/g, '').replace(/원/g, '').replace(/주/g, '').trim();
+
+            if (field === 'note') {
+                const textarea = document.createElement('textarea');
+                textarea.value = cell.getAttribute('title') || '';
+                textarea.maxLength = 500;
+                cell.innerHTML = '';
+                cell.appendChild(textarea);
+            } else {
+                const input = document.createElement('input');
+                input.type = 'number';
+                input.value = value;
+                cell.innerHTML = '';
+                cell.appendChild(input);
+            }
+        });
+
+        // 액션 버튼 변경
+        const actions = row.querySelector('.watcher-actions');
+        actions.innerHTML = `
+            <button class="watcher-action-btn save" onclick="saveWatcherRow('${code}')">✓</button>
+            <button class="watcher-action-btn cancel" onclick="cancelWatcherEdit('${code}')">✗</button>
+        `;
+    }
+}
+
+// 종목 편집 취소
+function cancelWatcherEdit(code) {
+    loadMode2List(); // 다시 로드하여 원래 상태로
+}
+
+// 종목 편집 저장
+async function saveWatcherRow(code) {
+    const row = document.querySelector(`.mode2-watcher-row[data-code="${code}"]`);
+    if (!row) return;
+
+    const data = {};
+    row.querySelectorAll('.editable').forEach(cell => {
+        const field = cell.getAttribute('data-field');
+        const input = cell.querySelector('input, textarea');
+
+        if (input) {
+            if (field === 'note') {
+                data[field] = input.value;
+            } else {
+                data[field] = parseInt(input.value) || 0;
+            }
+        }
+    });
+
+    try {
+        const response = await fetch(`/api/mode2/watchers/${code}`, {
+            credentials: 'same-origin',
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            showToast('✓ 저장 완료', 'success');
+            loadMode2List();
+        } else {
+            showToast(result.error, 'error');
+        }
+    } catch (error) {
+        showToast('요청 실패: ' + error.message, 'error');
+    }
+}
+
+// 단일 필드 즉시 업데이트
+async function updateWatcherField(code, field, value) {
+    try {
+        const data = {};
+        data[field] = field === 'polling_interval' ? parseInt(value) : value;
+
+        const response = await fetch(`/api/mode2/watchers/${code}`, {
+            credentials: 'same-origin',
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+
+        if (response.ok) {
+            showToast('✓ 업데이트 완료', 'success');
+            loadMode2List();
+        }
+    } catch (error) {
+        console.error('업데이트 실패:', error);
+    }
 }

@@ -864,3 +864,277 @@ tbody tr.inactive {
         gap: 24px !important;
     }
 }
+
+/* Mode2 섹션 기반 리스트 */
+.mode2-section {
+    margin-bottom: 24px;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    overflow: hidden;
+    background: white;
+}
+
+.mode2-section-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    background: #f8f9fa;
+    border-bottom: 1px solid #dee2e6;
+    cursor: pointer;
+    user-select: none;
+}
+
+.mode2-section-header:hover {
+    background: #e9ecef;
+}
+
+.mode2-section-header.collapsed {
+    border-bottom: none;
+}
+
+.section-drag-handle {
+    cursor: move;
+    font-size: 18px;
+    color: #adb5bd;
+}
+
+.section-toggle {
+    font-size: 14px;
+    color: #495057;
+    transition: transform 0.2s;
+}
+
+.section-toggle.collapsed {
+    transform: rotate(-90deg);
+}
+
+.section-name {
+    flex: 1;
+    font-weight: 600;
+    font-size: 15px;
+    color: #212529;
+}
+
+.section-name.editing {
+    border: 1px solid #228be6;
+    border-radius: 4px;
+    padding: 4px 8px;
+    outline: none;
+}
+
+.section-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.section-btn {
+    padding: 4px 8px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    border-radius: 4px;
+    font-size: 13px;
+    color: #495057;
+    transition: all 0.2s;
+}
+
+.section-btn:hover {
+    background: #dee2e6;
+    color: #212529;
+}
+
+.mode2-section-body {
+    display: block;
+}
+
+.mode2-section-body.collapsed {
+    display: none;
+}
+
+.mode2-watcher-row {
+    display: grid;
+    grid-template-columns: 30px 40px 120px 100px 80px 100px 100px 80px 80px 80px 80px 100px 80px 80px 150px 120px 80px;
+    gap: 8px;
+    align-items: center;
+    padding: 10px 16px;
+    border-bottom: 1px solid #f1f3f5;
+    font-size: 13px;
+    transition: background 0.2s;
+}
+
+.mode2-watcher-row:hover {
+    background: #f8f9fa;
+}
+
+.mode2-watcher-row.editing {
+    background: #fff3bf;
+}
+
+.watcher-drag-handle {
+    cursor: move;
+    color: #adb5bd;
+    text-align: center;
+}
+
+.watcher-cell {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.watcher-cell.editable {
+    cursor: pointer;
+    padding: 4px 6px;
+    border-radius: 3px;
+    transition: background 0.2s;
+}
+
+.watcher-cell.editable:hover {
+    background: #e7f5ff;
+}
+
+.watcher-cell input,
+.watcher-cell select,
+.watcher-cell textarea {
+    width: 100%;
+    padding: 4px 6px;
+    border: 1px solid #228be6;
+    border-radius: 3px;
+    font-size: 13px;
+}
+
+.watcher-cell textarea {
+    resize: vertical;
+    min-height: 40px;
+    max-height: 120px;
+}
+
+.monitoring-status {
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.monitoring-status.danger {
+    color: #f03e3e;
+}
+
+.monitoring-status.success {
+    color: #37b24d;
+}
+
+.monitoring-status.warning {
+    color: #fd7e14;
+}
+
+.mode-toggle {
+    display: inline-flex;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.mode-toggle-btn {
+    padding: 4px 10px;
+    border: none;
+    background: white;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+
+.mode-toggle-btn.active {
+    background: #228be6;
+    color: white;
+}
+
+.mode-toggle-btn:hover:not(.active) {
+    background: #f1f3f5;
+}
+
+.active-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border: 2px solid #dee2e6;
+    border-radius: 20px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    transition: all 0.2s;
+    user-select: none;
+}
+
+.active-toggle.on {
+    border-color: #37b24d;
+    background: #d3f9d8;
+    color: #2b8a3e;
+}
+
+.active-toggle.off {
+    border-color: #adb5bd;
+    background: #f1f3f5;
+    color: #868e96;
+}
+
+.active-toggle:hover {
+    transform: scale(1.05);
+}
+
+.watcher-actions {
+    display: flex;
+    gap: 4px;
+}
+
+.watcher-action-btn {
+    padding: 4px 8px;
+    border: none;
+    background: #e9ecef;
+    cursor: pointer;
+    border-radius: 4px;
+    font-size: 12px;
+    transition: all 0.2s;
+}
+
+.watcher-action-btn:hover {
+    background: #dee2e6;
+}
+
+.watcher-action-btn.save {
+    background: #37b24d;
+    color: white;
+}
+
+.watcher-action-btn.save:hover {
+    background: #2b8a3e;
+}
+
+.watcher-action-btn.cancel {
+    background: #f03e3e;
+    color: white;
+}
+
+.watcher-action-btn.cancel:hover {
+    background: #c92a2a;
+}
+
+.mode2-header-row {
+    display: grid;
+    grid-template-columns: 30px 40px 120px 100px 80px 100px 100px 80px 80px 80px 80px 100px 80px 80px 150px 120px 80px;
+    gap: 8px;
+    padding: 10px 16px;
+    background: #f8f9fa;
+    border-bottom: 2px solid #dee2e6;
+    font-size: 12px;
+    font-weight: 600;
+    color: #495057;
+}
+
+.mode2-empty {
+    padding: 40px;
+    text-align: center;
+    color: #adb5bd;
+    font-size: 14px;
+}
