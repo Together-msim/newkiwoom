@@ -923,7 +923,13 @@
                 <span class="note-modal-close" onclick="closeNoteModal()">&times;</span>
             </div>
             <div id="noteModalBody" class="note-modal-body">
-                <p>노트 내용</p>
+                <p id="noteModalText">노트 내용</p>
+                <textarea id="noteModalTextarea" class="note-modal-textarea" style="display: none;"></textarea>
+            </div>
+            <div class="note-modal-footer">
+                <button id="noteEditBtn" class="btn btn-secondary" onclick="enableNoteEdit()">✏️ 편집</button>
+                <button id="noteSaveBtn" class="btn btn-primary" onclick="saveNote()" style="display: none;">💾 저장</button>
+                <button id="noteCancelBtn" class="btn btn-secondary" onclick="cancelNoteEdit()" style="display: none;">취소</button>
             </div>
         </div>
     </div>

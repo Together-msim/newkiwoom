@@ -1377,6 +1377,27 @@ tbody tr.inactive {
     font-style: italic;
 }
 
+.note-modal-textarea {
+    width: 100%;
+    min-height: 150px;
+    padding: 12px;
+    border: 2px solid #228be6;
+    border-radius: 6px;
+    font-size: 14px;
+    line-height: 1.6;
+    font-family: inherit;
+    resize: vertical;
+}
+
+.note-modal-footer {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid #e9ecef;
+}
+
 @media (max-width: 768px) {
     .note-modal-content {
         margin: 15% auto;
@@ -1390,5 +1411,10 @@ tbody tr.inactive {
 
     .note-modal-body p {
         font-size: 13px;
+    }
+
+    .note-modal-textarea {
+        font-size: 16px;
+        min-height: 120px;
     }
 }

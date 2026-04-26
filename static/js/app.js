@@ -2803,18 +2803,39 @@ function syncOrderModeRadios(mode) {
 }
 
 // ========== 종목명 노트 모달 ==========
+let currentNoteStockCode = null;
+let originalNoteText = '';
+
 function showNoteModal(stockName, stockCode, noteText) {
     const modal = document.getElementById('noteModal');
     const modalStockName = document.getElementById('noteModalStockName');
+    const modalText = document.getElementById('noteModalText');
+    const modalTextarea = document.getElementById('noteModalTextarea');
     const modalBody = document.getElementById('noteModalBody');
+    const editBtn = document.getElementById('noteEditBtn');
+    const saveBtn = document.getElementById('noteSaveBtn');
+    const cancelBtn = document.getElementById('noteCancelBtn');
+
+    // 현재 종목 코드 저장
+    currentNoteStockCode = stockCode;
+    originalNoteText = noteText || '';
 
     modalStockName.textContent = `${stockName} (${stockCode})`;
 
+    // 읽기 모드로 초기화
+    modalText.style.display = 'block';
+    modalTextarea.style.display = 'none';
+    editBtn.style.display = 'inline-block';
+    saveBtn.style.display = 'none';
+    cancelBtn.style.display = 'none';
+
     if (noteText && noteText.trim()) {
-        modalBody.innerHTML = `<p>${noteText}</p>`;
+        modalText.textContent = noteText;
         modalBody.classList.remove('empty');
     } else {
-        modalBody.innerHTML = '<p style="text-align: center; color: #adb5bd; font-style: italic;">노트 내용이 없습니다</p>';
+        modalText.textContent = '노트 내용이 없습니다';
+        modalText.style.color = '#adb5bd';
+        modalText.style.fontStyle = 'italic';
         modalBody.classList.add('empty');
     }
 
@@ -2824,6 +2845,93 @@ function showNoteModal(stockName, stockCode, noteText) {
 function closeNoteModal() {
     const modal = document.getElementById('noteModal');
     modal.style.display = 'none';
+    currentNoteStockCode = null;
+    originalNoteText = '';
+}
+
+function enableNoteEdit() {
+    const modalText = document.getElementById('noteModalText');
+    const modalTextarea = document.getElementById('noteModalTextarea');
+    const editBtn = document.getElementById('noteEditBtn');
+    const saveBtn = document.getElementById('noteSaveBtn');
+    const cancelBtn = document.getElementById('noteCancelBtn');
+
+    // 편집 모드로 전환
+    modalText.style.display = 'none';
+    modalTextarea.style.display = 'block';
+    modalTextarea.value = originalNoteText;
+
+    editBtn.style.display = 'none';
+    saveBtn.style.display = 'inline-block';
+    cancelBtn.style.display = 'inline-block';
+
+    // 포커스
+    modalTextarea.focus();
+}
+
+function cancelNoteEdit() {
+    const modalText = document.getElementById('noteModalText');
+    const modalTextarea = document.getElementById('noteModalTextarea');
+    const editBtn = document.getElementById('noteEditBtn');
+    const saveBtn = document.getElementById('noteSaveBtn');
+    const cancelBtn = document.getElementById('noteCancelBtn');
+
+    // 읽기 모드로 복귀
+    modalText.style.display = 'block';
+    modalTextarea.style.display = 'none';
+
+    editBtn.style.display = 'inline-block';
+    saveBtn.style.display = 'none';
+    cancelBtn.style.display = 'none';
+}
+
+async function saveNote() {
+    const modalTextarea = document.getElementById('noteModalTextarea');
+    const newNoteText = modalTextarea.value.trim();
+
+    if (!currentNoteStockCode) {
+        showToast('종목 정보를 찾을 수 없습니다', 'error');
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/mode2/watchers/${currentNoteStockCode}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ note: newNoteText })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            showToast('✓ 노트 저장 완료', 'success');
+
+            // 원본 텍스트 업데이트
+            originalNoteText = newNoteText;
+
+            // 읽기 모드로 전환하고 내용 업데이트
+            const modalText = document.getElementById('noteModalText');
+            if (newNoteText) {
+                modalText.textContent = newNoteText;
+                modalText.style.color = '#495057';
+                modalText.style.fontStyle = 'normal';
+            } else {
+                modalText.textContent = '노트 내용이 없습니다';
+                modalText.style.color = '#adb5bd';
+                modalText.style.fontStyle = 'italic';
+            }
+
+            cancelNoteEdit();
+
+            // 리스트 새로고침
+            loadMode2List();
+        } else {
+            showToast('노트 저장 실패: ' + result.error, 'error');
+        }
+    } catch (error) {
+        showToast('요청 실패: ' + error.message, 'error');
+    }
 }
 
 // 모달 외부 클릭 시 닫기
