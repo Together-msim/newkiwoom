@@ -37,3 +37,8 @@ Thumbs.db
 # 임시 파일
 *.tmp
 *.temp
+
+# 로컬 관리자 도구 (배포 불필요)
+admin_server.py
+start_admin.command
+admin_templates/
