@@ -40,5 +40,7 @@ Thumbs.db
 
 # 로컬 관리자 도구 (배포 불필요)
 admin_server.py
+admin_server_oracle.py
 start_admin.command
+start_admin_oracle.command
 admin_templates/

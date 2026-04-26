@@ -1559,11 +1559,18 @@ def main():
     port = int(os.getenv("WEB_PORT", "5000"))
     host = os.getenv("WEB_HOST", "0.0.0.0")
 
+    # SSL 설정 (HTTPS)
+    ssl_context = None
+    if os.path.exists('cert.pem') and os.path.exists('key.pem'):
+        ssl_context = ('cert.pem', 'key.pem')
+        logger.info(f"SSL 인증서 발견 - HTTPS 모드로 시작")
+
     # PriceMonitor 시작
     start_price_monitor()
 
-    logger.info(f"웹 서버 시작: http://{host}:{port}")
-    app.run(host=host, port=port, debug=True, use_reloader=False)  # reloader 끄기 (중복 실행 방지)
+    protocol = "https" if ssl_context else "http"
+    logger.info(f"웹 서버 시작: {protocol}://{host}:{port}")
+    app.run(host=host, port=port, debug=True, use_reloader=False, ssl_context=ssl_context)  # reloader 끄기 (중복 실행 방지)
 
 
 if __name__ == "__main__":
