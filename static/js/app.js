@@ -448,7 +448,7 @@ function renderMode2WatcherRow(w, idx) {
             <div class="watcher-drag-handle" style="cursor: move;">☰</div>
             <div class="watcher-cell">${w.record_id || '-'}</div>
             <div class="watcher-cell"><strong>${w.code}</strong></div>
-            <div class="watcher-cell">${w.name || '-'}</div>
+            <div class="watcher-cell" onclick="showNoteModal('${w.name || '-'}', '${w.code}', '${(w.note || '').replace(/'/g, "\\'")}' )" style="cursor: pointer; color: #228be6; font-weight: 600;">${w.name || '-'}</div>
             <div class="watcher-cell editable" data-field="buy_target_price" ondblclick="enableCellEdit(this, '${w.code}')">${formatNumber(w.buy_target_price)}</div>
             <div class="watcher-cell editable" data-field="budget" ondblclick="enableCellEdit(this, '${w.code}')">${formatNumber(w.budget)}</div>
             <div class="watcher-cell">${w.quantity}주</div>
@@ -1640,15 +1640,37 @@ async function updateMode2LevelField(code, level, value) {
 // 알림 전용 모드 토글
 async function toggleMode2NotifyOnly(code, notifyOnly) {
     try {
-        const response = await fetch(`/api/mode2/watchers/${code}`, {
+        // 알림 → 자동매매 전환 시 손절/익절 % 검증
+        if (!notifyOnly) {
+            const response = await fetch(`/api/mode2/watchers/${code}`, {
+                credentials: 'same-origin'
+            });
+            const result = await response.json();
+
+            if (result.success && result.data) {
+                const w = result.data;
+                const hasR1 = w.resistance_1_price > 0 && w.resistance_1_profit_pct > 0;
+                const hasR2 = w.resistance_2_price > 0 && w.resistance_2_profit_pct > 0;
+                const hasS1 = w.support_1_price > 0 && w.support_1_loss_pct > 0;
+                const hasS2 = w.support_2_price > 0 && w.support_2_loss_pct > 0;
+
+                if (!hasR1 && !hasR2 && !hasS1 && !hasS2) {
+                    showToast('⚠️ 자동매매 모드 전환 불가: 손절/익절 % 값이 없습니다', 'error');
+                    return;
+                }
+            }
+        }
+
+        const updateResponse = await fetch(`/api/mode2/watchers/${code}`, {
+            credentials: 'same-origin',
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ notify_only: notifyOnly })
         });
 
-        const result = await response.json();
+        const updateResult = await updateResponse.json();
 
-        if (result.success) {
+        if (updateResult.success) {
             const mode = notifyOnly ? '알림 전용' : '자동매매';
             showToast(`✓ ${mode} 모드로 변경됨`, 'success');
             loadMode2List();
@@ -2780,6 +2802,38 @@ function syncOrderModeRadios(mode) {
     });
 }
 
+// ========== 종목명 노트 모달 ==========
+function showNoteModal(stockName, stockCode, noteText) {
+    const modal = document.getElementById('noteModal');
+    const modalStockName = document.getElementById('noteModalStockName');
+    const modalBody = document.getElementById('noteModalBody');
+
+    modalStockName.textContent = `${stockName} (${stockCode})`;
+
+    if (noteText && noteText.trim()) {
+        modalBody.innerHTML = `<p>${noteText}</p>`;
+        modalBody.classList.remove('empty');
+    } else {
+        modalBody.innerHTML = '<p style="text-align: center; color: #adb5bd; font-style: italic;">노트 내용이 없습니다</p>';
+        modalBody.classList.add('empty');
+    }
+
+    modal.style.display = 'block';
+}
+
+function closeNoteModal() {
+    const modal = document.getElementById('noteModal');
+    modal.style.display = 'none';
+}
+
+// 모달 외부 클릭 시 닫기
+window.addEventListener('click', (event) => {
+    const modal = document.getElementById('noteModal');
+    if (event.target === modal) {
+        closeNoteModal();
+    }
+});
+
 // 이벤트 리스너 등록
 document.addEventListener('DOMContentLoaded', () => {
     const toggleBtn = document.getElementById('toggleMonitorLog');
@@ -3843,12 +3897,54 @@ async function editWatcherRow(code) {
         // 저장
         saveWatcherRow(code);
     } else {
+        // 종목 데이터 조회
+        try {
+            const response = await fetch(`/api/mode2/watchers/${code}`, {
+                credentials: 'same-origin'
+            });
+            const result = await response.json();
+
+            if (result.success && result.data) {
+                const w = result.data;
+
+                // Mode2 폼에 값 채우기
+                fillMode2Form(w);
+
+                // 폼으로 스크롤
+                document.getElementById('mode2Form').scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+                showToast('✓ 편집 모드 - 상단 폼에서 수정 후 저장하세요', 'info');
+            }
+        } catch (error) {
+            console.error('데이터 조회 실패:', error);
+            showToast('데이터 조회 실패', 'error');
+        }
+
         // 편집 모드로 전환
         enterEditMode(row, code);
 
         // 차트 조회 및 표시
         await loadWatcherChart(code);
     }
+}
+
+// Mode2 폼에 watcher 데이터 채우기
+function fillMode2Form(watcher) {
+    document.getElementById('mode2Code').value = watcher.code;
+    document.getElementById('mode2Name').value = watcher.name || '';
+    document.getElementById('mode2Budget').value = watcher.budget;
+    document.getElementById('mode2PollingInterval').value = watcher.polling_interval || 10;
+    document.getElementById('mode2NotifyOnly').checked = watcher.notify_only || false;
+
+    document.querySelector('input[name="buy_target_price"]').value = watcher.buy_target_price || '';
+    document.querySelector('input[name="resistance_2_price"]').value = watcher.resistance_2_price || '';
+    document.querySelector('input[name="resistance_2_profit_pct"]').value = watcher.resistance_2_profit_pct || 50;
+    document.querySelector('input[name="resistance_1_price"]').value = watcher.resistance_1_price || '';
+    document.querySelector('input[name="resistance_1_profit_pct"]').value = watcher.resistance_1_profit_pct || 50;
+    document.querySelector('input[name="support_1_price"]').value = watcher.support_1_price || '';
+    document.querySelector('input[name="support_1_loss_pct"]').value = watcher.support_1_loss_pct || 50;
+    document.querySelector('input[name="support_2_price"]').value = watcher.support_2_price || '';
+    document.querySelector('input[name="support_2_loss_pct"]').value = watcher.support_2_loss_pct || 50;
 }
 
 // 종목 편집 취소

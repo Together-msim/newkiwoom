@@ -329,7 +329,7 @@
                                     <label>2차 저항</label>
                                     <div class="input-group">
                                         <input type="number" name="resistance_2_price" placeholder="가격">
-                                        <input type="number" step="0.1" name="resistance_2_profit_pct" placeholder="익절 %">
+                                        <input type="number" step="0.1" name="resistance_2_profit_pct" placeholder="익절 %" value="50">
                                     </div>
                                 </div>
 
@@ -337,7 +337,7 @@
                                     <label>1차 저항</label>
                                     <div class="input-group">
                                         <input type="number" name="resistance_1_price" placeholder="가격">
-                                        <input type="number" step="0.1" name="resistance_1_profit_pct" placeholder="익절 %">
+                                        <input type="number" step="0.1" name="resistance_1_profit_pct" placeholder="익절 %" value="50">
                                     </div>
                                 </div>
 
@@ -352,7 +352,7 @@
                                     <label>1차 지지</label>
                                     <div class="input-group">
                                         <input type="number" name="support_1_price" placeholder="가격">
-                                        <input type="number" step="0.1" name="support_1_loss_pct" placeholder="손절 %">
+                                        <input type="number" step="0.1" name="support_1_loss_pct" placeholder="손절 %" value="50">
                                     </div>
                                 </div>
 
@@ -360,7 +360,7 @@
                                     <label>2차 지지</label>
                                     <div class="input-group">
                                         <input type="number" name="support_2_price" placeholder="가격">
-                                        <input type="number" step="0.1" name="support_2_loss_pct" placeholder="손절 %">
+                                        <input type="number" step="0.1" name="support_2_loss_pct" placeholder="손절 %" value="50">
                                     </div>
                                 </div>
                             </div>
@@ -911,6 +911,19 @@
             <div class="modal-footer">
                 <button onclick="closeBulkAddModal()" class="btn btn-secondary">취소</button>
                 <button onclick="executeBulkAdd()" class="btn btn-primary">📥 일괄 등록</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 종목명 노트 모달 -->
+    <div id="noteModal" class="note-modal">
+        <div class="note-modal-content">
+            <div class="note-modal-header">
+                <h3 id="noteModalStockName">종목명</h3>
+                <span class="note-modal-close" onclick="closeNoteModal()">&times;</span>
+            </div>
+            <div id="noteModalBody" class="note-modal-body">
+                <p>노트 내용</p>
             </div>
         </div>
     </div>
