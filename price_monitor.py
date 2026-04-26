@@ -531,6 +531,27 @@ class PriceMonitor:
         if now.weekday() >= 5:  # 5=토요일, 6=일요일
             return False
 
+        # 2026년 평일 공휴일 (휴장일)
+        holidays_2026 = [
+            (5, 1),   # 근로자의 날
+            (5, 5),   # 어린이날
+            (5, 25),  # 부처님오신날 대체공휴일
+            (6, 3),   # 지방선거
+            (7, 17),  # 제헌절
+            (8, 17),  # 광복절 대체공휴일
+            (9, 24),  # 추석 연휴
+            (9, 25),  # 추석 연휴
+            (10, 5),  # 개천절 대체공휴일
+            (10, 9),  # 한글날
+            (12, 25), # 크리스마스
+        ]
+
+        # 공휴일 체크
+        if now.year == 2026:
+            current_date = (now.month, now.day)
+            if current_date in holidays_2026:
+                return False
+
         # 장 시간 체크 (08:00~15:30)
         market_open = now.replace(hour=8, minute=0, second=0, microsecond=0)
         market_close = now.replace(hour=15, minute=30, second=0, microsecond=0)
