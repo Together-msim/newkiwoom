@@ -524,15 +524,15 @@ class PriceMonitor:
             return None
 
     def _is_market_open(self) -> bool:
-        """장 시간 체크 (평일 09:00~15:30)"""
+        """장 시간 체크 (평일 08:00~15:30, NXT KRX)"""
         now = datetime.now(KST)
 
         # 주말 체크
         if now.weekday() >= 5:  # 5=토요일, 6=일요일
             return False
 
-        # 장 시간 체크 (09:00~15:30)
-        market_open = now.replace(hour=9, minute=0, second=0, microsecond=0)
+        # 장 시간 체크 (08:00~15:30)
+        market_open = now.replace(hour=8, minute=0, second=0, microsecond=0)
         market_close = now.replace(hour=15, minute=30, second=0, microsecond=0)
 
         return market_open <= now <= market_close
