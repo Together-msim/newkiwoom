@@ -523,6 +523,20 @@ class PriceMonitor:
             traceback.print_exc()
             return None
 
+    def _is_market_open(self) -> bool:
+        """장 시간 체크 (평일 09:00~15:30)"""
+        now = datetime.now(KST)
+
+        # 주말 체크
+        if now.weekday() >= 5:  # 5=토요일, 6=일요일
+            return False
+
+        # 장 시간 체크 (09:00~15:30)
+        market_open = now.replace(hour=9, minute=0, second=0, microsecond=0)
+        market_close = now.replace(hour=15, minute=30, second=0, microsecond=0)
+
+        return market_open <= now <= market_close
+
     async def monitor_loop(self):
         """모니터링 루프"""
         logger.info("모니터링 루프 시작")
@@ -531,6 +545,13 @@ class PriceMonitor:
             try:
                 if not self.is_monitoring:
                     await asyncio.sleep(1)
+                    continue
+
+                # 장 시간 체크
+                if not self._is_market_open():
+                    now = datetime.now(KST)
+                    logger.debug(f"장 시간 외 (현재: {now.strftime('%Y-%m-%d %H:%M:%S')})")
+                    await asyncio.sleep(60)  # 1분 대기 후 재확인
                     continue
 
                 # Tactic1/2 감시
