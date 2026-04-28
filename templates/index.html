@@ -652,15 +652,19 @@
                     </div>
                 </div>
 
-                <!-- 오늘 전체 뉴스 + 급등주 -->
+                <!-- 오늘 전체 뉴스 + 급등주 (기본 접힘) -->
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
                     <!-- 전체 뉴스 -->
                     <div class="card">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;" onclick="toggleSection('newsAllSection', 'newsAllChevron')">
                             <h3 style="margin: 0; font-size: 15px;">📋 전체 뉴스 <span id="newsAllCount" style="font-weight: normal; color: #868e96; font-size: 13px;"></span></h3>
-                            <button class="btn btn-danger" style="font-size: 11px; padding: 3px 8px;" onclick="deleteSelectedMessages('newsAll')">선택 삭제</button>
+                            <div style="display:flex;gap:6px;align-items:center;" onclick="event.stopPropagation()">
+                                <span id="newsAllChevron" style="color:#868e96;font-size:14px;cursor:pointer;" onclick="toggleSection('newsAllSection','newsAllChevron')">▶</span>
+                                <button class="btn btn-secondary" style="font-size: 11px; padding: 3px 8px;" onclick="extractJsonClipboard('newsAll')">📋 JSON</button>
+                                <button class="btn btn-danger" style="font-size: 11px; padding: 3px 8px;" onclick="deleteSelectedMessages('newsAll')">선택 삭제</button>
+                            </div>
                         </div>
-                        <div style="max-height: 500px; overflow-y: auto;">
+                        <div id="newsAllSection" style="display:none; margin-top:8px; max-height: 500px; overflow-y: auto;">
                             <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
                                 <thead><tr style="background: #f8f9fa; position: sticky; top: 0;">
                                     <th style="padding: 5px 4px; width: 24px; border-bottom: 1px solid #dee2e6;"><input type="checkbox" onchange="toggleTableCheckboxes('newsAll', this)"></th>
@@ -674,11 +678,15 @@
 
                     <!-- 전체 급등주 -->
                     <div class="card">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;" onclick="toggleSection('hotstockAllSection', 'hotstockAllChevron')">
                             <h3 style="margin: 0; font-size: 15px;">📈 전체 급등주 <span id="hotstockAllCount" style="font-weight: normal; color: #868e96; font-size: 13px;"></span></h3>
-                            <button class="btn btn-danger" style="font-size: 11px; padding: 3px 8px;" onclick="deleteSelectedMessages('hotstockAll')">선택 삭제</button>
+                            <div style="display:flex;gap:6px;align-items:center;" onclick="event.stopPropagation()">
+                                <span id="hotstockAllChevron" style="color:#868e96;font-size:14px;cursor:pointer;" onclick="toggleSection('hotstockAllSection','hotstockAllChevron')">▶</span>
+                                <button class="btn btn-secondary" style="font-size: 11px; padding: 3px 8px;" onclick="extractJsonClipboard('hotstockAll')">📋 JSON</button>
+                                <button class="btn btn-danger" style="font-size: 11px; padding: 3px 8px;" onclick="deleteSelectedMessages('hotstockAll')">선택 삭제</button>
+                            </div>
                         </div>
-                        <div style="max-height: 500px; overflow-y: auto;">
+                        <div id="hotstockAllSection" style="display:none; margin-top:8px; max-height: 500px; overflow-y: auto;">
                             <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
                                 <thead><tr style="background: #f8f9fa; position: sticky; top: 0;">
                                     <th style="padding: 5px 4px; width: 24px; border-bottom: 1px solid #dee2e6;"><input type="checkbox" onchange="toggleTableCheckboxes('hotstockAll', this)"></th>
@@ -699,6 +707,7 @@
                             <h3 style="margin: 0; font-size: 15px;">🎯 필터링된 뉴스 <span id="newsFilteredCount" style="font-weight: normal; color: #868e96; font-size: 13px;"></span></h3>
                             <div style="display: flex; gap: 6px;">
                                 <button id="newsInsightSelectedBtn" class="btn btn-primary" style="font-size: 11px; padding: 3px 8px; display: none;" onclick="runNewsInsightSelected()">🤖 선택 분석</button>
+                                <button class="btn btn-secondary" style="font-size: 11px; padding: 3px 8px;" onclick="extractJsonClipboard('newsFiltered')">📋 JSON</button>
                                 <button class="btn btn-success" style="font-size: 11px; padding: 3px 8px;" onclick="scrapeSelectedNews()">📌 스크래핑</button>
                                 <button class="btn btn-danger" style="font-size: 11px; padding: 3px 8px;" onclick="deleteSelectedMessages('newsFiltered')">선택 삭제</button>
                             </div>
@@ -719,7 +728,10 @@
                     <div class="card">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                             <h3 style="margin: 0; font-size: 15px;">🎯 매칭된 급등주 <span id="hotstockFilteredCount" style="font-weight: normal; color: #868e96; font-size: 13px;"></span></h3>
-                            <button class="btn btn-danger" style="font-size: 11px; padding: 3px 8px;" onclick="deleteSelectedMessages('hotstockFiltered')">선택 삭제</button>
+                            <div style="display:flex;gap:6px;">
+                                <button class="btn btn-secondary" style="font-size: 11px; padding: 3px 8px;" onclick="extractJsonClipboard('hotstockFiltered')">📋 JSON</button>
+                                <button class="btn btn-danger" style="font-size: 11px; padding: 3px 8px;" onclick="deleteSelectedMessages('hotstockFiltered')">선택 삭제</button>
+                            </div>
                         </div>
                         <div style="max-height: 500px; overflow-y: auto;">
                             <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
@@ -741,11 +753,13 @@
                         <div style="display: flex; gap: 8px; align-items: center;">
                             <input type="text" id="savedNewsSearch" placeholder="키워드 검색..." style="padding: 5px 10px; border: 1px solid #dee2e6; border-radius: 6px; font-size: 13px; width: 180px;">
                             <button class="btn btn-secondary" style="font-size: 12px; padding: 5px 10px;" onclick="loadSavedNews()">🔍 검색</button>
+                            <button class="btn btn-secondary" style="font-size: 12px; padding: 5px 10px;" onclick="extractJsonClipboard('savedNews')">📋 JSON</button>
                         </div>
                     </div>
                     <div style="max-height: 300px; overflow-y: auto;">
                         <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
                             <thead><tr style="background: #f8f9fa; position: sticky; top: 0;">
+                                <th style="padding: 6px 4px; width: 24px; border-bottom: 1px solid #dee2e6;"><input type="checkbox" onchange="toggleTableCheckboxes('savedNews', this)"></th>
                                 <th style="padding: 6px 8px; text-align: left; border-bottom: 1px solid #dee2e6;">내용</th>
                                 <th style="padding: 6px 8px; text-align: center; border-bottom: 1px solid #dee2e6; white-space: nowrap;">원본날짜</th>
                                 <th style="padding: 6px 8px; text-align: center; border-bottom: 1px solid #dee2e6; white-space: nowrap;">저장일시</th>

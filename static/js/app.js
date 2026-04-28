@@ -5246,6 +5246,15 @@ function _renderMsgTable(tbodyId, data, tableKey) {
     }).join('');
 }
 
+function toggleSection(sectionId, chevronId) {
+    const el = document.getElementById(sectionId);
+    const ch = document.getElementById(chevronId);
+    if (!el) return;
+    const open = el.style.display === 'none';
+    el.style.display = open ? '' : 'none';
+    if (ch) ch.textContent = open ? '▼' : '▶';
+}
+
 function toggleTableCheckboxes(tableKey, masterCb) {
     document.querySelectorAll(`.cb-${tableKey}`).forEach(cb => { cb.checked = masterCb.checked; });
     _onMsgCbChange(tableKey);
@@ -5318,24 +5327,29 @@ async function scrapeSelectedNews() {
     } catch (e) { showToast('요청 실패', 'error'); }
 }
 
+const _savedNewsData = [];
+
 async function loadSavedNews() {
     const q = (document.getElementById('savedNewsSearch')?.value || '').trim();
     const qs = q ? `?q=${encodeURIComponent(q)}` : '';
     try {
         const r = await (await fetch(`/api/news/saved${qs}`, { credentials: 'same-origin' })).json();
         const data = r.success ? r.data : [];
+        _savedNewsData.length = 0;
+        data.forEach(d => _savedNewsData.push(d));
         const countEl = document.getElementById('savedNewsCount');
         if (countEl) countEl.textContent = `(${data.length}건)`;
         const tbody = document.getElementById('savedNewsBody');
         if (!tbody) return;
         if (!data.length) {
-            tbody.innerHTML = `<tr><td colspan="4" style="padding:16px;text-align:center;color:#868e96;font-size:13px;">저장된 뉴스 없음</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="5" style="padding:16px;text-align:center;color:#868e96;font-size:13px;">저장된 뉴스 없음</td></tr>`;
             return;
         }
         tbody.innerHTML = data.map(m => {
             const text = (m.text || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
             const preview = text.length > 100 ? text.slice(0, 100) + '…' : text;
             return `<tr style="border-bottom:1px solid #f1f3f5;">
+                <td style="padding:5px 4px;width:24px;"><input type="checkbox" class="msg-cb cb-savedNews" data-id="${m.id}" onchange="_onMsgCbChange('savedNews')"></td>
                 <td style="padding:5px 8px;font-size:12px;line-height:1.4;" title="${text}">${preview}</td>
                 <td style="padding:5px 8px;font-size:11px;color:#495057;text-align:center;white-space:nowrap;">${m.original_date || '-'}</td>
                 <td style="padding:5px 8px;font-size:11px;color:#868e96;text-align:center;white-space:nowrap;">${_fmtDatetime(m.saved_at)}</td>
@@ -5345,6 +5359,49 @@ async function loadSavedNews() {
             </tr>`;
         }).join('');
     } catch (e) {}
+}
+
+function _extractUrlFromText(text) {
+    const m = text.match(/https?:\/\/[^\s\)\"\']+/);
+    return m ? m[0] : null;
+}
+
+function extractJsonClipboard(tableKey) {
+    let items;
+    if (tableKey === 'savedNews') {
+        const checkedIds = new Set(
+            Array.from(document.querySelectorAll('.cb-savedNews:checked')).map(cb => parseInt(cb.dataset.id))
+        );
+        if (checkedIds.size === 0) { showToast('JSON으로 추출할 항목을 선택하세요', 'error'); return; }
+        items = _savedNewsData.filter(m => checkedIds.has(m.id)).map(m => {
+            const text = m.text || '';
+            const title = text.split('\n')[0].trim().replace(/https?:\/\/\S+/g, '').trim() || text.slice(0, 80);
+            const url = _extractUrlFromText(text);
+            return { title, url };
+        });
+    } else {
+        const sourceData = _tableData[tableKey] || [];
+        const checkedIds = new Set(
+            Array.from(document.querySelectorAll(`.cb-${tableKey}:checked`)).map(cb => parseInt(cb.dataset.id))
+        );
+        if (checkedIds.size === 0) { showToast('JSON으로 추출할 항목을 선택하세요', 'error'); return; }
+        items = sourceData.filter(m => checkedIds.has(m.id)).map(m => {
+            const text = m.text || '';
+            const title = text.split('\n')[0].trim().replace(/https?:\/\/\S+/g, '').trim() || text.slice(0, 80);
+            const url = _extractUrlFromText(text);
+            return { title, url };
+        });
+    }
+    const json = JSON.stringify(items, null, 2);
+    navigator.clipboard.writeText(json)
+        .then(() => showToast(`✓ ${items.length}건 JSON 클립보드 복사됨`, 'success'))
+        .catch(() => {
+            const ta = document.createElement('textarea');
+            ta.value = json; ta.style.position = 'fixed'; ta.style.opacity = '0';
+            document.body.appendChild(ta); ta.select(); document.execCommand('copy');
+            document.body.removeChild(ta);
+            showToast(`✓ ${items.length}건 JSON 클립보드 복사됨`, 'success');
+        });
 }
 
 async function deleteSavedNews(id) {
