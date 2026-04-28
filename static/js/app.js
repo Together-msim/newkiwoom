@@ -40,6 +40,7 @@ function switchPage(pageName) {
     else if (pageName === 'mode1') loadMode1List();
     else if (pageName === 'mode2') loadMode2List();
     else if (pageName === 'tradelog') loadTradelog();
+    else if (pageName === 'newsfilter') loadNewsFilter();
     else if (pageName === 'test') loadMode2PickList(); // Test 페이지 진입 시 picklist 로드
 }
 
@@ -93,6 +94,43 @@ function setupEventListeners() {
         mode2NotifyOnly.addEventListener('change', () => {
             // 알림 전용: 3분(180초), 자동매매: 30초
             mode2PollingInterval.value = mode2NotifyOnly.checked ? '180' : '30';
+        });
+    }
+
+    // Mode2 Budget picklist 변경 시 처리
+    const mode2BudgetSelect = document.getElementById('mode2BudgetSelect');
+    const mode2BudgetInput = document.getElementById('mode2Budget');
+    if (mode2BudgetSelect && mode2BudgetInput) {
+        mode2BudgetSelect.addEventListener('change', () => {
+            if (mode2BudgetSelect.value === 'custom') {
+                mode2BudgetInput.style.display = 'inline-block';
+                mode2BudgetInput.focus();
+            } else {
+                mode2BudgetInput.style.display = 'none';
+                mode2BudgetInput.value = mode2BudgetSelect.value;
+            }
+        });
+    }
+
+    // Mode2 익절/손절 % 자동 계산 (합=100)
+    const resistance1ProfitPct = document.getElementById('resistance1ProfitPct');
+    const resistance2ProfitPct = document.querySelector('select[name="resistance_2_profit_pct"]');
+    const support1LossPct = document.getElementById('support1LossPct');
+    const support2LossPct = document.querySelector('select[name="support_2_loss_pct"]');
+
+    if (resistance1ProfitPct && resistance2ProfitPct) {
+        resistance1ProfitPct.addEventListener('change', () => {
+            const val1 = parseInt(resistance1ProfitPct.value);
+            const val2 = 100 - val1;
+            resistance2ProfitPct.value = val2;
+        });
+    }
+
+    if (support1LossPct && support2LossPct) {
+        support1LossPct.addEventListener('change', () => {
+            const val1 = parseInt(support1LossPct.value);
+            const val2 = 100 - val1;
+            support2LossPct.value = val2;
         });
     }
 
@@ -358,11 +396,17 @@ function renderMode2SectionList(sections, allWatchers) {
         watchersBySection[sectionId].push(w);
     });
 
-    // 각 섹션별로 정렬
+    // 각 섹션별로 정렬 (자동매매 우선, 그 다음 display_order)
     Object.keys(watchersBySection).forEach(sectionId => {
-        watchersBySection[sectionId].sort((a, b) =>
-            (a.display_order || 9999) - (b.display_order || 9999)
-        );
+        watchersBySection[sectionId].sort((a, b) => {
+            // 1순위: notify_only (false가 true보다 우선)
+            const notifyA = a.notify_only ? 1 : 0;
+            const notifyB = b.notify_only ? 1 : 0;
+            if (notifyA !== notifyB) return notifyA - notifyB;
+
+            // 2순위: display_order
+            return (a.display_order || 9999) - (b.display_order || 9999);
+        });
     });
 
     container.innerHTML = sections.map(section => {
@@ -450,7 +494,7 @@ function renderMode2WatcherRow(w, idx) {
             <div class="watcher-cell"><strong>${w.code}</strong></div>
             <div class="watcher-cell" onclick="showNoteModal('${w.name || '-'}', '${w.code}', '${(w.note || '').replace(/'/g, "\\'")}' )" style="cursor: pointer; color: #228be6; font-weight: 600;">${w.name || '-'}</div>
             <div class="watcher-cell editable" data-field="buy_target_price" ondblclick="enableCellEdit(this, '${w.code}')">${formatNumber(w.buy_target_price)}</div>
-            <div class="watcher-cell editable" data-field="budget" ondblclick="enableCellEdit(this, '${w.code}')">${formatNumber(w.budget)}</div>
+            <div class="watcher-cell editable" data-field="budget" ondblclick="enableCellEdit(this, '${w.code}')">${(w.budget / 10000).toFixed(0)}만</div>
             <div class="watcher-cell">${w.quantity}주</div>
             <div class="watcher-cell editable" data-field="support_2_price" ondblclick="enableCellEdit(this, '${w.code}')">${formatNumber(w.support_2_price)}</div>
             <div class="watcher-cell editable" data-field="support_1_price" ondblclick="enableCellEdit(this, '${w.code}')">${formatNumber(w.support_1_price)}</div>
@@ -507,11 +551,22 @@ async function handleMode2Submit(e) {
     const name = formData.get('name');
     const notifyOnly = document.getElementById('mode2NotifyOnly').checked;
 
+    // Budget 계산 (만원 단위)
+    const budgetSelect = document.getElementById('mode2BudgetSelect').value;
+    let budgetValue = 0;
+    if (budgetSelect === 'custom') {
+        const manwon = parseInt(document.getElementById('mode2Budget').value) || 0;
+        budgetValue = manwon * 10000;
+    } else {
+        const manwon = parseInt(budgetSelect);
+        budgetValue = manwon * 10000;
+    }
+
     const data = {
         code: code,
         name: name,
         buy_target_price: parseInt(formData.get('buy_target_price')) || 0,
-        budget: parseInt(formData.get('budget')) || 1000000,
+        budget: budgetValue,
         polling_interval: parseInt(formData.get('polling_interval')) || 10,
         notify_only: notifyOnly,
         resistance_1_price: parseInt(formData.get('resistance_1_price')) || 0,
@@ -1113,10 +1168,16 @@ async function handleLoadAccountPositions(silent = false) {
                             </td>
                             <td style="padding: 10px; text-align: right; font-size: 13px;">${formatNumber(p.eval_amount)}원</td>
                             <td style="padding: 10px; text-align: center;">
-                                <button class="btn btn-danger" style="font-size: 11px; padding: 4px 12px;"
-                                        onclick="showHoldingSellModal('${p.code}', '${p.name}', ${p.quantity}, ${p.buy_price})">
-                                    매도
-                                </button>
+                                <div style="display: flex; gap: 6px; justify-content: center; flex-wrap: wrap;">
+                                    <button class="btn btn-primary" style="font-size: 11px; padding: 4px 10px;"
+                                            onclick="showMode2TransferModal('${p.code}', '${p.name}', ${p.quantity}, ${p.buy_price})">
+                                        📊 Mode2
+                                    </button>
+                                    <button class="btn btn-danger" style="font-size: 11px; padding: 4px 10px;"
+                                            onclick="showHoldingSellModal('${p.code}', '${p.name}', ${p.quantity}, ${p.buy_price})">
+                                        매도
+                                    </button>
+                                </div>
                             </td>
                         </tr>
                     `;
@@ -1540,13 +1601,13 @@ async function selectMode2Row(code) {
 
             document.querySelector('input[name="buy_target_price"]').value = w.buy_target_price;
             document.querySelector('input[name="resistance_2_price"]').value = w.resistance_2_price;
-            document.querySelector('input[name="resistance_2_profit_pct"]').value = w.resistance_2_profit_pct;
+            document.querySelector('select[name="resistance_2_profit_pct"]').value = w.resistance_2_profit_pct;
             document.querySelector('input[name="resistance_1_price"]').value = w.resistance_1_price;
-            document.querySelector('input[name="resistance_1_profit_pct"]').value = w.resistance_1_profit_pct;
+            document.querySelector('select[name="resistance_1_profit_pct"]').value = w.resistance_1_profit_pct;
             document.querySelector('input[name="support_1_price"]').value = w.support_1_price;
-            document.querySelector('input[name="support_1_loss_pct"]').value = w.support_1_loss_pct;
+            document.querySelector('select[name="support_1_loss_pct"]').value = w.support_1_loss_pct;
             document.querySelector('input[name="support_2_price"]').value = w.support_2_price;
-            document.querySelector('input[name="support_2_loss_pct"]').value = w.support_2_loss_pct;
+            document.querySelector('select[name="support_2_loss_pct"]').value = w.support_2_loss_pct;
 
             showToast('✓ 데이터 로드 완료', 'success');
         }
@@ -2155,7 +2216,7 @@ function drawCandlestickChart(data, canvasId, containerId) {
     const minPrice = Math.min(...allPrices);
     const maxPrice = Math.max(...allPrices);
     const priceRange = maxPrice - minPrice;
-    const padding = priceRange * 0.15;
+    const padding = priceRange * 0.25;  // 15% → 25% 여유 공간 증가 (전일 데이터 포함)
 
     // 차트 영역
     const chartLeft = 80;
@@ -2849,6 +2910,107 @@ function closeNoteModal() {
     originalNoteText = '';
 }
 
+// ========== Mode2 편입 모달 ==========
+let transferStockData = null;
+
+function showMode2TransferModal(code, name, quantity, buyPrice) {
+    const modal = document.getElementById('mode2TransferModal');
+    const budget = quantity * buyPrice;
+
+    // 데이터 저장
+    transferStockData = { code, name, quantity, buyPrice, budget };
+
+    // 자동 입력 값 표시
+    document.getElementById('transferStockCode').textContent = code;
+    document.getElementById('transferStockName').textContent = name;
+    document.getElementById('transferQuantity').textContent = formatNumber(quantity);
+    document.getElementById('transferBuyPrice').textContent = formatNumber(buyPrice);
+    document.getElementById('transferBudget').textContent = formatNumber(budget);
+
+    // 입력 필드 초기화
+    document.getElementById('transferResistance1').value = '';
+    document.getElementById('transferSupport1').value = '';
+
+    modal.style.display = 'block';
+}
+
+function closeMode2TransferModal() {
+    const modal = document.getElementById('mode2TransferModal');
+    modal.style.display = 'none';
+    transferStockData = null;
+}
+
+async function handleMode2TransferSubmit(e) {
+    e.preventDefault();
+
+    if (!transferStockData) {
+        showToast('종목 데이터를 찾을 수 없습니다', 'error');
+        return;
+    }
+
+    const resistance1 = parseInt(document.getElementById('transferResistance1').value) || 0;
+    const support1 = parseInt(document.getElementById('transferSupport1').value) || 0;
+
+    if (resistance1 <= 0 || support1 <= 0) {
+        showToast('1차 저항/지지 가격을 입력해주세요', 'error');
+        return;
+    }
+
+    if (support1 >= transferStockData.buyPrice) {
+        showToast('1차 지지는 매입가보다 낮아야 합니다', 'error');
+        return;
+    }
+
+    if (resistance1 <= transferStockData.buyPrice) {
+        showToast('1차 저항은 매입가보다 높아야 합니다', 'error');
+        return;
+    }
+
+    const data = {
+        code: transferStockData.code,
+        name: transferStockData.name,
+        buy_target_price: transferStockData.buyPrice,
+        budget: transferStockData.budget,
+        quantity: transferStockData.quantity,
+        polling_interval: 30, // 기본 30초
+        notify_only: false, // 자동매매 모드
+        resistance_1_price: resistance1,
+        resistance_1_profit_pct: 100, // 1차 저항에서 100% 익절
+        resistance_2_price: 0,
+        resistance_2_profit_pct: 0,
+        support_1_price: support1,
+        support_1_loss_pct: 100, // 1차 지지에서 100% 손절
+        support_2_price: 0,
+        support_2_loss_pct: 0,
+        status: 'waiting_sell', // 이미 매수 완료 상태
+        bought_price: transferStockData.buyPrice,
+        bought_quantity: transferStockData.quantity,
+        bought_at: new Date().toISOString()
+    };
+
+    try {
+        const response = await fetch('/api/mode2/watchers', {
+            credentials: 'same-origin',
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            showToast('✅ Mode2 감시 종목으로 편입되었습니다', 'success');
+            closeMode2TransferModal();
+            loadMode2List();
+            loadWatchlist();
+        } else {
+            showToast(result.error || '편입 실패', 'error');
+        }
+    } catch (error) {
+        showToast('요청 실패: ' + error.message, 'error');
+    }
+}
+
 function enableNoteEdit() {
     const modalText = document.getElementById('noteModalText');
     const modalTextarea = document.getElementById('noteModalTextarea');
@@ -2934,11 +3096,24 @@ async function saveNote() {
     }
 }
 
+// Mode2 편입 폼 submit 이벤트 리스너
+document.addEventListener('DOMContentLoaded', () => {
+    const mode2TransferForm = document.getElementById('mode2TransferForm');
+    if (mode2TransferForm) {
+        mode2TransferForm.addEventListener('submit', handleMode2TransferSubmit);
+    }
+});
+
 // 모달 외부 클릭 시 닫기
 window.addEventListener('click', (event) => {
-    const modal = document.getElementById('noteModal');
-    if (event.target === modal) {
+    const noteModal = document.getElementById('noteModal');
+    if (event.target === noteModal) {
         closeNoteModal();
+    }
+
+    const transferModal = document.getElementById('mode2TransferModal');
+    if (event.target === transferModal) {
+        closeMode2TransferModal();
     }
 });
 
@@ -4046,13 +4221,13 @@ function fillMode2Form(watcher) {
 
     document.querySelector('input[name="buy_target_price"]').value = watcher.buy_target_price || '';
     document.querySelector('input[name="resistance_2_price"]').value = watcher.resistance_2_price || '';
-    document.querySelector('input[name="resistance_2_profit_pct"]').value = watcher.resistance_2_profit_pct || 50;
+    document.querySelector('select[name="resistance_2_profit_pct"]').value = watcher.resistance_2_profit_pct || 50;
     document.querySelector('input[name="resistance_1_price"]').value = watcher.resistance_1_price || '';
-    document.querySelector('input[name="resistance_1_profit_pct"]').value = watcher.resistance_1_profit_pct || 50;
+    document.querySelector('select[name="resistance_1_profit_pct"]').value = watcher.resistance_1_profit_pct || 50;
     document.querySelector('input[name="support_1_price"]').value = watcher.support_1_price || '';
-    document.querySelector('input[name="support_1_loss_pct"]').value = watcher.support_1_loss_pct || 50;
+    document.querySelector('select[name="support_1_loss_pct"]').value = watcher.support_1_loss_pct || 50;
     document.querySelector('input[name="support_2_price"]').value = watcher.support_2_price || '';
-    document.querySelector('input[name="support_2_loss_pct"]').value = watcher.support_2_loss_pct || 50;
+    document.querySelector('select[name="support_2_loss_pct"]').value = watcher.support_2_loss_pct || 50;
 }
 
 // 종목 편집 취소
@@ -4198,6 +4373,7 @@ function enableCellEdit(cell, code) {
 
     const field = cell.getAttribute('data-field');
     const isNote = field === 'note';
+    const isBudget = field === 'budget';
     const originalValue = isNote ? cell.getAttribute('title') : cell.textContent.replace(/,/g, '').replace(/원/g, '').trim();
 
     // input 또는 textarea 생성
@@ -4211,8 +4387,12 @@ function enableCellEdit(cell, code) {
         input.style.resize = 'vertical';
     } else {
         input.type = 'number';
-        input.value = originalValue;
+        // Budget 필드는 만원 단위로 표시
+        input.value = isBudget ? (parseInt(originalValue) / 10000 || 0) : originalValue;
         input.style.width = '100%';
+        if (isBudget) {
+            input.placeholder = '만원 단위 (예: 30 = 30만원)';
+        }
     }
 
     input.style.padding = '4px';
@@ -4224,17 +4404,27 @@ function enableCellEdit(cell, code) {
     const saveEdit = async () => {
         const newValue = input.value.trim();
 
+        // Budget 필드는 만원 단위로 입력받아 원 단위로 변환
+        const actualValue = isBudget ? (parseInt(newValue) * 10000 || 0) : (parseInt(newValue) || 0);
+
         // 변경사항 체크
-        if (newValue === originalValue) {
+        const compareValue = isBudget ? (parseInt(originalValue) || 0) : originalValue;
+        if (actualValue == compareValue && !isNote) {
             cell.innerHTML = isNote ? truncateText(originalValue, 20) : formatNumber(originalValue);
             if (isNote) cell.setAttribute('title', originalValue);
+            return;
+        }
+
+        if (isNote && newValue === originalValue) {
+            cell.innerHTML = truncateText(originalValue, 20);
+            cell.setAttribute('title', originalValue);
             return;
         }
 
         // API 호출
         try {
             const data = {};
-            data[field] = isNote ? newValue : (parseInt(newValue) || 0);
+            data[field] = isNote ? newValue : actualValue;
 
             const response = await fetch(`/api/mode2/watchers/${code}`, {
                 credentials: 'same-origin',
@@ -4959,3 +5149,330 @@ document.getElementById('cancelBulkBtn')?.addEventListener('click', () => {
     document.querySelectorAll('.watcher-checkbox').forEach(cb => cb.checked = false);
     handleWatcherCheckboxChange();
 });
+
+// ============================================================
+// 📰 뉴스필터 페이지
+// ============================================================
+
+let _keywordData = null; // 캐시된 키워드 설정
+
+function _newsFilterDate() {
+    const d = document.getElementById('newsfilterDate');
+    return d && d.value ? d.value : '';
+}
+
+function _fmtTime(dtStr) {
+    if (!dtStr) return '-';
+    const d = new Date(dtStr);
+    if (isNaN(d)) return dtStr;
+    return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+}
+
+async function loadNewsFilter() {
+    const date = _newsFilterDate();
+    const qs = date ? `?date=${date}` : '';
+    await Promise.all([
+        _loadNewsAll(qs),
+        _loadHotstockAll(qs),
+        _loadNewsFiltered(qs),
+        _loadHotstockFiltered(qs),
+        loadKeywords(),
+        loadThemes(),
+    ]);
+}
+
+async function _loadNewsAll(qs) {
+    try {
+        const res = await fetch(`/api/news/today${qs}`, { credentials: 'same-origin' });
+        const r = await res.json();
+        const data = r.success ? r.data : [];
+        document.getElementById('newsAllCount').textContent = `(${data.length}건)`;
+        _renderMsgTable('newsAllBody', data, false);
+    } catch (e) { /* ignore */ }
+}
+
+async function _loadHotstockAll(qs) {
+    try {
+        const res = await fetch(`/api/hotstock/today${qs}`, { credentials: 'same-origin' });
+        const r = await res.json();
+        const data = r.success ? r.data : [];
+        document.getElementById('hotstockAllCount').textContent = `(${data.length}건)`;
+        _renderMsgTable('hotstockAllBody', data, false);
+    } catch (e) { /* ignore */ }
+}
+
+async function _loadNewsFiltered(qs) {
+    try {
+        const res = await fetch(`/api/news/filtered${qs}`, { credentials: 'same-origin' });
+        const r = await res.json();
+        const data = r.success ? r.data : [];
+        document.getElementById('newsFilteredCount').textContent = `(${data.length}건)`;
+        _renderMsgTable('newsFilteredBody', data, true);
+    } catch (e) { /* ignore */ }
+}
+
+async function _loadHotstockFiltered(qs) {
+    try {
+        const res = await fetch(`/api/hotstock/filtered${qs}`, { credentials: 'same-origin' });
+        const r = await res.json();
+        const data = r.success ? r.data : [];
+        document.getElementById('hotstockFilteredCount').textContent = `(${data.length}건)`;
+        _renderMsgTable('hotstockFilteredBody', data, false);
+    } catch (e) { /* ignore */ }
+}
+
+function _renderMsgTable(tbodyId, data, showCheckbox) {
+    const tbody = document.getElementById(tbodyId);
+    if (!tbody) return;
+    if (!data || data.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="${showCheckbox ? 3 : 2}" class="empty-state" style="padding:16px; text-align:center; color:#868e96; font-size:13px;">데이터 없음</td></tr>`;
+        return;
+    }
+    tbody.innerHTML = data.map(m => {
+        const time = _fmtTime(m.received_at);
+        const text = (m.text || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const preview = text.length > 80 ? text.slice(0, 80) + '…' : text;
+        const cb = showCheckbox ? `<td style="padding:5px 4px; width:28px;"><input type="checkbox" class="news-select-cb" data-id="${m.id}" onchange="_onNewsCheckboxChange()"></td>` : '';
+        return `<tr style="border-bottom: 1px solid #f1f3f5;">
+            ${cb}
+            <td style="padding:5px 8px; font-size:12px; line-height:1.4;" title="${text}">${preview}</td>
+            <td style="padding:5px 8px; font-size:11px; color:#868e96; text-align:right; white-space:nowrap;">${time}</td>
+        </tr>`;
+    }).join('');
+}
+
+function toggleAllNewsCheckboxes(masterCb) {
+    document.querySelectorAll('.news-select-cb').forEach(cb => { cb.checked = masterCb.checked; });
+    _onNewsCheckboxChange();
+}
+
+function _onNewsCheckboxChange() {
+    const selected = document.querySelectorAll('.news-select-cb:checked').length;
+    const btn = document.getElementById('newsInsightSelectedBtn');
+    if (btn) btn.style.display = selected > 0 ? 'inline-block' : 'none';
+}
+
+function runNewsInsightSelected() {
+    const ids = Array.from(document.querySelectorAll('.news-select-cb:checked')).map(cb => cb.dataset.id);
+    if (ids.length === 0) { showToast('선택된 뉴스가 없습니다', 'error'); return; }
+    // 스킬에서 사용할 수 있도록 클립보드/콘솔에 ID 목록 출력
+    const idStr = ids.join(',');
+    navigator.clipboard?.writeText(idStr).catch(() => {});
+    showToast(`${ids.length}건 선택됨 (ID: ${idStr}) - /news-insight-selected 스킬에서 사용`, 'info');
+    console.log('선택된 뉴스 IDs:', idStr);
+}
+
+// ─── 키워드 관리 ───────────────────────────────────────────
+
+async function loadKeywords() {
+    try {
+        const res = await fetch('/api/keywords', { credentials: 'same-origin' });
+        const r = await res.json();
+        if (!r.success) return;
+        _keywordData = r.data;
+        _renderKeywordTags('includeKeywordTags', r.data.include_keywords || [], 'include');
+        _renderKeywordTags('excludeKeywordTags', r.data.exclude_keywords || [], 'exclude');
+        _renderGroupTags('keywordGroupTags', r.data.include_groups || []);
+        const mode = r.data.mode || 'loose';
+        const btn = document.getElementById('keywordModeBtn');
+        const desc = document.getElementById('keywordModeDesc');
+        if (btn) btn.textContent = mode;
+        if (desc) desc.textContent = mode === 'loose' ? '키워드 하나라도 일치하면 전달' : '모든 키워드가 일치해야 전달';
+    } catch (e) { /* ignore */ }
+}
+
+function _renderKeywordTags(containerId, keywords, type) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    container.innerHTML = keywords.map(kw =>
+        `<span style="display:inline-flex;align-items:center;gap:4px;background:${type==='include'?'#d3f9d8':'#ffe3e3'};color:${type==='include'?'#2f9e44':'#c92a2a'};padding:3px 10px;border-radius:12px;font-size:12px;">
+            ${kw}
+            <span style="cursor:pointer;font-size:14px;line-height:1;" onclick="removeKeyword('${type}','${kw}')" title="삭제">×</span>
+        </span>`
+    ).join('') || `<span style="font-size:12px;color:#adb5bd;">없음</span>`;
+}
+
+function _renderGroupTags(containerId, groups) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    container.innerHTML = groups.map(g =>
+        `<span style="display:inline-flex;align-items:center;gap:4px;background:#e7f5ff;color:#1971c2;padding:3px 10px;border-radius:12px;font-size:12px;">
+            ${g.join(' AND ')}
+            <span style="cursor:pointer;font-size:14px;line-height:1;" onclick="removeKeywordGroup(${JSON.stringify(g)})" title="삭제">×</span>
+        </span>`
+    ).join('') || `<span style="font-size:12px;color:#adb5bd;">없음</span>`;
+}
+
+async function addKeyword(type) {
+    const inputId = type === 'include' ? 'includeKeywordInput' : 'excludeKeywordInput';
+    const input = document.getElementById(inputId);
+    const keyword = input ? input.value.trim() : '';
+    if (!keyword) { showToast('키워드를 입력하세요', 'error'); return; }
+    try {
+        const res = await fetch(`/api/keywords/${type}`, {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ keyword }),
+        });
+        const r = await res.json();
+        if (r.success) {
+            if (input) input.value = '';
+            _keywordData = r.keywords;
+            _renderKeywordTags(`${type}KeywordTags`, r.keywords[`${type}_keywords`] || [], type);
+            showToast(`✓ "${keyword}" 추가`, 'success');
+        } else { showToast(r.error, 'error'); }
+    } catch (e) { showToast('요청 실패', 'error'); }
+}
+
+async function removeKeyword(type, keyword) {
+    try {
+        const res = await fetch(`/api/keywords/${type}`, {
+            method: 'DELETE', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ keyword }),
+        });
+        const r = await res.json();
+        if (r.success) {
+            _keywordData = r.keywords;
+            _renderKeywordTags(`${type}KeywordTags`, r.keywords[`${type}_keywords`] || [], type);
+            showToast(`✓ "${keyword}" 삭제`, 'success');
+        } else { showToast(r.error, 'error'); }
+    } catch (e) { showToast('요청 실패', 'error'); }
+}
+
+async function addKeywordGroup() {
+    const input = document.getElementById('groupKeywordInput');
+    const raw = input ? input.value.trim() : '';
+    const keywords = raw.split(',').map(k => k.trim()).filter(k => k);
+    if (keywords.length < 2) { showToast('키워드를 쉼표로 구분하여 2개 이상 입력하세요', 'error'); return; }
+    try {
+        const res = await fetch('/api/keywords/group', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ keywords }),
+        });
+        const r = await res.json();
+        if (r.success) {
+            if (input) input.value = '';
+            _keywordData = r.keywords;
+            _renderGroupTags('keywordGroupTags', r.keywords.include_groups || []);
+            showToast(`✓ AND 그룹 추가: ${keywords.join(' AND ')}`, 'success');
+        } else { showToast(r.error, 'error'); }
+    } catch (e) { showToast('요청 실패', 'error'); }
+}
+
+async function removeKeywordGroup(keywords) {
+    try {
+        const res = await fetch('/api/keywords/group', {
+            method: 'DELETE', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ keywords }),
+        });
+        const r = await res.json();
+        if (r.success) {
+            _keywordData = r.keywords;
+            _renderGroupTags('keywordGroupTags', r.keywords.include_groups || []);
+            showToast('✓ 그룹 삭제', 'success');
+        } else { showToast(r.error, 'error'); }
+    } catch (e) { showToast('요청 실패', 'error'); }
+}
+
+async function toggleKeywordMode() {
+    const currentMode = (_keywordData && _keywordData.mode) || 'loose';
+    const newMode = currentMode === 'loose' ? 'strict' : 'loose';
+    try {
+        const res = await fetch('/api/keywords/mode', {
+            method: 'PATCH', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode: newMode }),
+        });
+        const r = await res.json();
+        if (r.success) {
+            if (_keywordData) _keywordData.mode = newMode;
+            const btn = document.getElementById('keywordModeBtn');
+            const desc = document.getElementById('keywordModeDesc');
+            if (btn) btn.textContent = newMode;
+            if (desc) desc.textContent = newMode === 'loose' ? '키워드 하나라도 일치하면 전달' : '모든 키워드가 일치해야 전달';
+            showToast(`✓ 모드 변경: ${newMode}`, 'success');
+        } else { showToast(r.error, 'error'); }
+    } catch (e) { showToast('요청 실패', 'error'); }
+}
+
+// 엔터키 지원
+document.getElementById('includeKeywordInput')?.addEventListener('keydown', e => { if (e.key === 'Enter') addKeyword('include'); });
+document.getElementById('excludeKeywordInput')?.addEventListener('keydown', e => { if (e.key === 'Enter') addKeyword('exclude'); });
+document.getElementById('groupKeywordInput')?.addEventListener('keydown', e => { if (e.key === 'Enter') addKeywordGroup(); });
+document.getElementById('themeAddInput')?.addEventListener('keydown', e => { if (e.key === 'Enter') addTheme(); });
+
+// ─── 테마 라이브러리 ────────────────────────────────────────
+
+async function loadThemes() {
+    try {
+        const res = await fetch('/api/themes', { credentials: 'same-origin' });
+        const r = await res.json();
+        if (!r.success) return;
+        _renderThemeTable(r.data || []);
+    } catch (e) { /* ignore */ }
+}
+
+function _renderThemeTable(themes) {
+    const tbody = document.getElementById('themeTableBody');
+    if (!tbody) return;
+    if (!themes.length) {
+        tbody.innerHTML = '<tr><td colspan="6" style="padding:16px; text-align:center; color:#868e96; font-size:13px;">테마 없음 (급등주 메시지 수신 시 자동 누적)</td></tr>';
+        return;
+    }
+    tbody.innerHTML = themes.map(t => {
+        const first = t.first_seen_at ? new Date(t.first_seen_at).toLocaleDateString('ko-KR', {month:'short',day:'numeric'}) : '-';
+        const last = t.last_seen_at ? new Date(t.last_seen_at).toLocaleDateString('ko-KR', {month:'short',day:'numeric'}) : '-';
+        const activeLabel = t.active ? '<span style="color:#2f9e44;">●</span>' : '<span style="color:#adb5bd;">○</span>';
+        return `<tr style="border-bottom:1px solid #f1f3f5;">
+            <td style="padding:6px 8px; font-size:13px;">${t.name}</td>
+            <td style="padding:6px 8px; text-align:center; font-size:13px;">${t.count}</td>
+            <td style="padding:6px 8px; text-align:center; font-size:12px; color:#868e96;">${first}</td>
+            <td style="padding:6px 8px; text-align:center; font-size:12px; color:#868e96;">${last}</td>
+            <td style="padding:6px 8px; text-align:center; cursor:pointer;" onclick="toggleTheme(${t.id})" title="클릭해서 토글">${activeLabel}</td>
+            <td style="padding:6px 8px; text-align:center;">
+                <button style="background:none;border:none;color:#fa5252;cursor:pointer;font-size:14px;" onclick="deleteTheme(${t.id})" title="삭제">🗑</button>
+            </td>
+        </tr>`;
+    }).join('');
+}
+
+async function addTheme() {
+    const input = document.getElementById('themeAddInput');
+    const name = input ? input.value.trim() : '';
+    if (!name) { showToast('테마명을 입력하세요', 'error'); return; }
+    try {
+        const res = await fetch('/api/themes', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name }),
+        });
+        const r = await res.json();
+        if (r.success) {
+            if (input) input.value = '';
+            showToast(`✓ "${name}" 추가`, 'success');
+            await loadThemes();
+        } else { showToast(r.error, 'error'); }
+    } catch (e) { showToast('요청 실패', 'error'); }
+}
+
+async function toggleTheme(id) {
+    try {
+        const res = await fetch(`/api/themes/${id}`, { method: 'PATCH', credentials: 'same-origin' });
+        const r = await res.json();
+        if (r.success) await loadThemes();
+        else showToast(r.error, 'error');
+    } catch (e) { showToast('요청 실패', 'error'); }
+}
+
+async function deleteTheme(id) {
+    if (!confirm('테마를 삭제하시겠습니까?')) return;
+    try {
+        const res = await fetch(`/api/themes/${id}`, { method: 'DELETE', credentials: 'same-origin' });
+        const r = await res.json();
+        if (r.success) { showToast('✓ 삭제', 'success'); await loadThemes(); }
+        else showToast(r.error, 'error');
+    } catch (e) { showToast('요청 실패', 'error'); }
+}

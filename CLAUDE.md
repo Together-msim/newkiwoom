@@ -36,17 +36,31 @@ A dual-interface auto-trading system for Korean stocks via Kiwoom API:
 # Activate virtual environment
 source .venv/bin/activate
 
-# Run all services (Telegram bot + Web UI)
+# Run all services (Telegram bot + Web UI + Signal Listener)
 python run_all.py
 
 # Run individually
-python bot_v3.py          # Telegram bot only
-python web_app.py         # Web UI only (default port 5000)
+python bot_v3.py            # Telegram bot only
+python web_app.py           # Web UI only (default port 5000)
+python signal_listener.py   # 뉴스/급등주 아카이빙 서비스 (최초 실행 시 Pyrogram 인증 필요)
 
 # Run tests
 python test_bot.py        # Basic functionality
 python test_kiwoom.py     # Kiwoom API integration
 python test_mode2_monitoring.py  # Mode2 monitoring test
+
+# 뉴스 DB 조회 (빠른 확인)
+sqlite3 .data/news.db "SELECT source_type, text, received_at FROM messages ORDER BY received_at DESC LIMIT 10;"
+```
+
+### ⚠️ Signal Listener 최초 실행 (1회만)
+```bash
+# 반드시 터미널에서 직접 실행 (전화번호 인증 필요)
+python signal_listener.py
+# → Enter phone number: +8210XXXXXXXX
+# → Enter OTP: XXXXX
+# 인증 완료 시 signal_listener.session 파일 생성됨
+# 이후 run_all.py에서 자동 시작
 ```
 
 ## 🌐 Production Environment
@@ -72,9 +86,13 @@ tail -f ~/newkiwoom/web_app.log
 
 # 프로세스 확인
 ps aux | grep 'python.*web_app.py'
+ps aux | grep 'python.*signal_listener.py'
 
 # 서버 재시작 (긴급)
 ~/newkiwoom/restart_web_oracle.sh
+
+# 오늘 뉴스 수신 현황 확인
+sqlite3 ~/newkiwoom/.data/news.db "SELECT source_type, COUNT(*) FROM messages WHERE date=date('now') GROUP BY source_type;"
 ```
 
 ### Performance Metrics (2026-04-28 기준)
@@ -140,7 +158,13 @@ The web interface has 5 main pages accessed via top navigation:
    - Date range filter
    - 계좌 polling으로 자동 상태 변경
 
-5. **🧪 Test** - Kiwoom API 테스트 (완료)
+5. **📰 뉴스필터 (NewsFilter)** - 완료 ✅
+   - 오늘 전체 뉴스 / 급등주 테이블 (날짜 선택 가능)
+   - 필터링된 뉴스 테이블 (체크박스 선택 → 선택 인사이트 스킬 연동)
+   - 키워드 관리: Include / Exclude / AND그룹 / loose·strict 모드 토글
+   - 테마 라이브러리: 급등주 채널에서 자동 누적 + 수동 추가/삭제/토글
+
+6. **🧪 Test** - Kiwoom API 테스트 (완료)
    - 종목 정보 조회 (code → name, current_price)
    - 일봉차트 조회 (종목명/코드 → 당일/전일 가격 정보)
    - 분봉 차트 조회 (1/3/5/10분)
@@ -156,6 +180,7 @@ templates/index.html
 │  ├─ Mode1 Page
 │  ├─ Mode2 Page
 │  ├─ Tradelog Page
+│  ├─ NewsFilter Page ← NEW
 │  └─ Test Page
 └─ static/
    ├─ css/style.css (responsive, multi-page layout)
@@ -243,6 +268,45 @@ templates/index.html
      }
      ```
    - Methods: add_watcher, update_watcher, delete_watcher, set_active, record_buy, record_sell
+
+### News Filter Service (뉴스/급등주 아카이빙) ✅ NEW 2026-04-28
+
+1. **signal_listener.py** - Pyrogram 기반 텔레그램 채널 구독 서비스
+   - Source 1 (급등주 `-1003342481653`) → Target (`-1003623684126`) 포워딩
+   - Source 2 (뉴스 `-1003239561368`) → Target (`-1003599721748`) 포워딩
+   - 모든 수신 메시지를 `news.db`에 아카이빙 (필터 통과 여부 무관)
+   - 급등주 채널에서 테마 자동 추출 → `themes` 테이블에 누적
+   - 키워드 필터링 통과 시 포워딩 + `filtered_messages` 테이블 기록
+   - `signal_listener.session` 파일 필요 (최초 1회 Pyrogram 인증)
+
+2. **news_storage.py** - SQLite 기반 뉴스/급등주/테마 저장소
+   - `messages` 테이블: 전체 수신 메시지 (source_type: news / hot_stock)
+   - `filtered_messages` 테이블: 필터링 통과 메시지
+   - `themes` 테이블: 테마 라이브러리 (자동 누적)
+   - DB 경로: `.data/news.db`
+
+3. **keyword_storage.py** - 키워드 설정 JSON 저장소 (portalocker 기반)
+   - 저장 경로: `.data/keywords.json`
+   - Include 키워드 / Exclude 키워드 / AND 그룹 / loose·strict 모드
+
+4. **keyword_filter.py** - 키워드 필터링 로직
+   - loose 모드: include 키워드 하나라도 매칭 → 포워딩
+   - strict 모드: include 키워드 모두 매칭 → 포워딩
+   - AND 그룹: 그룹 내 모두 매칭 → 포워딩 (그룹 간 OR)
+   - 중복 방지: MD5 해시 → `message_hashes.txt`
+   - 키워드 핫리로드: 파일 변경 감지 (30초 주기)
+
+### Claude Code 스킬 (`.claude/skills/`) ✅ NEW 2026-04-28
+
+| 스킬 | 트리거 | 역할 |
+|------|--------|------|
+| `news-grouping` | `/news-grouping` | 오늘 뉴스를 테마별 그룹핑 + 강도(H/M/L) |
+| `news-insight` | `/news-insight` | 마지막 실행 이후 신규 뉴스 증분 분석 |
+| `news-insight-selected` | `/news-insight-selected` | 체크박스로 선택한 뉴스만 심층 분석 |
+
+- 프롬프트 파일 수정으로 분석 기준 커스터마이징 가능
+  - `.claude/skills/news-grouping/prompts/grouping.md`
+  - `.claude/skills/news-insight/prompts/insight.md`
 
 ### Shared Components
 
@@ -402,6 +466,15 @@ GCP_PROJECT_ID=                       # GCP Project ID (optional, uses default i
 # Testing
 TEST_LAST_PRICE=116000       # Bypass API, return fixed price
 IGNORE_MARKET_HOURS=1        # Skip time validation
+
+# 뉴스 필터링 서비스 (Signal Listener)
+TG_API_ID=...                # Telegram User API ID (my.telegram.org)
+TG_API_HASH=...              # Telegram User API Hash
+SOURCE_CHAT_IDS=-1003342481653,-1003239561368   # 소스 채널 (급등주, 뉴스)
+SOURCE_DEST_MAPPING=-1003342481653:-1003623684126,-1003239561368:-1003599721748
+DEST_CHAT_ID=-1003623684126  # 기본 목적지
+NEWS_DB_PATH=.data/news.db   # 뉴스 아카이브 DB 경로
+KEYWORD_RELOAD_INTERVAL=30   # 키워드 핫리로드 주기 (초)
 ```
 
 ## Testing Strategy
@@ -418,7 +491,7 @@ IGNORE_MARKET_HOURS=1        # Skip time validation
 ### Current Production Files
 - **bot_v3.py** - Telegram bot (Tactic1/2) with monitoring + server control
 - **web_app.py** - Flask REST API + multi-page static file server
-- **run_all.py** - Unified launcher (bot + web server in parallel)
+- **run_all.py** - Unified launcher (bot + web server + signal_listener)
 - **server_scheduler.py** - GCP server auto-scheduling (평일 08:00~15:30)
 - **mode1_manager.py** - Mode1 watchlist manager (완료)
 - **mode2_manager.py** - Mode2 watchlist manager (완료)
@@ -428,6 +501,12 @@ IGNORE_MARKET_HOURS=1        # Skip time validation
 - **trend_analyzer.py** - Candle trend analysis (양봉/음봉, 연속 카운트)
 - **symbol_resolver.py** - Stock name/code converter
 - **tactic_manager.py** - Tactic1/2 watchlist manager
+- **signal_listener.py** - Pyrogram 채널 구독 + 아카이빙 + 포워딩 ✅ NEW
+- **news_storage.py** - SQLite 뉴스/급등주/테마 저장소 ✅ NEW
+- **keyword_storage.py** - 키워드 설정 JSON 저장소 ✅ NEW
+- **keyword_filter.py** - 키워드 필터링 엔진 ✅ NEW
+- **keyword_config.py** - 키워드 파일 경로 설정 ✅ NEW
+- **admin_server_oracle.py** - 오라클 서버 관리 UI (signal_listener 상태 포함)
 
 ### Frontend Files
 - **templates/index.html** - Multi-page SPA structure
@@ -440,6 +519,10 @@ IGNORE_MARKET_HOURS=1        # Skip time validation
 - `.data/mode1_watchers.json` - Mode1 watchlist
 - `.data/mode2_watchers.json` - Mode2 watchlist
 - `.data/manual_server_control.txt` - Manual server control state (on/off)
+- `.data/news.db` - 뉴스/급등주 아카이브 SQLite DB ✅ NEW
+- `.data/keywords.json` - 키워드 필터링 설정 ✅ NEW
+- `.data/message_hashes.txt` - 중복 방지 해시 목록 ✅ NEW
+- `signal_listener.session` - Pyrogram 인증 세션 (최초 1회 생성) ✅ NEW
 - `files/corp_master1.xlsx` - Stock master data (종목코드, 종목명, DART 코드)
 
 ### Legacy Files (Reference Only)
@@ -498,6 +581,24 @@ Always use `bot_v3.py` or `run_all.py` for development.
   - Updates bought_quantity for all Mode1/Mode2 watchers
   - Sets bought_quantity=0 for watchers not in account
   - Returns: { success, message, holdings_count }
+
+### News Filter API ✅ NEW
+- `GET /api/news/today?date=YYYY-MM-DD` - 오늘 전체 뉴스 (생략 시 오늘)
+- `GET /api/news/filtered?date=YYYY-MM-DD` - 필터링된 뉴스
+- `GET /api/hotstock/today?date=YYYY-MM-DD` - 오늘 전체 급등주
+- `GET /api/hotstock/filtered?date=YYYY-MM-DD` - 필터링된 급등주
+- `GET /api/keywords` - 키워드 설정 전체 조회
+- `POST /api/keywords/include` - include 키워드 추가 `{ keyword }`
+- `DELETE /api/keywords/include` - include 키워드 삭제 `{ keyword }`
+- `POST /api/keywords/exclude` - exclude 키워드 추가 `{ keyword }`
+- `DELETE /api/keywords/exclude` - exclude 키워드 삭제 `{ keyword }`
+- `POST /api/keywords/group` - AND 그룹 추가 `{ keywords: [] }`
+- `DELETE /api/keywords/group` - AND 그룹 삭제 `{ keywords: [] }`
+- `PATCH /api/keywords/mode` - 모드 변경 `{ mode: "loose"|"strict" }`
+- `GET /api/themes` - 테마 목록
+- `POST /api/themes` - 테마 수동 추가 `{ name }`
+- `PATCH /api/themes/<id>` - 테마 활성화 토글
+- `DELETE /api/themes/<id>` - 테마 삭제
 
 ## TODO / 구현 대기
 

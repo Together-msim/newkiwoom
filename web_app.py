@@ -15,13 +15,14 @@ from mode2_manager import Mode2Manager
 from utils.code import normalize_stock_code
 from kiwoom_client import KiwoomClient
 from kiwoom_token import get_token
-from kiwoom_chart import get_daily_chart, format_chart_info
+from kiwoom_chart import get_daily_chart, get_nxt_daily_chart, format_chart_info
 from symbol_resolver import resolve_symbol
 from global_config import get_global_config
 from price_monitor import PriceMonitor
 from tactic_manager import TacticManager
 import asyncio
 import threading
+from telegram.ext import Application
 
 load_dotenv()
 
@@ -64,13 +65,25 @@ except Exception as e:
     logger.warning(f"Kiwoom API 연결 실패: {e}")
     kiwoom_client = None
 
+# 텔레그램 봇 초기화 (알림 전송용)
+bot_application = None
+telegram_token = os.getenv('TELEGRAM_BOT_TOKEN')
+if telegram_token:
+    try:
+        bot_application = Application.builder().token(telegram_token).build()
+        logger.info("텔레그램 봇 초기화 완료 (알림 전용)")
+    except Exception as e:
+        logger.warning(f"텔레그램 봇 초기화 실패: {e}")
+else:
+    logger.warning("TELEGRAM_BOT_TOKEN 없음 - 텔레그램 알림 비활성화")
+
 # PriceMonitor 초기화 (웹 서버에서도 모니터링)
 price_monitor = None
 if kiwoom_client:
     price_monitor = PriceMonitor(
         tactic_manager=tactic_mgr,
         kiwoom_client=kiwoom_client,
-        bot_application=None,  # 웹 서버는 텔레그램 없음
+        bot_application=bot_application,  # 텔레그램 봇 연결
         mode1_manager=mode1_mgr,
         mode2_manager=mode2_mgr
     )
@@ -767,8 +780,8 @@ def test_daily_chart():
                 "error": "Kiwoom API 토큰 발급 실패"
             }), 503
 
-        # 일봉차트 조회
-        chart_data = get_daily_chart(token=token, symbol=symbol_code)
+        # 일봉차트 조회 (NXT 종목 지원)
+        chart_data = get_nxt_daily_chart(token=token, symbol=symbol_code)
 
         if not chart_data:
             return jsonify({
@@ -924,11 +937,11 @@ def test_mode2_monitor():
                 "error": f"현재가 조회 실패: {str(e)}"
             }), 500
 
-        # 매수타점 체크 (현재가가 타점 이상이면 매수)
+        # 매수타점 체크 (현재가가 타점 이하로 떨어지면 매수 - 눌림 매매)
         buy_target = watcher.get('buy_target_price', 0)
         buy_triggered = False
         if buy_target > 0:
-            buy_triggered = current_price >= buy_target
+            buy_triggered = current_price <= buy_target
 
         # 저항/지지 레벨 체크
         resist1 = watcher.get('resistance_1_price', 0)
@@ -1527,6 +1540,254 @@ def seeking_signal_defaults():
         }), 500
 
 
+# ========== News Filter API ==========
+
+def _get_news_storage():
+    """NewsStorage 인스턴스를 반환 (지연 초기화)."""
+    if not hasattr(_get_news_storage, "_instance") or _get_news_storage._instance is None:
+        from news_storage import NewsStorage
+        db_path = os.getenv("NEWS_DB_PATH", ".data/news.db")
+        _get_news_storage._instance = NewsStorage(db_path)
+    return _get_news_storage._instance
+
+
+def _get_keyword_storage():
+    """KeywordStorage 인스턴스를 반환 (지연 초기화)."""
+    if not hasattr(_get_keyword_storage, "_instance") or _get_keyword_storage._instance is None:
+        from keyword_storage import KeywordStorage
+        from keyword_config import resolve_keywords_path
+        _get_keyword_storage._instance = KeywordStorage(str(resolve_keywords_path()))
+    return _get_keyword_storage._instance
+
+
+@app.route('/api/news/today', methods=['GET'])
+@auth.login_required
+def get_news_today():
+    target_date = request.args.get('date')
+    try:
+        ns = _get_news_storage()
+        messages = ns.get_messages(target_date=target_date, source_type='news')
+        return jsonify({"success": True, "data": messages, "count": len(messages)})
+    except Exception as e:
+        logger.error(f"get_news_today 실패: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/news/filtered', methods=['GET'])
+@auth.login_required
+def get_news_filtered():
+    target_date = request.args.get('date')
+    try:
+        ns = _get_news_storage()
+        messages = ns.get_filtered_messages(target_date=target_date, source_type='news')
+        return jsonify({"success": True, "data": messages, "count": len(messages)})
+    except Exception as e:
+        logger.error(f"get_news_filtered 실패: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/hotstock/today', methods=['GET'])
+@auth.login_required
+def get_hotstock_today():
+    target_date = request.args.get('date')
+    try:
+        ns = _get_news_storage()
+        messages = ns.get_messages(target_date=target_date, source_type='hot_stock')
+        return jsonify({"success": True, "data": messages, "count": len(messages)})
+    except Exception as e:
+        logger.error(f"get_hotstock_today 실패: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/hotstock/filtered', methods=['GET'])
+@auth.login_required
+def get_hotstock_filtered():
+    target_date = request.args.get('date')
+    try:
+        ns = _get_news_storage()
+        messages = ns.get_filtered_messages(target_date=target_date, source_type='hot_stock')
+        return jsonify({"success": True, "data": messages, "count": len(messages)})
+    except Exception as e:
+        logger.error(f"get_hotstock_filtered 실패: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/keywords', methods=['GET'])
+@auth.login_required
+def get_keywords():
+    try:
+        ks = _get_keyword_storage()
+        return jsonify({"success": True, "data": ks.get_all()})
+    except Exception as e:
+        logger.error(f"get_keywords 실패: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/keywords/include', methods=['POST'])
+@auth.login_required
+def add_include_keyword():
+    data = request.json or {}
+    keyword = (data.get('keyword') or '').strip()
+    if not keyword:
+        return jsonify({"success": False, "error": "keyword 필드 필요"}), 400
+    try:
+        ks = _get_keyword_storage()
+        added = ks.add_include_keyword(keyword)
+        return jsonify({"success": True, "added": added, "keywords": ks.get_all()})
+    except Exception as e:
+        logger.error(f"add_include_keyword 실패: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/keywords/include', methods=['DELETE'])
+@auth.login_required
+def remove_include_keyword():
+    data = request.json or {}
+    keyword = (data.get('keyword') or '').strip()
+    if not keyword:
+        return jsonify({"success": False, "error": "keyword 필드 필요"}), 400
+    try:
+        ks = _get_keyword_storage()
+        removed = ks.remove_include_keyword(keyword)
+        return jsonify({"success": True, "removed": removed, "keywords": ks.get_all()})
+    except Exception as e:
+        logger.error(f"remove_include_keyword 실패: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/keywords/exclude', methods=['POST'])
+@auth.login_required
+def add_exclude_keyword():
+    data = request.json or {}
+    keyword = (data.get('keyword') or '').strip()
+    if not keyword:
+        return jsonify({"success": False, "error": "keyword 필드 필요"}), 400
+    try:
+        ks = _get_keyword_storage()
+        added = ks.add_exclude_keyword(keyword)
+        return jsonify({"success": True, "added": added, "keywords": ks.get_all()})
+    except Exception as e:
+        logger.error(f"add_exclude_keyword 실패: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/keywords/exclude', methods=['DELETE'])
+@auth.login_required
+def remove_exclude_keyword():
+    data = request.json or {}
+    keyword = (data.get('keyword') or '').strip()
+    if not keyword:
+        return jsonify({"success": False, "error": "keyword 필드 필요"}), 400
+    try:
+        ks = _get_keyword_storage()
+        removed = ks.remove_exclude_keyword(keyword)
+        return jsonify({"success": True, "removed": removed, "keywords": ks.get_all()})
+    except Exception as e:
+        logger.error(f"remove_exclude_keyword 실패: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/keywords/group', methods=['POST'])
+@auth.login_required
+def add_keyword_group():
+    data = request.json or {}
+    keywords = data.get('keywords', [])
+    if not keywords or len(keywords) < 2:
+        return jsonify({"success": False, "error": "keywords 2개 이상 필요"}), 400
+    try:
+        ks = _get_keyword_storage()
+        added = ks.add_include_group(keywords)
+        return jsonify({"success": True, "added": added, "keywords": ks.get_all()})
+    except Exception as e:
+        logger.error(f"add_keyword_group 실패: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/keywords/group', methods=['DELETE'])
+@auth.login_required
+def remove_keyword_group():
+    data = request.json or {}
+    keywords = data.get('keywords', [])
+    if not keywords:
+        return jsonify({"success": False, "error": "keywords 필드 필요"}), 400
+    try:
+        ks = _get_keyword_storage()
+        removed = ks.remove_include_group(keywords)
+        return jsonify({"success": True, "removed": removed, "keywords": ks.get_all()})
+    except Exception as e:
+        logger.error(f"remove_keyword_group 실패: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/keywords/mode', methods=['PATCH'])
+@auth.login_required
+def set_keyword_mode():
+    data = request.json or {}
+    mode = (data.get('mode') or '').strip()
+    if mode not in ('loose', 'strict'):
+        return jsonify({"success": False, "error": "mode는 loose 또는 strict"}), 400
+    try:
+        ks = _get_keyword_storage()
+        ks.set_mode(mode)
+        return jsonify({"success": True, "mode": mode})
+    except Exception as e:
+        logger.error(f"set_keyword_mode 실패: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/themes', methods=['GET'])
+@auth.login_required
+def get_themes():
+    active_only = request.args.get('active_only', '0') == '1'
+    try:
+        ns = _get_news_storage()
+        themes = ns.get_themes(active_only=active_only)
+        return jsonify({"success": True, "data": themes})
+    except Exception as e:
+        logger.error(f"get_themes 실패: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/themes', methods=['POST'])
+@auth.login_required
+def add_theme():
+    data = request.json or {}
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({"success": False, "error": "name 필드 필요"}), 400
+    try:
+        ns = _get_news_storage()
+        ns.add_theme(name)
+        return jsonify({"success": True, "message": f"테마 추가: {name}"}), 201
+    except Exception as e:
+        logger.error(f"add_theme 실패: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/themes/<int:theme_id>', methods=['PATCH'])
+@auth.login_required
+def toggle_theme(theme_id):
+    try:
+        ns = _get_news_storage()
+        ns.toggle_theme(theme_id)
+        return jsonify({"success": True})
+    except Exception as e:
+        logger.error(f"toggle_theme 실패: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/themes/<int:theme_id>', methods=['DELETE'])
+@auth.login_required
+def delete_theme(theme_id):
+    try:
+        ns = _get_news_storage()
+        ns.delete_theme(theme_id)
+        return jsonify({"success": True})
+    except Exception as e:
+        logger.error(f"delete_theme 실패: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 def start_price_monitor():
     """PriceMonitor를 별도 스레드에서 실행"""
     if not price_monitor:
@@ -1570,7 +1831,10 @@ def main():
 
     protocol = "https" if ssl_context else "http"
     logger.info(f"웹 서버 시작: {protocol}://{host}:{port}")
-    app.run(host=host, port=port, debug=True, use_reloader=False, ssl_context=ssl_context)  # reloader 끄기 (중복 실행 방지)
+
+    # 운영 환경에서는 debug=False (HTTPS 사용 시)
+    debug_mode = False if ssl_context else True
+    app.run(host=host, port=port, debug=debug_mode, use_reloader=False, ssl_context=ssl_context)
 
 
 if __name__ == "__main__":

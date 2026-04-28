@@ -44,3 +44,7 @@ admin_server_oracle.py
 start_admin.command
 start_admin_oracle.command
 admin_templates/
+
+# SSL 인증서
+cert.pem
+key.pem

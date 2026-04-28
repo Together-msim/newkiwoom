@@ -109,6 +109,7 @@ def get_daily_chart(
         today_low = _p(today_bar, ["low_pric", "low", "today_low"], today_open) or 0.0
         today_cur = _p(today_bar, ["cur_prc", "close", "today_current"], today_open) or 0.0
 
+        yday_open = _p(yday_bar, ["open_pric", "open", "yesterday_open"], today_cur) or 0.0
         yday_close = _p(yday_bar, ["cur_prc", "close", "yesterday_close"], today_cur) or 0.0
         yday_high = _p(yday_bar, ["high_pric", "high", "yesterday_high"], yday_close) or 0.0
         yday_low = _p(yday_bar, ["low_pric", "low", "yesterday_low"], yday_close) or 0.0
@@ -134,6 +135,7 @@ def get_daily_chart(
             "today_high": float(today_high),
             "today_low": float(today_low),
             "today_current": float(today_cur),
+            "yesterday_open": float(yday_open),
             "yesterday_close": float(yday_close),
             "yesterday_high": float(yday_high),
             "yesterday_low": float(yday_low),
@@ -340,6 +342,164 @@ def get_intraday_summary(
         if error_out is not None:
             error_out.append(err)
         return None
+
+
+def get_nxt_daily_chart(
+    token: str,
+    symbol: str,
+    target_date: Optional[str] = None,
+    error_out: Optional[list] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    NXT 종목 일봉차트 조회 (분봉 데이터로 08:00~20:00 범위 계산)
+
+    Args:
+        token: 키움 API 토큰
+        symbol: 종목코드
+        target_date: 조회 날짜 (YYYYMMDD, None이면 당일)
+        error_out: 실패 시 사유를 append할 리스트
+
+    Returns:
+        일봉차트와 동일한 형식
+        {
+            "date": "20260427",
+            "today_open": 160000,  # 08:00 시가
+            "today_high": 176000,
+            "today_low": 159000,
+            "today_current": 172700,  # 20:00 종가 (또는 마지막 체결가)
+            "yesterday_close": 157200,
+            "yesterday_high": 159100,
+            "yesterday_low": 150400,
+        }
+    """
+    symbol = normalize_stock_code(symbol)
+
+    if not HOST:
+        msg = "KIWOOM_HOST 환경 변수가 설정되어 있지 않습니다."
+        print(f"❌ {msg}")
+        if error_out is not None:
+            error_out.append(msg)
+        return None
+
+    if target_date is None:
+        target_date = datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y%m%d")
+
+    # 1분봉 데이터 조회 (최대 200개)
+    url = HOST.rstrip("/") + "/api/dostk/chart"
+    headers = {
+        "Content-Type": "application/json;charset=UTF-8",
+        "api-id": "ka10080",
+        "authorization": f"Bearer {token}",
+    }
+    payload = {
+        "stk_cd": symbol,
+        "base_dt": target_date,
+        "tic_scope": "1",  # 1분봉
+        "cnt": 200,
+        "upd_stkpc_tp": "1",
+    }
+
+    try:
+        resp = requests.post(url, headers=headers, json=payload, timeout=15)
+        resp.raise_for_status()
+        data = resp.json() if resp.content else {}
+
+        if not isinstance(data, dict) or data.get("return_code") != 0:
+            # NXT가 아니면 일반 일봉 API 사용
+            return get_daily_chart(token, symbol, error_out)
+
+        raw_list = data.get("stk_min_pole_chart_qry") or []
+        if not isinstance(raw_list, list):
+            return get_daily_chart(token, symbol, error_out)
+
+        # 당일 데이터만 필터 (08:00~20:00)
+        bars = []
+        for b in raw_list:
+            if not isinstance(b, dict):
+                continue
+            cntr_tm = b.get("cntr_tm", "")
+            if len(cntr_tm) < 14:
+                continue
+            date_part = cntr_tm[:8]
+            time_part = cntr_tm[8:14]
+
+            if date_part == target_date:
+                hour = time_part[:2]
+                if "08" <= hour <= "20":  # 08:00~20:59
+                    bars.append(b)
+
+        if not bars:
+            # 분봉 데이터 없으면 일반 일봉 + 현재가 조합
+            daily_data = get_daily_chart(token, symbol, error_out)
+            if not daily_data:
+                return None
+
+            # 현재가 조회하여 today_current 업데이트
+            try:
+                from kiwoom_client import KiwoomClient
+                client = KiwoomClient(token=token)
+                current_price = float(client.get_last_price(symbol))
+                daily_data["today_current"] = current_price
+            except Exception as e:
+                print(f"⚠️  NXT 현재가 조회 실패: {e}")
+
+            return daily_data
+
+        # 시간순 정렬
+        bars.sort(key=lambda b: b.get("cntr_tm", ""))
+
+        # OHLC 계산
+        def parse_price(bar: Dict[str, Any], keys: List[str]) -> float:
+            val = _extract_price(bar, keys)
+            return abs(float(val)) if val is not None else 0.0
+
+        first_bar = bars[0]
+        last_bar = bars[-1]
+
+        today_open = parse_price(first_bar, ["open_pric", "open"])
+        today_current = parse_price(last_bar, ["cur_prc", "close"])
+
+        today_high = 0.0
+        today_low = float('inf')
+
+        for bar in bars:
+            high = parse_price(bar, ["high_pric", "high"])
+            low = parse_price(bar, ["low_pric", "low"])
+
+            if high > today_high:
+                today_high = high
+            if low > 0 and low < today_low:
+                today_low = low
+
+        if today_low == float('inf'):
+            today_low = today_open
+
+        # 전일 데이터는 일봉 API에서 가져오기
+        daily_data = get_daily_chart(token, symbol)
+        yesterday_open = daily_data.get("yesterday_open", 0) if daily_data else 0
+        yesterday_close = daily_data.get("yesterday_close", 0) if daily_data else 0
+        yesterday_high = daily_data.get("yesterday_high", 0) if daily_data else 0
+        yesterday_low = daily_data.get("yesterday_low", 0) if daily_data else 0
+
+        return {
+            "date": target_date,
+            "today_open": float(today_open),
+            "today_high": float(today_high),
+            "today_low": float(today_low),
+            "today_current": float(today_current),
+            "yesterday_open": float(yesterday_open),
+            "yesterday_close": float(yesterday_close),
+            "yesterday_high": float(yesterday_high),
+            "yesterday_low": float(yesterday_low),
+            "is_nxt": True,  # NXT 종목 표시
+        }
+
+    except Exception as e:
+        print(f"❌ NXT 일봉 조회 실패: {e}")
+        if error_out is not None:
+            error_out.append(str(e))
+        # 실패 시 일반 일봉 사용
+        return get_daily_chart(token, symbol, error_out)
 
 
 def get_minute_chart(
