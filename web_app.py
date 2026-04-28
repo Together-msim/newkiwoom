@@ -1619,6 +1619,32 @@ def add_watchlist():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/watchlist/bulk', methods=['POST'])
+@auth.login_required
+def bulk_set_watchlist():
+    """수동 추가 종목 전체 교체 (편집 모드 저장용)."""
+    data = request.json or {}
+    codes = data.get('codes', [])
+    if not isinstance(codes, list):
+        return jsonify({'success': False, 'error': 'codes 배열 필요'}), 400
+    try:
+        items = []
+        seen = set()
+        for code in codes:
+            code = code.strip()
+            if not code:
+                continue
+            normalized = normalize_stock_code(code) if (code.isdigit() or (len(code) <= 6 and code.isalnum())) else code
+            if normalized not in seen:
+                items.append({'code': normalized, 'name': normalized})
+                seen.add(normalized)
+        _save_manual_watchlist(items)
+        return jsonify({'success': True, 'count': len(items)})
+    except Exception as e:
+        logger.error(f"bulk_set_watchlist 실패: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/watchlist/<code>', methods=['DELETE'])
 @auth.login_required
 def delete_watchlist(code):

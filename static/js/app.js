@@ -5227,33 +5227,98 @@ async function deleteWatchlistItem(code) {
     } catch (e) { showToast('요청 실패', 'error'); }
 }
 
+function toggleWatchlistEdit() {
+    const tagsEl = document.getElementById('watchlistTags');
+    const editEl = document.getElementById('watchlistEditView');
+    const areaEl = document.getElementById('watchlistEditArea');
+    if (!tagsEl || !editEl || !areaEl) return;
+    const isEditing = editEl.style.display !== 'none';
+    if (isEditing) {
+        cancelWatchlistEdit();
+    } else {
+        // 수동 추가 종목만 textarea에 채움
+        const manualItems = _watchlistData.filter(i => i.origin === 'manual' || i.origin === 'both');
+        areaEl.value = manualItems.map(i => i.code).join('\n');
+        tagsEl.style.display = 'none';
+        editEl.style.display = '';
+    }
+}
+
+async function saveWatchlistEdit() {
+    const areaEl = document.getElementById('watchlistEditArea');
+    const raw = areaEl?.value || '';
+    const codes = raw.split(/[\n,]/).map(s => s.trim()).filter(Boolean);
+    try {
+        const r = await (await fetch('/api/watchlist/bulk', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ codes }),
+        })).json();
+        if (r.success) {
+            showToast('✓ 관심종목 저장됨', 'success');
+            document.getElementById('watchlistEditView').style.display = 'none';
+            document.getElementById('watchlistTags').style.display = '';
+            await loadWatchlist_siwhang();
+        } else { showToast(r.error || '저장 실패', 'error'); }
+    } catch (e) { showToast('요청 실패', 'error'); }
+}
+
+function cancelWatchlistEdit() {
+    document.getElementById('watchlistEditView').style.display = 'none';
+    document.getElementById('watchlistTags').style.display = '';
+}
+
 // ─── 급등주 파싱 테이블 ────────────────────────────────────
+// 파싱 데이터 캐시 (message_id 기반 삭제용)
+const _parsedData = { ssUp: [], vi: [], ss: [] };
+
 async function loadHotstockParsed() {
     const date = _newsFilterDate();
     const qs = date ? `?date=${date}` : '';
     try {
         const r = await (await fetch(`/api/hotstock/parsed${qs}`, { credentials: 'same-origin' })).json();
         if (!r.success) return;
-        const ssUp = r.data.filter(d => d.tag_type === 'ss_up');
-        const vi   = r.data.filter(d => d.tag_type === 'vi');
-        const ss   = r.data.filter(d => d.tag_type === 'ss');
+        _parsedData.ssUp = r.data.filter(d => d.tag_type === 'ss_up');
+        _parsedData.vi   = r.data.filter(d => d.tag_type === 'vi');
+        _parsedData.ss   = r.data.filter(d => d.tag_type === 'ss');
         const upCountEl = document.getElementById('ssUpCount');
-        if (upCountEl) upCountEl.textContent = `(${ssUp.length}건)`;
+        if (upCountEl) upCountEl.textContent = `(${_parsedData.ssUp.length}건)`;
         const viCountEl = document.getElementById('viCount');
-        if (viCountEl) viCountEl.textContent = `(${vi.length}건)`;
+        if (viCountEl) viCountEl.textContent = `(${_parsedData.vi.length}건)`;
         const ssCountEl = document.getElementById('ssAllCount');
-        if (ssCountEl) ssCountEl.textContent = `(${ss.length}건)`;
-        _renderParsedTable('ssUpBody', ssUp);
-        _renderParsedTable('viBody', vi);
-        _renderParsedTable('ssAllBody', ss);
+        if (ssCountEl) ssCountEl.textContent = `(${_parsedData.ss.length}건)`;
+        _renderParsedTable('ssUpBody', _parsedData.ssUp, 'ssUp');
+        _renderParsedTable('viBody', _parsedData.vi, 'vi');
+        _renderParsedTable('ssAllBody', _parsedData.ss, 'ss');
     } catch (e) { console.error('hotstock parsed error', e); }
 }
 
-function _renderParsedTable(tbodyId, data) {
+function toggleParsedCheckboxes(tableKey, masterCb) {
+    document.querySelectorAll(`.cb-parsed-${tableKey}`).forEach(cb => { cb.checked = masterCb.checked; });
+}
+
+async function deleteParsedSelected(tableKey) {
+    const ids = Array.from(document.querySelectorAll(`.cb-parsed-${tableKey}:checked`)).map(cb => parseInt(cb.dataset.id));
+    if (ids.length === 0) { showToast('삭제할 항목을 선택하세요', 'error'); return; }
+    if (!confirm(`${ids.length}건을 삭제하시겠습니까?`)) return;
+    try {
+        const r = await (await fetch('/api/messages/delete', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids }),
+        })).json();
+        if (r.success) {
+            showToast(`✓ ${r.deleted}건 삭제됨`, 'success');
+            await loadHotstockParsed();
+        } else { showToast(r.error || '삭제 실패', 'error'); }
+    } catch (e) { showToast('요청 실패', 'error'); }
+}
+
+function _renderParsedTable(tbodyId, data, tableKey) {
     const tbody = document.getElementById(tbodyId);
     if (!tbody) return;
     if (!data.length) {
-        tbody.innerHTML = `<tr><td colspan="6" style="padding:16px;text-align:center;color:#868e96;font-size:13px;">데이터 없음</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" style="padding:16px;text-align:center;color:#868e96;font-size:13px;">데이터 없음</td></tr>`;
         return;
     }
     tbody.innerHTML = data.map(m => {
@@ -5263,6 +5328,7 @@ function _renderParsedTable(tbodyId, data) {
         const related = (m.related_stocks || []).join(', ') || '-';
         const price = m.price ? `<span style="color:${m.change && m.change.startsWith('+') ? '#c92a2a' : '#1971c2'}">${m.price}</span><br><span style="font-size:11px;color:#868e96;">${m.change || ''}</span>` : '-';
         return `<tr style="border-bottom:1px solid #f1f3f5;">
+            <td style="padding:5px 4px;width:24px;"><input type="checkbox" class="cb-parsed-${tableKey}" data-id="${m.message_id}"></td>
             <td style="padding:5px 8px;font-size:13px;font-weight:500;">${m.stock_name || '-'}</td>
             <td style="padding:5px 8px;font-size:12px;text-align:right;">${price}</td>
             <td style="padding:5px 8px;font-size:12px;">${m.theme || '-'}</td>
