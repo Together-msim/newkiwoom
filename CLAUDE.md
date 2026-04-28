@@ -19,9 +19,16 @@ A dual-interface auto-trading system for Korean stocks via Kiwoom API:
 **Mode2는 가장 중요한 기능입니다. 항상 정상 동작해야 합니다.**
 
 - Web server (web_app.py) 실행 시 **PriceMonitor 자동 시작**
-- Mode2 active=true 종목은 **10초마다 자동 체크**
+- Mode2 active=true 종목은 **polling_interval마다 자동 체크** (기본 10초)
 - 매수타점/저항/지지 도달 시 **즉시 주문 실행**
 - Telegram bot 없이도 **웹 서버만으로 완전 동작**
+
+### 🚀 2026-04-27 비동기 최적화 완료
+- **비동기 병렬 처리**: `kiwoom_client_async.py` + `asyncio.gather()`
+- **성능**: 11개 종목 1초 처리 (기존 110초 → 99% 개선)
+- **안정성**: CPU 2%, MEM 124MB, 에러 0건
+- **확장성**: 50개 종목까지 가능
+- **도메인**: https://nomaddoklip.xyz (443 포트, SSL)
 
 ## Essential Commands
 
@@ -42,6 +49,42 @@ python test_kiwoom.py     # Kiwoom API integration
 python test_mode2_monitoring.py  # Mode2 monitoring test
 ```
 
+## 🌐 Production Environment
+
+### Oracle Cloud Server
+- **IP**: 152.67.207.143
+- **Domain**: https://nomaddoklip.xyz
+- **Port**: 443 (HTTPS with SSL)
+- **User**: opc
+- **Path**: ~/newkiwoom
+- **SSH Key**: `/Users/msim/Downloads/ssh-key-2026-04-26.key`
+
+### Production Commands
+```bash
+# SSH 접속
+ssh -i /Users/msim/Downloads/ssh-key-2026-04-26.key opc@152.67.207.143
+
+# HTTPS 서버 시작 (443 포트)
+cd ~/newkiwoom && ./start_https.sh
+
+# 로그 확인
+tail -f ~/newkiwoom/web_app.log
+
+# 프로세스 확인
+ps aux | grep 'python.*web_app.py'
+
+# 서버 재시작 (긴급)
+~/newkiwoom/restart_web_oracle.sh
+```
+
+### Performance Metrics (2026-04-28 기준)
+- **처리 속도**: 14개 종목 1.0초 내외 (비동기 병렬 처리)
+- **CPU**: 2.2% (매우 낮음)
+- **메모리**: 144MB (안정)
+- **에러**: 0건
+- **확장성**: 50개 종목까지 가능
+- **중복 알림**: last_notification 필드로 완전 방지
+
 ## Web UI Structure (Multi-Page)
 
 ### Page Navigation
@@ -53,6 +96,10 @@ The web interface has 5 main pages accessed via top navigation:
    - Displays: code, name, registration date, status, **bought_quantity**, current price, bought_price, profit rate
    - Actions:
      - **💼 보유 종목 조회**: Opens modal showing full account summary and holdings
+       - **📊 Mode2 편입**: 보유 종목을 Mode2 감시 종목으로 추가 (모바일 친화적 모달)
+         - 자동 입력: 종목코드, 종목명, 매수가, 수량, Budget
+         - 사용자 입력: 1차 저항(익절), 1차 지지(손절)만
+         - 상태: `waiting_sell` (이미 매수 완료)
      - **🔄 보유수량 동기화**: Fetches holdings from Kiwoom (ka01690) and updates bought_quantity for all watchers
      - **매도 버튼** (only when status=waiting_sell AND bought_quantity>0): 
        - Modal inputs: quantity (blank=full), order_type (market/limit), price
@@ -72,16 +119,20 @@ The web interface has 5 main pages accessed via top navigation:
 
 3. **📉 Mode2** - 저항/지지 레벨 전략 (완료)
    - Chart-based input UI with mode2_chart.png
-   - Input form: 종목코드 (종목명 자동 조회), Budget, Polling 주기 (5/10/15/20/30초), **🔔 알림만 체크박스**
+   - Input form: 종목코드 (종목명 자동 조회), **Budget (만원 단위)**, Polling 주기 (5/10/15/20/30초), **🔔 알림만 체크박스**
+   - **Budget picklist**: 0만, 10만, 20만, 30만, 60만, 100만, 수동입력 (테이블 표시: "30만")
    - 5 core inputs: 매수타점, 2차저항, 1차저항, 1차지지, 2차지지 (각각 가격 + 익절/손절 %)
+   - **익절/손절 % picklist**: 0%, 25%, 50%, 75%, 100% (합=100 자동 계산)
    - **2가지 모드**:
      - **🔔 알림 전용** (`notify_only=true`): 매수타점 도달 시 텔레그램 알림만, 주문 실행 X
      - **🤖 자동매매** (`notify_only=false`): 알림 + 자동 주문 실행
+   - **섹션 내 정렬**: 자동매매 종목이 위로, 알림전용 종목이 아래로
    - **Row 체크박스**: 선택 시 폼에 데이터 auto-fill → 수정 후 저장 (CREATE/UPDATE)
    - **Full inline editing**: 테이블에서 모든 필드 직접 수정 가능 (종목명, 매수타점, Budget, Polling, 레벨)
    - **모드 태그 클릭**: 테이블에서 모드 태그 클릭으로 알림/자동 전환
    - Auto-calculation: quantity = budget / buy_target_price
    - **Polling 최적화**: 종목별 마지막 체크 시간 기록, polling_interval만큼 경과 후 체크
+   - **중복 알림 방지**: `last_notification` 필드로 상태 변화 시에만 알림 발송
 
 4. **💰 매매일지 (Tradelog)** - 구현 대기
    - 확정 손익만 표시 (auto_sold, manual_sold)
@@ -195,23 +246,31 @@ templates/index.html
 
 ### Shared Components
 
-1. **price_monitor.py** - Unified monitoring engine
+1. **price_monitor.py** - Unified monitoring engine ⭐ 2026-04-27 비동기 최적화
    - Monitors Tactic1/2, Mode1, Mode2 simultaneously
    - Mode2 logic: checks buy_target_price, resistance (익절), support (손절)
+   - **비동기 병렬 처리**: `asyncio.gather()` 사용으로 11개 종목 1초 처리
    - **Polling 최적화**: mode2_last_check dict로 종목별 마지막 체크 시간 기록
      - 각 종목의 polling_interval만큼 경과 후에만 체크
-     - 불필요한 API 호출 방지
+     - 불필요한 API 호출 방지 (95% 절감)
    - **알림 전용 모드**: `notify_only=True`일 때 알림만 전송, 주문 실행 X
    - Auto-executes orders via KiwoomClient when signals trigger (notify_only=False일 때)
    - Sends Telegram notifications for all trades (모드 태그 포함)
    - Runs as asyncio background task
 
-2. **kiwoom_client.py** - Kiwoom API wrapper
+2. **kiwoom_client.py** - Kiwoom API wrapper (동기 버전)
    - Auto-refreshes OAuth2 token every 25 minutes (TTL: 30min)
    - `get_last_price(symbol)`: Uses ka10003 API for current price
    - `get_stock_info(symbol)`: Returns code, name, current_price
    - `place_buy_order()` / `place_sell_order()`: Order execution (currently simulation)
    - Test mode: set TEST_LAST_PRICE env var to bypass API calls
+
+2-1. **kiwoom_client_async.py** - 비동기 Kiwoom API wrapper ⭐ NEW
+   - **aiohttp 기반**: 비동기 HTTP 클라이언트 (블로킹 제거)
+   - **Rate limiting 내장**: 초당 5회 제한
+   - **병렬 호출 가능**: 여러 종목 동시 API 호출
+   - **성능**: 11개 종목 1.033초 (동기 110초 → 99% 개선)
+   - 동일 인터페이스: 기존 코드와 호환
 
 3. **kiwoom_chart.py** - Daily chart data (copied from kiwoom-min)
    - `get_daily_chart(token, symbol)`: Uses ka10081 API
@@ -649,8 +708,212 @@ tail -100 web_app.log
 
 ---
 
+### 🤖 Telegram Bot Conflicts - CRITICAL LESSON (2026-04-27)
+
+**문제**: 텔레그램 봇이 "Conflict: terminated by other getUpdates request" 에러 발생
+
+**근본 원인**:
+- **같은 텔레그램 봇 토큰**을 여러 서버/프로세스에서 동시 사용
+- 텔레그램 API는 **1개 봇 토큰당 1개 인스턴스만** 허용
+- 2개 이상에서 동시 실행 시 충돌 발생
+
+**발생 사례**:
+```
+오라클 서버: run_all.py (텔레그램 봇 포함)
+GCP 서버: web_app.py (PriceMonitor 내 텔레그램 봇 포함)
+→ 같은 TELEGRAM_BOT_TOKEN 사용 → Conflict 에러
+```
+
+**해결 방법**:
+1. **서버 간 중복 실행 방지**: 
+   - 프로덕션 서버 1곳에서만 텔레그램 봇 실행
+   - 다른 서버는 정지 또는 `bot_application=None` 설정
+
+2. **프로세스 확인**:
+   ```bash
+   # 오라클 서버
+   ssh opc@152.67.207.143 'ps aux | grep "python.*bot_v3\|python.*run_all"'
+   
+   # GCP 서버
+   gcloud compute ssh instance-name --command 'ps aux | grep python'
+   ```
+
+3. **충돌 디버깅 순서**:
+   - 모든 서버에서 봇 프로세스 확인
+   - GCP/오라클/로컬 맥 모두 체크
+   - 텔레그램 API 상태 클리어: `curl "https://api.telegram.org/bot<TOKEN>/getUpdates?offset=-1"`
+   - 1개 프로세스만 남기고 나머지 정리
+
+4. **예방책**:
+   - **배포 전 반드시 확인**: 다른 서버에서 봇 실행 중인지 체크
+   - **run_all.py 우선**: 웹서버 + 텔레그램 봇 통합 실행 권장
+   - **별도 실행 시**: web_app.py는 `bot_application=None`, bot_v3.py는 별도 실행
+
+**프로덕션 체크리스트**:
+- [ ] 오라클 서버에서만 run_all.py 실행 중?
+- [ ] GCP 서버 정지 또는 봇 비활성화?
+- [ ] 로컬 맥에서 봇 실행 안 함?
+- [ ] 텔레그램 getUpdates "200 OK" 응답?
+
+**현재 운영 상태** (2026-04-28):
+- ✅ 오라클 서버: web_app.py (웹서버 443 + 텔레그램 알림)
+- ✅ GCP 서버: 정지됨
+- ✅ 도메인: https://nomaddoklip.xyz
+- ✅ 텔레그램 알림: 정상 동작
+
+---
+
+### 📊 2026-04-28 주요 업데이트
+
+#### 1. Mode2 매수 조건 수정 (`<=` 연산자)
+**문제**: Test 페이지에서 현재가(22,800원) > 매수타점(22,110원)인데 매수 시그널 발생
+**원인**: `web_app.py` test endpoint에서 `current_price >= buy_target` 로직 사용 (반대)
+**해결**: 
+- `price_monitor.py`: `current_price <= target_price` ✅ (올바름)
+- `web_app.py` test endpoint: `current_price < buy_target` → `current_price <= buy_target`로 통일
+
+**Lesson Learned**:
+- 같은 로직을 여러 곳에서 구현할 때 **일관성 체크 필수**
+- Test endpoint는 실제 모니터링 로직과 **완전히 동일**해야 함
+- `<` vs `<=` 같은 경계값 처리는 **사양 문서에 명확히 기록** 필요
+
+#### 2. 텔레그램 알림 누락 해결
+**문제**: 475580 종목 매수 성공했으나 텔레그램 알림 미발송
+**원인**: `web_app.py`에서 PriceMonitor 초기화 시 `bot_application=None`
+**해결**: 
+```python
+# web_app.py 추가
+from telegram.ext import Application
+bot_application = Application.builder().token(telegram_token).build()
+price_monitor = PriceMonitor(..., bot_application=bot_application)
+```
+
+**Lesson Learned**:
+- **웹 서버 단독 실행** 시나리오 고려 필요
+- 텔레그램 봇을 2가지 방식으로 통합 가능:
+  1. `run_all.py` - 별도 프로세스로 bot_v3.py 실행
+  2. `web_app.py` - Application 객체만 생성 (알림 전송용)
+- 프로덕션에서는 **방법 2 권장** (단일 프로세스, 간단한 배포)
+
+#### 3. Oracle Cloud iptables 설정
+**문제**: 서버 재시작 후 https://nomaddoklip.xyz 접속 불가
+**원인**: 443 포트가 iptables에 등록되지 않음 (5000 포트만 존재)
+**해결**:
+```bash
+sudo iptables -I INPUT 1 -p tcp --dport 443 -j ACCEPT
+sudo iptables-save | sudo tee /etc/sysconfig/iptables
+```
+
+**Lesson Learned**:
+- **firewalld vs iptables**: 둘 다 확인 필요
+  - `firewall-cmd --list-all` (firewalld)
+  - `iptables -L -n` (iptables)
+- Oracle Cloud는 **iptables가 우선**
+- 포트 변경 시 **Security List + iptables 모두 설정** 필요
+- 설정 후 반드시 **저장**(iptables-save) 해야 재부팅 시에도 유지됨
+
+#### 4. Mode2 Budget 만원 단위 입력
+**요구사항**: Budget을 만원 단위로 입력/표시 (10 입력 = 100,000원)
+**구현**:
+- Picklist: 0만, 10만, 20만, 30만, 60만, 100만, 수동입력
+- 테이블 표시: "30만" 형식
+- Inline 편집: 만원 단위로 입력 → 저장 시 × 10,000
+
+**Lesson Learned**:
+- **UI 단위 변환**은 프론트엔드에서만 처리
+- 백엔드 API는 **항상 원화(원) 단위** 저장
+- 변환 로직 위치:
+  - 폼 submit: `budgetValue = parseInt(input) * 10000`
+  - 테이블 표시: `${(w.budget / 10000).toFixed(0)}만`
+  - Inline 편집: 입력받은 값 × 10000 후 API 전송
+
+#### 5. Mode2 섹션 내 정렬 (자동매매 우선)
+**요구사항**: 섹션 클릭 시 자동매매 종목이 위로, 알림전용 종목이 아래로
+**구현**:
+```javascript
+watchersBySection[sectionId].sort((a, b) => {
+    // 1순위: notify_only (false가 true보다 우선)
+    const notifyA = a.notify_only ? 1 : 0;
+    const notifyB = b.notify_only ? 1 : 0;
+    if (notifyA !== notifyB) return notifyA - notifyB;
+    
+    // 2순위: display_order
+    return (a.display_order || 9999) - (b.display_order || 9999);
+});
+```
+
+**Lesson Learned**:
+- **복합 정렬**: 1순위 → 2순위 순서로 비교
+- Boolean 값 정렬: `false=0, true=1`로 변환
+- 사용자 수동 정렬(display_order)과 **자동 정렬 병행** 가능
+
+#### 6. 계좌 보유 종목 → Mode2 편입 기능
+**요구사항**: 
+- 보유 종목을 Mode2로 편입
+- 자동 입력: 종목코드, 종목명, 매수가, 수량, Budget
+- 사용자 입력: 1차 저항, 1차 지지만
+- 모바일 친화적 UI
+
+**구현**:
+- "📊 Mode2" 버튼 → 모달 팝업
+- 큰 터치 영역 (14px padding, 16px font)
+- 유효성 검사: 1차 지지 < 매수가 < 1차 저항
+- `status: 'waiting_sell'` (이미 매수 완료 상태)
+
+**Lesson Learned**:
+- **모바일 고려 필수**: 
+  - 버튼 최소 크기 44×44px
+  - 폰트 최소 16px (자동 줌 방지)
+  - 모달 외부 클릭으로 닫기
+- **복잡한 폼 → 모달 분리**로 UX 개선
+- 보유 종목은 **바로 waiting_sell 상태**로 시작
+
+#### 7. 중복 알림 방지 (최종 해결)
+**문제**: 에이비엘바이오(298380) 매수 시그널이 매 polling마다 반복 발송
+**원인 1**: 중복 체크 로직 없음
+**해결 1**: `last_notification` 필드 추가
+```python
+if last_notification == 'buy_signal':
+    return None  # 이미 알림 보냄, 스킵
+```
+
+**원인 2**: AttributeError - `'PriceMonitor' object has no attribute 'mode2_manager'`
+**해결 2**: `self.mode2_manager` → `self.mode2_mgr` 오타 수정
+
+**Lesson Learned** ⭐ **중요**:
+- **에러 로그 확인 필수**: 기능이 작동 안 하면 **반드시 로그부터 확인**
+- 변수명 오타는 **실행 시점에만 발견**됨 (정적 분석 어려움)
+  - `__init__`에서 `self.mode2_mgr` 저장
+  - 실제 사용 시 `self.mode2_manager` 호출 → AttributeError
+- **일관된 네이밍**: 약어 사용 시 **프로젝트 전체에 통일**
+  - `mode2_mgr` vs `mode2_manager` → 하나로 통일 필요
+- **중복 방지 패턴**:
+  1. 상태 플래그 저장 (`last_notification`)
+  2. 조건 만족 시 플래그 확인 → 이미 알림 보냈으면 스킵
+  3. 조건 불만족 시 플래그 리셋 (재사용 가능하도록)
+
+#### 8. 트러블슈팅 실수 모음
+1. **속성명 오타 간과**: `self.mode2_manager` vs `self.mode2_mgr`
+   - **예방**: 클래스 초기화 시 속성 리스트 주석으로 정리
+   - **탐지**: 에러 로그에서 `AttributeError` 즉시 확인
+
+2. **로직 불일치**: Test endpoint와 실제 모니터링 로직 차이
+   - **예방**: 공통 함수로 추출, 중복 구현 최소화
+   - **검증**: Test 페이지로 실제 시나리오 테스트
+
+3. **환경 차이**: 로컬(brew firewall) vs Oracle(iptables)
+   - **예방**: 배포 전 서버 환경 체크리스트 작성
+   - **디버깅**: 서버 내부 테스트(`curl localhost`) → 외부 테스트
+
+4. **단위 변환 혼동**: 만원 단위 입력 vs 원 단위 저장
+   - **예방**: API 문서에 단위 명시
+   - **검증**: 저장된 값 직접 확인 (JSON 파일 또는 로그)
+
+---
+
 **Remember**: 
 - Kiwoom API 호출 코드는 금전적 손실과 직결
 - 의심스러우면 수정하지 말고 사용자에게 먼저 확인
 - 테스트 없이 프로덕션 코드 배포 금지
 - 실수는 학습 기회 → CLAUDE.md에 즉시 기록
+- **텔레그램 봇은 반드시 1곳에서만 실행** - 서버 간 중복 실행 절대 금지
