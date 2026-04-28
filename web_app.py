@@ -1540,6 +1540,232 @@ def seeking_signal_defaults():
         }), 500
 
 
+# ========== Watchlist API ==========
+
+def _get_watchlist_path():
+    from pathlib import Path
+    p = Path(os.getenv("WATCHLIST_PATH", ".data/watchlist.json"))
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def _load_manual_watchlist():
+    p = _get_watchlist_path()
+    if not p.exists():
+        return []
+    try:
+        import json as _json
+        return _json.loads(p.read_text(encoding='utf-8')).get('manual', [])
+    except Exception:
+        return []
+
+
+def _save_manual_watchlist(items):
+    import json as _json
+    _get_watchlist_path().write_text(
+        _json.dumps({'manual': items}, ensure_ascii=False, indent=2), encoding='utf-8'
+    )
+
+
+@app.route('/api/watchlist', methods=['GET'])
+@auth.login_required
+def get_watchlist():
+    try:
+        manual = _load_manual_watchlist()
+        manual_codes = {item['code'] for item in manual}
+        # Mode2 watchers
+        mode2_mgr = Mode2Manager()
+        m2_watchers = mode2_mgr.get_all_watchers()
+        m2_codes = {w['code'] for w in m2_watchers}
+        result = []
+        # Mode2 종목 먼저
+        for w in m2_watchers:
+            origin = 'both' if w['code'] in manual_codes else 'mode2'
+            result.append({'code': w['code'], 'name': w.get('name', w['code']), 'origin': origin})
+        # manual 전용 종목
+        for item in manual:
+            if item['code'] not in m2_codes:
+                result.append({'code': item['code'], 'name': item.get('name', item['code']), 'origin': 'manual'})
+        return jsonify({'success': True, 'data': result})
+    except Exception as e:
+        logger.error(f"get_watchlist 실패: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/watchlist', methods=['POST'])
+@auth.login_required
+def add_watchlist():
+    data = request.json or {}
+    raw = (data.get('codes') or '').strip()
+    if not raw:
+        return jsonify({'success': False, 'error': 'codes 필드 필요'}), 400
+    try:
+        manual = _load_manual_watchlist()
+        existing = {item['code'] for item in manual}
+        added = 0
+        for part in raw.split(','):
+            part = part.strip()
+            if not part:
+                continue
+            code = normalize_stock_code(part) if part.isdigit() or (len(part) <= 6 and part.isalnum()) else part
+            if code not in existing:
+                manual.append({'code': code, 'name': code})
+                existing.add(code)
+                added += 1
+        _save_manual_watchlist(manual)
+        return jsonify({'success': True, 'added': added})
+    except Exception as e:
+        logger.error(f"add_watchlist 실패: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/watchlist/<code>', methods=['DELETE'])
+@auth.login_required
+def delete_watchlist(code):
+    try:
+        manual = _load_manual_watchlist()
+        before = len(manual)
+        manual = [item for item in manual if item['code'] != normalize_stock_code(code) and item['code'] != code]
+        if len(manual) == before:
+            return jsonify({'success': False, 'error': '해당 종목이 없거나 Mode2 종목입니다'}), 404
+        _save_manual_watchlist(manual)
+        return jsonify({'success': True})
+    except Exception as e:
+        logger.error(f"delete_watchlist 실패: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ========== Hotstock Parsed API ==========
+
+import re as _re
+
+_TAG_PATTERN = _re.compile(r'^\[(SS⬆️?|VI|SS)\]', _re.UNICODE)
+_PRICE_PATTERN = _re.compile(r'현재가\s*:\s*([\d,]+)\s*\(([^)]+)\)')
+_THEME_PATTERN = _re.compile(r'테마\s*[：:]\s*(.+)')
+_RELATED_PATTERN = _re.compile(r'^Y\s+[^:：]+[：:]\s*(.+)', _re.MULTILINE)
+
+
+def _parse_hotstock_message(text: str) -> dict:
+    """급등주 메시지 파싱. tag_type, stock_name, price, change, theme, related_stocks 반환."""
+    first_line = text.split('\n')[0].strip()
+    tag_type = None
+    stock_name = None
+
+    if '[SS⬆️]' in first_line or '[SS⬆]' in first_line:
+        tag_type = 'ss_up'
+        stock_name = _re.sub(r'^\[SS[⬆️⬆]*\]\s*', '', first_line)
+    elif '[VI]' in first_line:
+        tag_type = 'vi'
+        stock_name = _re.sub(r'^\[VI\]\s*', '', first_line)
+    elif '[SS]' in first_line:
+        tag_type = 'ss'
+        stock_name = _re.sub(r'^\[SS\]\s*', '', first_line)
+    else:
+        return {}
+
+    # 종목명에서 현재가 부분 제거
+    price_m = _PRICE_PATTERN.search(stock_name)
+    price, change = None, None
+    if price_m:
+        stock_name = stock_name[:price_m.start()].strip()
+        price = price_m.group(1)
+        change = price_m.group(2)
+
+    theme_m = _THEME_PATTERN.search(text)
+    theme = theme_m.group(1).strip() if theme_m else None
+
+    related = []
+    for m in _RELATED_PATTERN.finditer(text):
+        for name in m.group(1).split(','):
+            name = name.strip()
+            if name:
+                related.append(name)
+
+    return {
+        'tag_type': tag_type,
+        'stock_name': stock_name,
+        'price': price,
+        'change': change,
+        'theme': theme,
+        'related_stocks': related,
+    }
+
+
+@app.route('/api/hotstock/parsed', methods=['GET'])
+@auth.login_required
+def get_hotstock_parsed():
+    target_date = request.args.get('date')
+    since = request.args.get('since')
+    try:
+        ns = _get_news_storage()
+        if since:
+            messages = ns.get_messages_since(since, source_type='hot_stock')
+        else:
+            messages = ns.get_messages(target_date=target_date, source_type='hot_stock')
+
+        # 관심종목 목록
+        manual = _load_manual_watchlist()
+        manual_codes = {item['code'] for item in manual}
+        mode2_mgr = Mode2Manager()
+        m2_watchers = mode2_mgr.get_all_watchers()
+        watchlist_names = set()
+        for w in m2_watchers:
+            watchlist_names.add(w.get('name', '').strip())
+        for item in manual:
+            watchlist_names.add(item.get('name', item['code']).strip())
+        watchlist_names.discard('')
+
+        result = []
+        for msg in messages:
+            parsed = _parse_hotstock_message(msg.get('text', ''))
+            if not parsed:
+                continue
+            # 관심종목 매칭
+            all_names = [parsed.get('stock_name', '')] + parsed.get('related_stocks', [])
+            matches = [n for n in all_names if n and n in watchlist_names]
+            parsed['message_id'] = msg['id']
+            parsed['received_at'] = msg.get('received_at')
+            parsed['watchlist_match'] = matches
+            result.append(parsed)
+
+        return jsonify({'success': True, 'data': result, 'count': len(result)})
+    except Exception as e:
+        logger.error(f"get_hotstock_parsed 실패: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ========== Siwhang Results API ==========
+
+
+@app.route('/api/siwhang/results', methods=['GET'])
+@auth.login_required
+def get_siwhang_results():
+    target_date = request.args.get('date')
+    try:
+        ns = _get_news_storage()
+        data = ns.get_siwhang_results(target_date=target_date)
+        return jsonify({'success': True, 'data': data, 'count': len(data)})
+    except Exception as e:
+        logger.error(f"get_siwhang_results 실패: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/siwhang/results', methods=['POST'])
+@auth.login_required
+def save_siwhang_results():
+    data = request.json or {}
+    results = data.get('results', [])
+    if not isinstance(results, list):
+        return jsonify({'success': False, 'error': 'results 배열 필요'}), 400
+    try:
+        ns = _get_news_storage()
+        saved = ns.save_siwhang_results(results)
+        return jsonify({'success': True, 'saved': saved})
+    except Exception as e:
+        logger.error(f"save_siwhang_results 실패: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 # ========== News Filter API ==========
 
 def _get_news_storage():

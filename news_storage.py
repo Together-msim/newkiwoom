@@ -76,11 +76,28 @@ class NewsStorage:
                     saved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
 
+                CREATE TABLE IF NOT EXISTS siwhang_results (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    message_id INTEGER REFERENCES messages(id),
+                    stock_code TEXT,
+                    stock_name TEXT,
+                    tag_type TEXT,
+                    theme TEXT,
+                    related_stocks TEXT,
+                    has_news_match BOOLEAN DEFAULT 0,
+                    news_summary TEXT,
+                    watchlist_match TEXT,
+                    analysis_text TEXT,
+                    date TEXT
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_messages_date ON messages(date);
                 CREATE INDEX IF NOT EXISTS idx_messages_source_type ON messages(source_type);
                 CREATE INDEX IF NOT EXISTS idx_messages_received_at ON messages(received_at);
                 CREATE INDEX IF NOT EXISTS idx_saved_news_source_type ON saved_news(source_type);
                 CREATE INDEX IF NOT EXISTS idx_saved_news_saved_at ON saved_news(saved_at);
+                CREATE INDEX IF NOT EXISTS idx_siwhang_results_date ON siwhang_results(date);
             """)
         logger.info(f"NewsStorage 초기화 완료: {self.db_path}")
 
@@ -343,3 +360,59 @@ class NewsStorage:
         except Exception as e:
             logger.error(f"delete_theme 실패: {e}")
             return False
+
+    # ─── 시황체크 분석 결과 ────────────────────────────────────
+
+    def save_siwhang_results(self, results: List[Dict]) -> int:
+        """시황체크 분석 결과 배치 저장. 저장된 건수 반환."""
+        if not results:
+            return 0
+        today = date.today().isoformat()
+        saved = 0
+        try:
+            with self._conn() as conn:
+                for r in results:
+                    conn.execute(
+                        """INSERT INTO siwhang_results
+                           (message_id, stock_code, stock_name, tag_type, theme,
+                            related_stocks, has_news_match, news_summary, watchlist_match,
+                            analysis_text, date)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (
+                            r.get('message_id'),
+                            r.get('stock_code'),
+                            r.get('stock_name'),
+                            r.get('tag_type'),
+                            r.get('theme'),
+                            json.dumps(r.get('related_stocks', []), ensure_ascii=False),
+                            1 if r.get('has_news_match') else 0,
+                            r.get('news_summary'),
+                            json.dumps(r.get('watchlist_match', []), ensure_ascii=False),
+                            r.get('analysis_text'),
+                            r.get('date', today),
+                        )
+                    )
+                    saved += 1
+        except Exception as e:
+            logger.error(f"save_siwhang_results 실패: {e}")
+        return saved
+
+    def get_siwhang_results(self, target_date: Optional[str] = None) -> List[Dict]:
+        """시황체크 분석 결과 조회."""
+        if target_date is None:
+            target_date = date.today().isoformat()
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM siwhang_results WHERE date=? ORDER BY run_at DESC",
+                (target_date,)
+            ).fetchall()
+        results = []
+        for r in rows:
+            d = dict(r)
+            for field in ('related_stocks', 'watchlist_match'):
+                try:
+                    d[field] = json.loads(d[field]) if d[field] else []
+                except Exception:
+                    d[field] = []
+            results.append(d)
+        return results

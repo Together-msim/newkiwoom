@@ -40,7 +40,7 @@ function switchPage(pageName) {
     else if (pageName === 'mode1') loadMode1List();
     else if (pageName === 'mode2') loadMode2List();
     else if (pageName === 'tradelog') loadTradelog();
-    else if (pageName === 'newsfilter') loadNewsFilter();
+    else if (pageName === 'siwhang') loadSiwhang();
     else if (pageName === 'test') loadMode2PickList(); // Test 페이지 진입 시 picklist 로드
 }
 
@@ -5151,15 +5151,162 @@ document.getElementById('cancelBulkBtn')?.addEventListener('click', () => {
 });
 
 // ============================================================
-// 📰 뉴스필터 페이지
+// 📊 시황체크 페이지
 // ============================================================
 
-// ─── 뉴스필터 상태 ─────────────────────────────────────────
+// ─── 시황체크 상태 ─────────────────────────────────────────
 let _kwTab = 'news'; // 현재 키워드 탭 ('news' | 'hotstock')
 let _kwDataNews = null;
 let _kwDataHotstock = null;
 // 테이블별 데이터 캐시 (삭제 기능용)
 const _tableData = { newsAll: [], hotstockAll: [], newsFiltered: [], hotstockFiltered: [] };
+// 관심종목 캐시
+let _watchlistData = [];
+
+// ─── 시황체크 진입점 ───────────────────────────────────────
+async function loadSiwhang() {
+    await Promise.all([loadWatchlist_siwhang(), loadHotstockParsed(), loadSiwhangResults(), loadNewsFilter()]);
+}
+
+// ─── 관심종목 관리 ─────────────────────────────────────────
+async function loadWatchlist_siwhang() {
+    try {
+        const r = await (await fetch('/api/watchlist', { credentials: 'same-origin' })).json();
+        _watchlistData = r.success ? r.data : [];
+        const countEl = document.getElementById('watchlistCount');
+        if (countEl) countEl.textContent = `(${_watchlistData.length}개)`;
+        _renderWatchlistTags();
+    } catch (e) { console.error('watchlist load error', e); }
+}
+
+function _renderWatchlistTags() {
+    const container = document.getElementById('watchlistTags');
+    if (!container) return;
+    if (!_watchlistData.length) {
+        container.innerHTML = '<span style="color:#868e96;font-size:13px;">관심종목이 없습니다. 종목코드를 추가하세요.</span>';
+        return;
+    }
+    container.innerHTML = _watchlistData.map(item => {
+        const badge = item.origin === 'mode2' ? ' <span style="background:#339af0;color:#fff;font-size:10px;padding:1px 4px;border-radius:3px;vertical-align:middle;">M2</span>'
+                    : item.origin === 'both'  ? ' <span style="background:#37b24d;color:#fff;font-size:10px;padding:1px 4px;border-radius:3px;vertical-align:middle;">M2</span>'
+                    : '';
+        const deleteBtn = (item.origin === 'manual' || item.origin === 'both')
+            ? `<span onclick="deleteWatchlistItem('${item.code}')" style="cursor:pointer;color:#c92a2a;margin-left:4px;font-size:12px;">×</span>`
+            : '';
+        return `<span style="display:inline-flex;align-items:center;background:#f1f3f5;border:1px solid #dee2e6;border-radius:16px;padding:4px 10px;font-size:12px;">
+            ${item.name}(${item.code})${badge}${deleteBtn}
+        </span>`;
+    }).join('');
+}
+
+async function addWatchlistItems() {
+    const input = document.getElementById('watchlistInput');
+    const raw = input?.value?.trim();
+    if (!raw) return;
+    try {
+        const r = await (await fetch('/api/watchlist', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ codes: raw }),
+        })).json();
+        if (r.success) {
+            input.value = '';
+            showToast(`✓ ${r.added}개 추가됨`, 'success');
+            await loadWatchlist_siwhang();
+        } else { showToast(r.error || '추가 실패', 'error'); }
+    } catch (e) { showToast('요청 실패', 'error'); }
+}
+
+async function deleteWatchlistItem(code) {
+    try {
+        const r = await (await fetch(`/api/watchlist/${code}`, {
+            method: 'DELETE', credentials: 'same-origin',
+        })).json();
+        if (r.success) { showToast('✓ 삭제됨', 'success'); await loadWatchlist_siwhang(); }
+        else { showToast(r.error || '삭제 실패', 'error'); }
+    } catch (e) { showToast('요청 실패', 'error'); }
+}
+
+// ─── 급등주 파싱 테이블 ────────────────────────────────────
+async function loadHotstockParsed() {
+    const date = _newsFilterDate();
+    const qs = date ? `?date=${date}` : '';
+    try {
+        const r = await (await fetch(`/api/hotstock/parsed${qs}`, { credentials: 'same-origin' })).json();
+        if (!r.success) return;
+        const ssUp = r.data.filter(d => d.tag_type === 'ss_up');
+        const vi   = r.data.filter(d => d.tag_type === 'vi');
+        const ss   = r.data.filter(d => d.tag_type === 'ss');
+        const upCountEl = document.getElementById('ssUpCount');
+        if (upCountEl) upCountEl.textContent = `(${ssUp.length}건)`;
+        const viCountEl = document.getElementById('viCount');
+        if (viCountEl) viCountEl.textContent = `(${vi.length}건)`;
+        const ssCountEl = document.getElementById('ssAllCount');
+        if (ssCountEl) ssCountEl.textContent = `(${ss.length}건)`;
+        _renderParsedTable('ssUpBody', ssUp);
+        _renderParsedTable('viBody', vi);
+        _renderParsedTable('ssAllBody', ss);
+    } catch (e) { console.error('hotstock parsed error', e); }
+}
+
+function _renderParsedTable(tbodyId, data) {
+    const tbody = document.getElementById(tbodyId);
+    if (!tbody) return;
+    if (!data.length) {
+        tbody.innerHTML = `<tr><td colspan="6" style="padding:16px;text-align:center;color:#868e96;font-size:13px;">데이터 없음</td></tr>`;
+        return;
+    }
+    tbody.innerHTML = data.map(m => {
+        const matchHtml = m.watchlist_match && m.watchlist_match.length
+            ? m.watchlist_match.map(n => `<span style="background:#fff3bf;border:1px solid #ffd43b;border-radius:10px;padding:1px 6px;font-size:11px;">🔔${n}</span>`).join(' ')
+            : '<span style="color:#868e96;">-</span>';
+        const related = (m.related_stocks || []).join(', ') || '-';
+        const price = m.price ? `<span style="color:${m.change && m.change.startsWith('+') ? '#c92a2a' : '#1971c2'}">${m.price}</span><br><span style="font-size:11px;color:#868e96;">${m.change || ''}</span>` : '-';
+        return `<tr style="border-bottom:1px solid #f1f3f5;">
+            <td style="padding:5px 8px;font-size:13px;font-weight:500;">${m.stock_name || '-'}</td>
+            <td style="padding:5px 8px;font-size:12px;text-align:right;">${price}</td>
+            <td style="padding:5px 8px;font-size:12px;">${m.theme || '-'}</td>
+            <td style="padding:5px 8px;font-size:11px;color:#495057;max-width:200px;">${related}</td>
+            <td style="padding:5px 8px;text-align:center;">${matchHtml}</td>
+            <td style="padding:5px 6px;font-size:11px;color:#868e96;text-align:right;white-space:nowrap;">${_fmtDatetime(m.received_at)}</td>
+        </tr>`;
+    }).join('');
+}
+
+// ─── AI 분석 결과 ─────────────────────────────────────────
+async function loadSiwhangResults() {
+    const date = _newsFilterDate();
+    const qs = date ? `?date=${date}` : '';
+    try {
+        const r = await (await fetch(`/api/siwhang/results${qs}`, { credentials: 'same-origin' })).json();
+        const data = r.success ? r.data : [];
+        const countEl = document.getElementById('siwhangResultCount');
+        if (countEl) countEl.textContent = `(${data.length}건)`;
+        const tbody = document.getElementById('siwhangResultBody');
+        if (!tbody) return;
+        if (!data.length) {
+            tbody.innerHTML = `<tr><td colspan="8" style="padding:16px;text-align:center;color:#868e96;font-size:13px;">/siwhang 스킬 실행 후 결과가 표시됩니다</td></tr>`;
+            return;
+        }
+        const tagLabel = { ss_up: '🚀상한가', vi: '⚡VI', ss: '📈급등' };
+        tbody.innerHTML = data.map(m => {
+            const related = Array.isArray(m.related_stocks) ? m.related_stocks.join(', ') : (m.related_stocks || '-');
+            const matchHtml = m.watchlist_match && m.watchlist_match.length
+                ? m.watchlist_match.map(n => `<span style="background:#fff3bf;border:1px solid #ffd43b;border-radius:10px;padding:1px 6px;font-size:11px;">🔔${n}</span>`).join(' ')
+                : '-';
+            return `<tr style="border-bottom:1px solid #f1f3f5;">
+                <td style="padding:5px 6px;font-size:11px;color:#868e96;white-space:nowrap;">${_fmtDatetime(m.run_at)}</td>
+                <td style="padding:5px 6px;text-align:center;">${tagLabel[m.tag_type] || m.tag_type}</td>
+                <td style="padding:5px 8px;font-size:13px;font-weight:500;white-space:nowrap;">${m.stock_name || '-'}</td>
+                <td style="padding:5px 8px;font-size:12px;white-space:nowrap;">${m.theme || '-'}</td>
+                <td style="padding:5px 8px;font-size:11px;color:#495057;max-width:160px;">${related}</td>
+                <td style="padding:5px 8px;text-align:center;">${m.has_news_match ? '✅' : '❌'}</td>
+                <td style="padding:5px 8px;">${matchHtml}</td>
+                <td style="padding:5px 8px;font-size:11px;color:#495057;max-width:200px;" title="${m.analysis_text || ''}">${(m.analysis_text || '').slice(0, 60)}${(m.analysis_text || '').length > 60 ? '…' : ''}</td>
+            </tr>`;
+        }).join('');
+    } catch (e) { console.error('siwhang results error', e); }
+}
 
 function _newsFilterDate() {
     const d = document.getElementById('newsfilterDate');
