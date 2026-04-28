@@ -1551,13 +1551,18 @@ def _get_news_storage():
     return _get_news_storage._instance
 
 
-def _get_keyword_storage():
-    """KeywordStorage 인스턴스를 반환 (지연 초기화)."""
-    if not hasattr(_get_keyword_storage, "_instance") or _get_keyword_storage._instance is None:
+def _get_keyword_storage(kw_type: str = 'news'):
+    """KeywordStorage 인스턴스를 반환 (지연 초기화). kw_type: 'news' | 'hotstock'"""
+    attr = f"_instance_{kw_type}"
+    if not hasattr(_get_keyword_storage, attr) or getattr(_get_keyword_storage, attr) is None:
         from keyword_storage import KeywordStorage
-        from keyword_config import resolve_keywords_path
-        _get_keyword_storage._instance = KeywordStorage(str(resolve_keywords_path()))
-    return _get_keyword_storage._instance
+        from keyword_config import resolve_news_keywords_path, resolve_hotstock_keywords_path
+        if kw_type == 'hotstock':
+            path = resolve_hotstock_keywords_path()
+        else:
+            path = resolve_news_keywords_path()
+        setattr(_get_keyword_storage, attr, KeywordStorage(str(path)))
+    return getattr(_get_keyword_storage, attr)
 
 
 @app.route('/api/news/today', methods=['GET'])
@@ -1615,9 +1620,10 @@ def get_hotstock_filtered():
 @app.route('/api/keywords', methods=['GET'])
 @auth.login_required
 def get_keywords():
+    kw_type = request.args.get('type', 'news')
     try:
-        ks = _get_keyword_storage()
-        return jsonify({"success": True, "data": ks.get_all()})
+        ks = _get_keyword_storage(kw_type)
+        return jsonify({"success": True, "data": ks.get_all(), "type": kw_type})
     except Exception as e:
         logger.error(f"get_keywords 실패: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -1628,10 +1634,11 @@ def get_keywords():
 def add_include_keyword():
     data = request.json or {}
     keyword = (data.get('keyword') or '').strip()
+    kw_type = data.get('type', 'news')
     if not keyword:
         return jsonify({"success": False, "error": "keyword 필드 필요"}), 400
     try:
-        ks = _get_keyword_storage()
+        ks = _get_keyword_storage(kw_type)
         added = ks.add_include_keyword(keyword)
         return jsonify({"success": True, "added": added, "keywords": ks.get_all()})
     except Exception as e:
@@ -1644,10 +1651,11 @@ def add_include_keyword():
 def remove_include_keyword():
     data = request.json or {}
     keyword = (data.get('keyword') or '').strip()
+    kw_type = data.get('type', 'news')
     if not keyword:
         return jsonify({"success": False, "error": "keyword 필드 필요"}), 400
     try:
-        ks = _get_keyword_storage()
+        ks = _get_keyword_storage(kw_type)
         removed = ks.remove_include_keyword(keyword)
         return jsonify({"success": True, "removed": removed, "keywords": ks.get_all()})
     except Exception as e:
@@ -1660,10 +1668,11 @@ def remove_include_keyword():
 def add_exclude_keyword():
     data = request.json or {}
     keyword = (data.get('keyword') or '').strip()
+    kw_type = data.get('type', 'news')
     if not keyword:
         return jsonify({"success": False, "error": "keyword 필드 필요"}), 400
     try:
-        ks = _get_keyword_storage()
+        ks = _get_keyword_storage(kw_type)
         added = ks.add_exclude_keyword(keyword)
         return jsonify({"success": True, "added": added, "keywords": ks.get_all()})
     except Exception as e:
@@ -1676,14 +1685,35 @@ def add_exclude_keyword():
 def remove_exclude_keyword():
     data = request.json or {}
     keyword = (data.get('keyword') or '').strip()
+    kw_type = data.get('type', 'news')
     if not keyword:
         return jsonify({"success": False, "error": "keyword 필드 필요"}), 400
     try:
-        ks = _get_keyword_storage()
+        ks = _get_keyword_storage(kw_type)
         removed = ks.remove_exclude_keyword(keyword)
         return jsonify({"success": True, "removed": removed, "keywords": ks.get_all()})
     except Exception as e:
         logger.error(f"remove_exclude_keyword 실패: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/keywords/set', methods=['POST'])
+@auth.login_required
+def set_keywords_bulk():
+    """Include 또는 Exclude 키워드 전체 교체."""
+    data = request.json or {}
+    kw_type = data.get('type', 'news')
+    field = data.get('field', 'include')  # 'include' | 'exclude'
+    keywords = data.get('keywords', [])
+    try:
+        ks = _get_keyword_storage(kw_type)
+        if field == 'include':
+            ks.set_include_keywords(keywords)
+        else:
+            ks.set_exclude_keywords(keywords)
+        return jsonify({"success": True, "keywords": ks.get_all()})
+    except Exception as e:
+        logger.error(f"set_keywords_bulk 실패: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -1692,10 +1722,11 @@ def remove_exclude_keyword():
 def add_keyword_group():
     data = request.json or {}
     keywords = data.get('keywords', [])
+    kw_type = data.get('type', 'news')
     if not keywords or len(keywords) < 2:
         return jsonify({"success": False, "error": "keywords 2개 이상 필요"}), 400
     try:
-        ks = _get_keyword_storage()
+        ks = _get_keyword_storage(kw_type)
         added = ks.add_include_group(keywords)
         return jsonify({"success": True, "added": added, "keywords": ks.get_all()})
     except Exception as e:
@@ -1708,10 +1739,11 @@ def add_keyword_group():
 def remove_keyword_group():
     data = request.json or {}
     keywords = data.get('keywords', [])
+    kw_type = data.get('type', 'news')
     if not keywords:
         return jsonify({"success": False, "error": "keywords 필드 필요"}), 400
     try:
-        ks = _get_keyword_storage()
+        ks = _get_keyword_storage(kw_type)
         removed = ks.remove_include_group(keywords)
         return jsonify({"success": True, "removed": removed, "keywords": ks.get_all()})
     except Exception as e:
@@ -1724,14 +1756,100 @@ def remove_keyword_group():
 def set_keyword_mode():
     data = request.json or {}
     mode = (data.get('mode') or '').strip()
+    kw_type = data.get('type', 'news')
     if mode not in ('loose', 'strict'):
         return jsonify({"success": False, "error": "mode는 loose 또는 strict"}), 400
     try:
-        ks = _get_keyword_storage()
+        ks = _get_keyword_storage(kw_type)
         ks.set_mode(mode)
         return jsonify({"success": True, "mode": mode})
     except Exception as e:
         logger.error(f"set_keyword_mode 실패: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/messages/delete', methods=['POST'])
+@auth.login_required
+def delete_messages():
+    """메시지 선택 삭제. { ids: [], source_type: 'news'|'hotstock'|null }"""
+    data = request.json or {}
+    ids = [int(i) for i in data.get('ids', []) if str(i).isdigit()]
+    source_type = data.get('source_type') or None
+    if not ids:
+        return jsonify({"success": False, "error": "ids 필드 필요"}), 400
+    try:
+        ns = _get_news_storage()
+        deleted = ns.delete_messages(ids, source_type=source_type)
+        return jsonify({"success": True, "deleted": deleted})
+    except Exception as e:
+        logger.error(f"delete_messages 실패: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/messages/cleanup', methods=['POST'])
+@auth.login_required
+def cleanup_messages():
+    """1일 지난 메시지 자동 삭제."""
+    try:
+        ns = _get_news_storage()
+        deleted = ns.cleanup_old_messages()
+        return jsonify({"success": True, "deleted": deleted, "message": f"{deleted}건 삭제됨"})
+    except Exception as e:
+        logger.error(f"cleanup_messages 실패: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/news/save', methods=['POST'])
+@auth.login_required
+def save_news_scrape():
+    """선택 뉴스 스크래핑 저장. { ids: [] }"""
+    data = request.json or {}
+    ids = [int(i) for i in data.get('ids', []) if str(i).isdigit()]
+    if not ids:
+        return jsonify({"success": False, "error": "ids 필드 필요"}), 400
+    try:
+        ns = _get_news_storage()
+        messages = ns.get_messages_by_ids(ids)
+        saved_count = 0
+        for msg in messages:
+            ns.save_scraped_news(
+                message_id=msg.get('id'),
+                text=msg.get('text', ''),
+                source_type=msg.get('source_type', 'news'),
+                original_date=msg.get('date', ''),
+            )
+            saved_count += 1
+        return jsonify({"success": True, "saved": saved_count})
+    except Exception as e:
+        logger.error(f"save_news_scrape 실패: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/news/saved', methods=['GET'])
+@auth.login_required
+def get_saved_news():
+    """저장된 뉴스 조회. ?q=검색어&source_type=news|hotstock"""
+    search_query = request.args.get('q', '').strip() or None
+    source_type = request.args.get('source_type', '').strip() or None
+    try:
+        ns = _get_news_storage()
+        items = ns.get_saved_news(search_query=search_query, source_type=source_type)
+        return jsonify({"success": True, "data": items, "count": len(items)})
+    except Exception as e:
+        logger.error(f"get_saved_news 실패: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/news/saved/<int:saved_id>', methods=['DELETE'])
+@auth.login_required
+def delete_saved_news(saved_id):
+    """저장된 뉴스 삭제."""
+    try:
+        ns = _get_news_storage()
+        ns.delete_saved_news(saved_id)
+        return jsonify({"success": True})
+    except Exception as e:
+        logger.error(f"delete_saved_news 실패: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 

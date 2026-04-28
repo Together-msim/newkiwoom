@@ -5154,142 +5154,252 @@ document.getElementById('cancelBulkBtn')?.addEventListener('click', () => {
 // 📰 뉴스필터 페이지
 // ============================================================
 
-let _keywordData = null; // 캐시된 키워드 설정
+// ─── 뉴스필터 상태 ─────────────────────────────────────────
+let _kwTab = 'news'; // 현재 키워드 탭 ('news' | 'hotstock')
+let _kwDataNews = null;
+let _kwDataHotstock = null;
+// 테이블별 데이터 캐시 (삭제 기능용)
+const _tableData = { newsAll: [], hotstockAll: [], newsFiltered: [], hotstockFiltered: [] };
 
 function _newsFilterDate() {
     const d = document.getElementById('newsfilterDate');
     return d && d.value ? d.value : '';
 }
 
-function _fmtTime(dtStr) {
+function _fmtDatetime(dtStr) {
     if (!dtStr) return '-';
-    const d = new Date(dtStr);
+    const d = new Date(dtStr.replace(' ', 'T') + (dtStr.includes('T') ? '' : 'Z'));
     if (isNaN(d)) return dtStr;
-    return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mi = String(d.getMinutes()).padStart(2, '0');
+    return `${mm}/${dd} ${hh}:${mi}`;
 }
 
 async function loadNewsFilter() {
     const date = _newsFilterDate();
     const qs = date ? `?date=${date}` : '';
     await Promise.all([
-        _loadNewsAll(qs),
-        _loadHotstockAll(qs),
-        _loadNewsFiltered(qs),
-        _loadHotstockFiltered(qs),
-        loadKeywords(),
-        loadThemes(),
+        _loadNewsAll(qs), _loadHotstockAll(qs),
+        _loadNewsFiltered(qs), _loadHotstockFiltered(qs),
+        loadKeywords(), loadThemes(), loadSavedNews(),
     ]);
 }
 
 async function _loadNewsAll(qs) {
     try {
-        const res = await fetch(`/api/news/today${qs}`, { credentials: 'same-origin' });
-        const r = await res.json();
+        const r = await (await fetch(`/api/news/today${qs}`, { credentials: 'same-origin' })).json();
         const data = r.success ? r.data : [];
+        _tableData.newsAll = data;
         document.getElementById('newsAllCount').textContent = `(${data.length}건)`;
-        _renderMsgTable('newsAllBody', data, false);
-    } catch (e) { /* ignore */ }
+        _renderMsgTable('newsAllBody', data, 'newsAll');
+    } catch (e) {}
 }
 
 async function _loadHotstockAll(qs) {
     try {
-        const res = await fetch(`/api/hotstock/today${qs}`, { credentials: 'same-origin' });
-        const r = await res.json();
+        const r = await (await fetch(`/api/hotstock/today${qs}`, { credentials: 'same-origin' })).json();
         const data = r.success ? r.data : [];
+        _tableData.hotstockAll = data;
         document.getElementById('hotstockAllCount').textContent = `(${data.length}건)`;
-        _renderMsgTable('hotstockAllBody', data, false);
-    } catch (e) { /* ignore */ }
+        _renderMsgTable('hotstockAllBody', data, 'hotstockAll');
+    } catch (e) {}
 }
 
 async function _loadNewsFiltered(qs) {
     try {
-        const res = await fetch(`/api/news/filtered${qs}`, { credentials: 'same-origin' });
-        const r = await res.json();
+        const r = await (await fetch(`/api/news/filtered${qs}`, { credentials: 'same-origin' })).json();
         const data = r.success ? r.data : [];
+        _tableData.newsFiltered = data;
         document.getElementById('newsFilteredCount').textContent = `(${data.length}건)`;
-        _renderMsgTable('newsFilteredBody', data, true);
-    } catch (e) { /* ignore */ }
+        _renderMsgTable('newsFilteredBody', data, 'newsFiltered');
+    } catch (e) {}
 }
 
 async function _loadHotstockFiltered(qs) {
     try {
-        const res = await fetch(`/api/hotstock/filtered${qs}`, { credentials: 'same-origin' });
-        const r = await res.json();
+        const r = await (await fetch(`/api/hotstock/filtered${qs}`, { credentials: 'same-origin' })).json();
         const data = r.success ? r.data : [];
+        _tableData.hotstockFiltered = data;
         document.getElementById('hotstockFilteredCount').textContent = `(${data.length}건)`;
-        _renderMsgTable('hotstockFilteredBody', data, false);
-    } catch (e) { /* ignore */ }
+        _renderMsgTable('hotstockFilteredBody', data, 'hotstockFiltered');
+    } catch (e) {}
 }
 
-function _renderMsgTable(tbodyId, data, showCheckbox) {
+function _renderMsgTable(tbodyId, data, tableKey) {
     const tbody = document.getElementById(tbodyId);
     if (!tbody) return;
     if (!data || data.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="${showCheckbox ? 3 : 2}" class="empty-state" style="padding:16px; text-align:center; color:#868e96; font-size:13px;">데이터 없음</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="3" style="padding:16px;text-align:center;color:#868e96;font-size:13px;">데이터 없음</td></tr>`;
         return;
     }
     tbody.innerHTML = data.map(m => {
-        const time = _fmtTime(m.received_at);
+        const dt = _fmtDatetime(m.received_at);
         const text = (m.text || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        const preview = text.length > 80 ? text.slice(0, 80) + '…' : text;
-        const cb = showCheckbox ? `<td style="padding:5px 4px; width:28px;"><input type="checkbox" class="news-select-cb" data-id="${m.id}" onchange="_onNewsCheckboxChange()"></td>` : '';
-        return `<tr style="border-bottom: 1px solid #f1f3f5;">
-            ${cb}
-            <td style="padding:5px 8px; font-size:12px; line-height:1.4;" title="${text}">${preview}</td>
-            <td style="padding:5px 8px; font-size:11px; color:#868e96; text-align:right; white-space:nowrap;">${time}</td>
+        const preview = text.length > 90 ? text.slice(0, 90) + '…' : text;
+        return `<tr style="border-bottom:1px solid #f1f3f5;">
+            <td style="padding:4px 4px;width:24px;"><input type="checkbox" class="msg-cb cb-${tableKey}" data-id="${m.id}" onchange="_onMsgCbChange('${tableKey}')"></td>
+            <td style="padding:4px 8px;font-size:12px;line-height:1.4;" title="${text}">${preview}</td>
+            <td style="padding:4px 6px;font-size:11px;color:#868e96;text-align:right;white-space:nowrap;">${dt}</td>
         </tr>`;
     }).join('');
 }
 
-function toggleAllNewsCheckboxes(masterCb) {
-    document.querySelectorAll('.news-select-cb').forEach(cb => { cb.checked = masterCb.checked; });
-    _onNewsCheckboxChange();
+function toggleTableCheckboxes(tableKey, masterCb) {
+    document.querySelectorAll(`.cb-${tableKey}`).forEach(cb => { cb.checked = masterCb.checked; });
+    _onMsgCbChange(tableKey);
 }
 
-function _onNewsCheckboxChange() {
-    const selected = document.querySelectorAll('.news-select-cb:checked').length;
-    const btn = document.getElementById('newsInsightSelectedBtn');
-    if (btn) btn.style.display = selected > 0 ? 'inline-block' : 'none';
+function _onMsgCbChange(tableKey) {
+    if (tableKey === 'newsFiltered') {
+        const selected = document.querySelectorAll('.cb-newsFiltered:checked').length;
+        const btn = document.getElementById('newsInsightSelectedBtn');
+        if (btn) btn.style.display = selected > 0 ? 'inline-block' : 'none';
+    }
 }
 
 function runNewsInsightSelected() {
-    const ids = Array.from(document.querySelectorAll('.news-select-cb:checked')).map(cb => cb.dataset.id);
+    const ids = Array.from(document.querySelectorAll('.cb-newsFiltered:checked')).map(cb => cb.dataset.id);
     if (ids.length === 0) { showToast('선택된 뉴스가 없습니다', 'error'); return; }
-    // 스킬에서 사용할 수 있도록 클립보드/콘솔에 ID 목록 출력
     const idStr = ids.join(',');
     navigator.clipboard?.writeText(idStr).catch(() => {});
     showToast(`${ids.length}건 선택됨 (ID: ${idStr}) - /news-insight-selected 스킬에서 사용`, 'info');
-    console.log('선택된 뉴스 IDs:', idStr);
+}
+
+async function deleteSelectedMessages(tableKey) {
+    const ids = Array.from(document.querySelectorAll(`.cb-${tableKey}:checked`)).map(cb => parseInt(cb.dataset.id));
+    if (ids.length === 0) { showToast('삭제할 항목을 선택하세요', 'error'); return; }
+    if (!confirm(`${ids.length}건을 삭제하시겠습니까?`)) return;
+    try {
+        const r = await (await fetch('/api/messages/delete', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids }),
+        })).json();
+        if (r.success) {
+            showToast(`✓ ${r.deleted}건 삭제됨`, 'success');
+            const qs = _newsFilterDate() ? `?date=${_newsFilterDate()}` : '';
+            if (tableKey === 'newsAll') await _loadNewsAll(qs);
+            else if (tableKey === 'hotstockAll') await _loadHotstockAll(qs);
+            else if (tableKey === 'newsFiltered') await _loadNewsFiltered(qs);
+            else if (tableKey === 'hotstockFiltered') await _loadHotstockFiltered(qs);
+        } else { showToast(r.error || '삭제 실패', 'error'); }
+    } catch (e) { showToast('요청 실패', 'error'); }
+}
+
+async function cleanupOldMessages() {
+    if (!confirm('오늘 날짜 이전 뉴스를 모두 삭제하시겠습니까?\n(스크래핑된 뉴스는 보존됩니다)')) return;
+    try {
+        const r = await (await fetch('/api/messages/cleanup', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+        })).json();
+        if (r.success) {
+            showToast(`✓ ${r.message}`, 'success');
+            loadNewsFilter();
+        } else { showToast(r.error || '실패', 'error'); }
+    } catch (e) { showToast('요청 실패', 'error'); }
+}
+
+async function scrapeSelectedNews() {
+    const ids = Array.from(document.querySelectorAll('.cb-newsFiltered:checked')).map(cb => parseInt(cb.dataset.id));
+    if (ids.length === 0) { showToast('스크래핑할 뉴스를 선택하세요', 'error'); return; }
+    try {
+        const r = await (await fetch('/api/news/save', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids }),
+        })).json();
+        if (r.success) {
+            showToast(`✓ ${r.saved}건 스크래핑 저장됨`, 'success');
+            await loadSavedNews();
+        } else { showToast(r.error || '실패', 'error'); }
+    } catch (e) { showToast('요청 실패', 'error'); }
+}
+
+async function loadSavedNews() {
+    const q = (document.getElementById('savedNewsSearch')?.value || '').trim();
+    const qs = q ? `?q=${encodeURIComponent(q)}` : '';
+    try {
+        const r = await (await fetch(`/api/news/saved${qs}`, { credentials: 'same-origin' })).json();
+        const data = r.success ? r.data : [];
+        const countEl = document.getElementById('savedNewsCount');
+        if (countEl) countEl.textContent = `(${data.length}건)`;
+        const tbody = document.getElementById('savedNewsBody');
+        if (!tbody) return;
+        if (!data.length) {
+            tbody.innerHTML = `<tr><td colspan="4" style="padding:16px;text-align:center;color:#868e96;font-size:13px;">저장된 뉴스 없음</td></tr>`;
+            return;
+        }
+        tbody.innerHTML = data.map(m => {
+            const text = (m.text || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            const preview = text.length > 100 ? text.slice(0, 100) + '…' : text;
+            return `<tr style="border-bottom:1px solid #f1f3f5;">
+                <td style="padding:5px 8px;font-size:12px;line-height:1.4;" title="${text}">${preview}</td>
+                <td style="padding:5px 8px;font-size:11px;color:#495057;text-align:center;white-space:nowrap;">${m.original_date || '-'}</td>
+                <td style="padding:5px 8px;font-size:11px;color:#868e96;text-align:center;white-space:nowrap;">${_fmtDatetime(m.saved_at)}</td>
+                <td style="padding:5px 6px;text-align:center;">
+                    <button onclick="deleteSavedNews(${m.id})" style="border:none;background:none;cursor:pointer;color:#c92a2a;font-size:14px;" title="삭제">🗑</button>
+                </td>
+            </tr>`;
+        }).join('');
+    } catch (e) {}
+}
+
+async function deleteSavedNews(id) {
+    if (!confirm('이 스크래핑 뉴스를 삭제하시겠습니까?')) return;
+    try {
+        const r = await (await fetch(`/api/news/saved/${id}`, {
+            method: 'DELETE', credentials: 'same-origin',
+        })).json();
+        if (r.success) { showToast('✓ 삭제됨', 'success'); await loadSavedNews(); }
+        else { showToast(r.error || '실패', 'error'); }
+    } catch (e) { showToast('요청 실패', 'error'); }
 }
 
 // ─── 키워드 관리 ───────────────────────────────────────────
 
+function switchKwTab(tab) {
+    _kwTab = tab;
+    const newsBtn = document.getElementById('kwTabNews');
+    const hsBtn = document.getElementById('kwTabHotstock');
+    if (newsBtn) { newsBtn.style.background = tab === 'news' ? '#228be6' : 'white'; newsBtn.style.color = tab === 'news' ? 'white' : '#495057'; }
+    if (hsBtn) { hsBtn.style.background = tab === 'hotstock' ? '#228be6' : 'white'; hsBtn.style.color = tab === 'hotstock' ? 'white' : '#495057'; }
+    loadKeywords();
+}
+
 async function loadKeywords() {
     try {
-        const res = await fetch('/api/keywords', { credentials: 'same-origin' });
-        const r = await res.json();
+        const r = await (await fetch(`/api/keywords?type=${_kwTab}`, { credentials: 'same-origin' })).json();
         if (!r.success) return;
-        _keywordData = r.data;
-        _renderKeywordTags('includeKeywordTags', r.data.include_keywords || [], 'include');
-        _renderKeywordTags('excludeKeywordTags', r.data.exclude_keywords || [], 'exclude');
-        _renderGroupTags('keywordGroupTags', r.data.include_groups || []);
-        const mode = r.data.mode || 'loose';
+        if (_kwTab === 'news') _kwDataNews = r.data; else _kwDataHotstock = r.data;
+        const data = r.data;
+        _renderKeywordTags('includeKeywordTags', data.include_keywords || [], 'include');
+        _renderKeywordTags('excludeKeywordTags', data.exclude_keywords || [], 'exclude');
+        _renderGroupTags('keywordGroupTags', data.include_groups || []);
+        const mode = data.mode || 'loose';
         const btn = document.getElementById('keywordModeBtn');
         const desc = document.getElementById('keywordModeDesc');
         if (btn) btn.textContent = mode;
         if (desc) desc.textContent = mode === 'loose' ? '키워드 하나라도 일치하면 전달' : '모든 키워드가 일치해야 전달';
-    } catch (e) { /* ignore */ }
+    } catch (e) {}
 }
+
+function _kwData() { return _kwTab === 'news' ? _kwDataNews : _kwDataHotstock; }
 
 function _renderKeywordTags(containerId, keywords, type) {
     const container = document.getElementById(containerId);
     if (!container) return;
-    container.innerHTML = keywords.map(kw =>
-        `<span style="display:inline-flex;align-items:center;gap:4px;background:${type==='include'?'#d3f9d8':'#ffe3e3'};color:${type==='include'?'#2f9e44':'#c92a2a'};padding:3px 10px;border-radius:12px;font-size:12px;">
-            ${kw}
-            <span style="cursor:pointer;font-size:14px;line-height:1;" onclick="removeKeyword('${type}','${kw}')" title="삭제">×</span>
-        </span>`
-    ).join('') || `<span style="font-size:12px;color:#adb5bd;">없음</span>`;
+    // 편집 중이면 태그 렌더링 스킵
+    const editDiv = document.getElementById(`${type}KeywordEdit`);
+    if (editDiv && editDiv.style.display !== 'none') return;
+    container.innerHTML = keywords.map(kw => {
+        const escaped = kw.replace(/'/g, "\\'");
+        return `<span style="display:inline-flex;align-items:center;gap:4px;background:${type==='include'?'#d3f9d8':'#ffe3e3'};color:${type==='include'?'#2f9e44':'#c92a2a'};padding:3px 10px;border-radius:12px;font-size:12px;">
+            ${kw}<span style="cursor:pointer;font-size:14px;line-height:1;" onclick="removeKeyword('${type}','${escaped}')" title="삭제">×</span>
+        </span>`;
+    }).join('') || `<span style="font-size:12px;color:#adb5bd;">없음</span>`;
 }
 
 function _renderGroupTags(containerId, groups) {
@@ -5297,43 +5407,97 @@ function _renderGroupTags(containerId, groups) {
     if (!container) return;
     container.innerHTML = groups.map(g =>
         `<span style="display:inline-flex;align-items:center;gap:4px;background:#e7f5ff;color:#1971c2;padding:3px 10px;border-radius:12px;font-size:12px;">
-            ${g.join(' AND ')}
-            <span style="cursor:pointer;font-size:14px;line-height:1;" onclick="removeKeywordGroup(${JSON.stringify(g)})" title="삭제">×</span>
+            ${g.join(' AND ')}<span style="cursor:pointer;font-size:14px;line-height:1;" onclick="removeKeywordGroup(${JSON.stringify(g)})" title="삭제">×</span>
         </span>`
     ).join('') || `<span style="font-size:12px;color:#adb5bd;">없음</span>`;
 }
 
-async function addKeyword(type) {
-    const inputId = type === 'include' ? 'includeKeywordInput' : 'excludeKeywordInput';
-    const input = document.getElementById(inputId);
-    const keyword = input ? input.value.trim() : '';
-    if (!keyword) { showToast('키워드를 입력하세요', 'error'); return; }
+function toggleKwEdit(type) {
+    const tagsDiv = document.getElementById(`${type}KeywordTags`);
+    const editDiv = document.getElementById(`${type}KeywordEdit`);
+    const textarea = document.getElementById(`${type}KeywordTextarea`);
+    if (!tagsDiv || !editDiv || !textarea) return;
+    const isEditing = editDiv.style.display !== 'none';
+    if (isEditing) {
+        cancelKwEdit(type);
+    } else {
+        const kw = _kwData();
+        const keywords = (kw && kw[`${type}_keywords`]) || [];
+        textarea.value = keywords.join(', ');
+        tagsDiv.style.display = 'none';
+        editDiv.style.display = 'block';
+        const btn = document.getElementById(`${type}EditBtn`);
+        if (btn) btn.textContent = '✕ 닫기';
+    }
+}
+
+async function saveKwEdit(type) {
+    const textarea = document.getElementById(`${type}KeywordTextarea`);
+    if (!textarea) return;
+    const keywords = textarea.value.split(',').map(k => k.trim()).filter(k => k);
     try {
-        const res = await fetch(`/api/keywords/${type}`, {
+        const r = await (await fetch('/api/keywords/set', {
             method: 'POST', credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ keyword }),
-        });
-        const r = await res.json();
+            body: JSON.stringify({ type: _kwTab, field: type, keywords }),
+        })).json();
         if (r.success) {
-            if (input) input.value = '';
-            _keywordData = r.keywords;
+            if (_kwTab === 'news') _kwDataNews = r.keywords; else _kwDataHotstock = r.keywords;
+            cancelKwEdit(type);
             _renderKeywordTags(`${type}KeywordTags`, r.keywords[`${type}_keywords`] || [], type);
-            showToast(`✓ "${keyword}" 추가`, 'success');
-        } else { showToast(r.error, 'error'); }
+            showToast(`✓ ${type === 'include' ? 'Include' : 'Exclude'} 키워드 저장됨 (${keywords.length}개)`, 'success');
+        } else { showToast(r.error || '저장 실패', 'error'); }
+    } catch (e) { showToast('요청 실패', 'error'); }
+}
+
+function cancelKwEdit(type) {
+    const tagsDiv = document.getElementById(`${type}KeywordTags`);
+    const editDiv = document.getElementById(`${type}KeywordEdit`);
+    const btn = document.getElementById(`${type}EditBtn`);
+    if (tagsDiv) tagsDiv.style.display = 'flex';
+    if (editDiv) editDiv.style.display = 'none';
+    if (btn) btn.textContent = '✏️ 편집';
+}
+
+async function addKeywordBulk(type) {
+    const inputId = type === 'include' ? 'includeKeywordInput' : 'excludeKeywordInput';
+    const input = document.getElementById(inputId);
+    const raw = input ? input.value.trim() : '';
+    if (!raw) { showToast('키워드를 입력하세요', 'error'); return; }
+    const newKws = raw.split(',').map(k => k.trim()).filter(k => k);
+    const existing = (_kwData() && _kwData()[`${type}_keywords`]) || [];
+    const merged = [...existing];
+    let addedCount = 0;
+    for (const kw of newKws) {
+        if (!merged.some(e => e.toLowerCase() === kw.toLowerCase())) {
+            merged.push(kw);
+            addedCount++;
+        }
+    }
+    try {
+        const r = await (await fetch('/api/keywords/set', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: _kwTab, field: type, keywords: merged }),
+        })).json();
+        if (r.success) {
+            if (_kwTab === 'news') _kwDataNews = r.keywords; else _kwDataHotstock = r.keywords;
+            if (input) input.value = '';
+            _renderKeywordTags(`${type}KeywordTags`, r.keywords[`${type}_keywords`] || [], type);
+            showToast(`✓ ${addedCount}개 추가됨`, 'success');
+        } else { showToast(r.error || '실패', 'error'); }
     } catch (e) { showToast('요청 실패', 'error'); }
 }
 
 async function removeKeyword(type, keyword) {
     try {
-        const res = await fetch(`/api/keywords/${type}`, {
+        const r = await (await fetch(`/api/keywords/${type}`, {
             method: 'DELETE', credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ keyword }),
-        });
-        const r = await res.json();
+            body: JSON.stringify({ keyword, type: _kwTab }),
+        })).json();
         if (r.success) {
-            _keywordData = r.keywords;
+            if (_kwTab === 'news') _kwDataNews = r.keywords; else _kwDataHotstock = r.keywords;
             _renderKeywordTags(`${type}KeywordTags`, r.keywords[`${type}_keywords`] || [], type);
             showToast(`✓ "${keyword}" 삭제`, 'success');
         } else { showToast(r.error, 'error'); }
@@ -5344,33 +5508,31 @@ async function addKeywordGroup() {
     const input = document.getElementById('groupKeywordInput');
     const raw = input ? input.value.trim() : '';
     const keywords = raw.split(',').map(k => k.trim()).filter(k => k);
-    if (keywords.length < 2) { showToast('키워드를 쉼표로 구분하여 2개 이상 입력하세요', 'error'); return; }
+    if (keywords.length < 2) { showToast('2개 이상 입력하세요', 'error'); return; }
     try {
-        const res = await fetch('/api/keywords/group', {
+        const r = await (await fetch('/api/keywords/group', {
             method: 'POST', credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ keywords }),
-        });
-        const r = await res.json();
+            body: JSON.stringify({ keywords, type: _kwTab }),
+        })).json();
         if (r.success) {
             if (input) input.value = '';
-            _keywordData = r.keywords;
+            if (_kwTab === 'news') _kwDataNews = r.keywords; else _kwDataHotstock = r.keywords;
             _renderGroupTags('keywordGroupTags', r.keywords.include_groups || []);
-            showToast(`✓ AND 그룹 추가: ${keywords.join(' AND ')}`, 'success');
+            showToast(`✓ AND 그룹 추가`, 'success');
         } else { showToast(r.error, 'error'); }
     } catch (e) { showToast('요청 실패', 'error'); }
 }
 
 async function removeKeywordGroup(keywords) {
     try {
-        const res = await fetch('/api/keywords/group', {
+        const r = await (await fetch('/api/keywords/group', {
             method: 'DELETE', credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ keywords }),
-        });
-        const r = await res.json();
+            body: JSON.stringify({ keywords, type: _kwTab }),
+        })).json();
         if (r.success) {
-            _keywordData = r.keywords;
+            if (_kwTab === 'news') _kwDataNews = r.keywords; else _kwDataHotstock = r.keywords;
             _renderGroupTags('keywordGroupTags', r.keywords.include_groups || []);
             showToast('✓ 그룹 삭제', 'success');
         } else { showToast(r.error, 'error'); }
@@ -5378,17 +5540,17 @@ async function removeKeywordGroup(keywords) {
 }
 
 async function toggleKeywordMode() {
-    const currentMode = (_keywordData && _keywordData.mode) || 'loose';
+    const kw = _kwData();
+    const currentMode = (kw && kw.mode) || 'loose';
     const newMode = currentMode === 'loose' ? 'strict' : 'loose';
     try {
-        const res = await fetch('/api/keywords/mode', {
+        const r = await (await fetch('/api/keywords/mode', {
             method: 'PATCH', credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ mode: newMode }),
-        });
-        const r = await res.json();
+            body: JSON.stringify({ mode: newMode, type: _kwTab }),
+        })).json();
         if (r.success) {
-            if (_keywordData) _keywordData.mode = newMode;
+            if (kw) kw.mode = newMode;
             const btn = document.getElementById('keywordModeBtn');
             const desc = document.getElementById('keywordModeDesc');
             if (btn) btn.textContent = newMode;
@@ -5399,10 +5561,11 @@ async function toggleKeywordMode() {
 }
 
 // 엔터키 지원
-document.getElementById('includeKeywordInput')?.addEventListener('keydown', e => { if (e.key === 'Enter') addKeyword('include'); });
-document.getElementById('excludeKeywordInput')?.addEventListener('keydown', e => { if (e.key === 'Enter') addKeyword('exclude'); });
+document.getElementById('includeKeywordInput')?.addEventListener('keydown', e => { if (e.key === 'Enter') addKeywordBulk('include'); });
+document.getElementById('excludeKeywordInput')?.addEventListener('keydown', e => { if (e.key === 'Enter') addKeywordBulk('exclude'); });
 document.getElementById('groupKeywordInput')?.addEventListener('keydown', e => { if (e.key === 'Enter') addKeywordGroup(); });
 document.getElementById('themeAddInput')?.addEventListener('keydown', e => { if (e.key === 'Enter') addTheme(); });
+document.getElementById('savedNewsSearch')?.addEventListener('keydown', e => { if (e.key === 'Enter') loadSavedNews(); });
 
 // ─── 테마 라이브러리 ────────────────────────────────────────
 

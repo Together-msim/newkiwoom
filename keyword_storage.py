@@ -93,48 +93,60 @@ class KeywordStorage:
     def add_include_keyword(self, keyword: str) -> bool:
         """Include 키워드 추가"""
         data = self._read_locked()
-        keywords = set(data.get("include_keywords", []))
-        if keyword.lower() not in keywords:
-            keywords.add(keyword.lower())
-            data["include_keywords"] = sorted(list(keywords))
+        keywords = list(data.get("include_keywords", []))
+        if keyword.lower() not in [k.lower() for k in keywords]:
+            keywords.append(keyword)
+            data["include_keywords"] = keywords
             self._write_locked(data)
-            logger.info(f"💾 keywords.json 저장 완료: {self.storage_path.resolve()}")
             return True
         return False
-    
+
     def remove_include_keyword(self, keyword: str) -> bool:
         """Include 키워드 제거"""
         data = self._read_locked()
-        keywords = set(data.get("include_keywords", []))
-        if keyword.lower() in keywords:
-            keywords.remove(keyword.lower())
-            data["include_keywords"] = sorted(list(keywords))
+        keywords = data.get("include_keywords", [])
+        new_kws = [k for k in keywords if k.lower() != keyword.lower()]
+        if len(new_kws) < len(keywords):
+            data["include_keywords"] = new_kws
             self._write_locked(data)
             return True
         return False
-    
+
+    def set_include_keywords(self, keywords: List[str]) -> bool:
+        """Include 키워드 전체 교체 (bulk set)"""
+        data = self._read_locked()
+        data["include_keywords"] = [k.strip() for k in keywords if k.strip()]
+        self._write_locked(data)
+        return True
+
     def add_exclude_keyword(self, keyword: str) -> bool:
         """Exclude 키워드 추가"""
         data = self._read_locked()
-        keywords = set(data.get("exclude_keywords", []))
-        if keyword.lower() not in keywords:
-            keywords.add(keyword.lower())
-            data["exclude_keywords"] = sorted(list(keywords))
+        keywords = list(data.get("exclude_keywords", []))
+        if keyword.lower() not in [k.lower() for k in keywords]:
+            keywords.append(keyword)
+            data["exclude_keywords"] = keywords
             self._write_locked(data)
-            logger.info(f"💾 keywords.json 저장 완료: {self.storage_path.resolve()}")
             return True
         return False
-    
+
     def remove_exclude_keyword(self, keyword: str) -> bool:
         """Exclude 키워드 제거"""
         data = self._read_locked()
-        keywords = set(data.get("exclude_keywords", []))
-        if keyword.lower() in keywords:
-            keywords.remove(keyword.lower())
-            data["exclude_keywords"] = sorted(list(keywords))
+        keywords = data.get("exclude_keywords", [])
+        new_kws = [k for k in keywords if k.lower() != keyword.lower()]
+        if len(new_kws) < len(keywords):
+            data["exclude_keywords"] = new_kws
             self._write_locked(data)
             return True
         return False
+
+    def set_exclude_keywords(self, keywords: List[str]) -> bool:
+        """Exclude 키워드 전체 교체 (bulk set)"""
+        data = self._read_locked()
+        data["exclude_keywords"] = [k.strip() for k in keywords if k.strip()]
+        self._write_locked(data)
+        return True
     
     def get_include_keywords(self) -> List[str]:
         """Include 키워드 목록 조회"""

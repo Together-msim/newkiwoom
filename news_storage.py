@@ -67,9 +67,20 @@ class NewsStorage:
                     active BOOLEAN DEFAULT TRUE
                 );
 
+                CREATE TABLE IF NOT EXISTS saved_news (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    message_id INTEGER,
+                    text TEXT NOT NULL,
+                    source_type TEXT NOT NULL,
+                    original_date TEXT,
+                    saved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_messages_date ON messages(date);
                 CREATE INDEX IF NOT EXISTS idx_messages_source_type ON messages(source_type);
                 CREATE INDEX IF NOT EXISTS idx_messages_received_at ON messages(received_at);
+                CREATE INDEX IF NOT EXISTS idx_saved_news_source_type ON saved_news(source_type);
+                CREATE INDEX IF NOT EXISTS idx_saved_news_saved_at ON saved_news(saved_at);
             """)
         logger.info(f"NewsStorage 초기화 완료: {self.db_path}")
 
@@ -174,6 +185,102 @@ class NewsStorage:
                 f"SELECT * FROM messages WHERE id IN ({placeholders})", ids
             ).fetchall()
         return [dict(r) for r in rows]
+
+    # ─── 삭제 / 정리 ───────────────────────────────────────────
+
+    def delete_messages(self, ids: List[int], source_type: Optional[str] = None) -> int:
+        """메시지 선택 삭제. source_type 지정 시 해당 타입만. filtered_messages도 같이 삭제."""
+        if not ids:
+            return 0
+        placeholders = ",".join("?" * len(ids))
+        query = f"SELECT id FROM messages WHERE id IN ({placeholders})"
+        params: list = list(ids)
+        if source_type:
+            query += " AND source_type=?"
+            params.append(source_type)
+        try:
+            with self._conn() as conn:
+                rows = conn.execute(query, params).fetchall()
+                valid_ids = [r["id"] for r in rows]
+                if not valid_ids:
+                    return 0
+                ph2 = ",".join("?" * len(valid_ids))
+                conn.execute(f"DELETE FROM filtered_messages WHERE message_id IN ({ph2})", valid_ids)
+                cur = conn.execute(f"DELETE FROM messages WHERE id IN ({ph2})", valid_ids)
+                return cur.rowcount
+        except Exception as e:
+            logger.error(f"delete_messages 실패: {e}")
+            return 0
+
+    def cleanup_old_messages(self) -> int:
+        """오늘 날짜 이전 메시지 삭제 (saved_news는 보존). 삭제된 건수 반환."""
+        today = date.today().isoformat()
+        try:
+            with self._conn() as conn:
+                # saved_news에 있는 message_id는 보존
+                saved_msg_ids = [
+                    r["message_id"] for r in
+                    conn.execute("SELECT message_id FROM saved_news WHERE message_id IS NOT NULL").fetchall()
+                ]
+                query = "SELECT id FROM messages WHERE date < ?"
+                params: list = [today]
+                if saved_msg_ids:
+                    ph = ",".join("?" * len(saved_msg_ids))
+                    query += f" AND id NOT IN ({ph})"
+                    params.extend(saved_msg_ids)
+                old_ids = [r["id"] for r in conn.execute(query, params).fetchall()]
+                if not old_ids:
+                    return 0
+                ph2 = ",".join("?" * len(old_ids))
+                conn.execute(f"DELETE FROM filtered_messages WHERE message_id IN ({ph2})", old_ids)
+                cur = conn.execute(f"DELETE FROM messages WHERE id IN ({ph2})", old_ids)
+                deleted = cur.rowcount
+                logger.info(f"cleanup_old_messages: {deleted}건 삭제 (date < {today})")
+                return deleted
+        except Exception as e:
+            logger.error(f"cleanup_old_messages 실패: {e}")
+            return 0
+
+    # ─── 스크래핑 (영구 보관) ───────────────────────────────────
+
+    def save_scraped_news(self, message_id: Optional[int], text: str, source_type: str, original_date: str) -> Optional[int]:
+        """중요 뉴스 영구 보관."""
+        try:
+            with self._conn() as conn:
+                cur = conn.execute(
+                    """INSERT INTO saved_news (message_id, text, source_type, original_date)
+                       VALUES (?, ?, ?, ?)""",
+                    (message_id, text, source_type, original_date),
+                )
+                return cur.lastrowid
+        except Exception as e:
+            logger.error(f"save_scraped_news 실패: {e}")
+            return None
+
+    def get_saved_news(self, search_query: Optional[str] = None, source_type: Optional[str] = None) -> List[Dict]:
+        """저장된 뉴스 조회. search_query: 텍스트 포함 검색."""
+        query = "SELECT * FROM saved_news WHERE 1=1"
+        params: list = []
+        if source_type:
+            query += " AND source_type=?"
+            params.append(source_type)
+        if search_query:
+            query += " AND text LIKE ?"
+            params.append(f"%{search_query}%")
+        query += " ORDER BY saved_at DESC"
+        with self._conn() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [dict(r) for r in rows]
+
+    def delete_saved_news(self, saved_id: int) -> bool:
+        """저장된 뉴스 삭제."""
+        try:
+            with self._conn() as conn:
+                conn.execute("DELETE FROM saved_news WHERE id=?", (saved_id,))
+            return True
+        except Exception as e:
+            logger.error(f"delete_saved_news 실패: {e}")
+            return False
 
     # ─── 테마 라이브러리 ────────────────────────────────────────
 

@@ -36,7 +36,7 @@ if str(ROOT_DIR) not in sys.path:
 env_path = ROOT_DIR / ".env"
 load_dotenv(dotenv_path=env_path, override=True)
 
-from keyword_config import resolve_keywords_path
+from keyword_config import resolve_news_keywords_path, resolve_hotstock_keywords_path
 from keyword_storage import KeywordStorage
 from keyword_filter import KeywordFilter
 from news_storage import NewsStorage, _get_source_type
@@ -86,15 +86,26 @@ if not SOURCE_CHAT_IDS:
     sys.exit(1)
 
 # ─── 저장소 & 필터 초기화 ─────────────────────────────────────
-KEYWORDS_JSON_PATH = resolve_keywords_path()
-KEYWORDS_JSON_PATH.parent.mkdir(parents=True, exist_ok=True)
+NEWS_KEYWORDS_PATH = resolve_news_keywords_path()
+HOTSTOCK_KEYWORDS_PATH = resolve_hotstock_keywords_path()
+NEWS_KEYWORDS_PATH.parent.mkdir(parents=True, exist_ok=True)
+HOTSTOCK_KEYWORDS_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 MESSAGE_HASHES_PATH = Path(os.getenv("MESSAGE_HASHES_PATH", str(ROOT_DIR / ".data" / "message_hashes.txt")))
 MESSAGE_HASHES_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-keyword_storage = KeywordStorage(str(KEYWORDS_JSON_PATH))
-keyword_filter = KeywordFilter(keyword_storage, str(MESSAGE_HASHES_PATH))
+news_keyword_storage = KeywordStorage(str(NEWS_KEYWORDS_PATH))
+hotstock_keyword_storage = KeywordStorage(str(HOTSTOCK_KEYWORDS_PATH))
+news_keyword_filter = KeywordFilter(news_keyword_storage, str(MESSAGE_HASHES_PATH))
+hotstock_keyword_filter = KeywordFilter(hotstock_keyword_storage, str(MESSAGE_HASHES_PATH))
 news_storage = NewsStorage(NEWS_DB_PATH)
+
+
+def _get_keyword_filter(chat_id: int) -> KeywordFilter:
+    """채널 ID에 따라 적절한 키워드 필터 반환."""
+    if _get_source_type(chat_id) == "hot_stock":
+        return hotstock_keyword_filter
+    return news_keyword_filter
 
 # ─── Pyrogram & Bot 초기화 ────────────────────────────────────
 SESSION_FILE_PATH = ROOT_DIR / "signal_listener.session"
@@ -177,7 +188,8 @@ async def send_notification(text: str, source_chat_id: int, dest_chat_id: int):
 
 @pyrogram_client.on_message()
 async def handle_message(client, message):
-    keyword_filter.reload_if_changed()
+    news_keyword_filter.reload_if_changed()
+    hotstock_keyword_filter.reload_if_changed()
 
     try:
         chat = message.chat
@@ -216,7 +228,8 @@ async def handle_message(client, message):
                 logger.debug(f"🏷️  테마 누적: {theme}")
 
         # ── 3. 키워드 필터링 & 전달 ─────────────────────────────
-        dest_chat_id = keyword_filter.should_forward_to(chat_id, message.id, match_text)
+        kf = _get_keyword_filter(chat_id)
+        dest_chat_id = kf.should_forward_to(chat_id, message.id, match_text)
         if dest_chat_id is None:
             logger.debug(f"🔍 필터링됨: {getattr(chat, 'title', '')} - {match_text[:50]}...")
             return
@@ -242,7 +255,8 @@ def keyword_reload_polling_thread():
         try:
             if _reload_thread_stop_event.wait(timeout=KEYWORD_RELOAD_INTERVAL):
                 break
-            keyword_filter.reload_if_changed()
+            news_keyword_filter.reload_if_changed()
+            hotstock_keyword_filter.reload_if_changed()
         except Exception as e:
             logger.error(f"❌ 키워드 리로드 오류: {e}", exc_info=True)
     logger.info("🛑 키워드 리로드 스레드 종료")
@@ -264,7 +278,8 @@ def main():
     logger.info("=" * 60)
     logger.info("Signal Listener 시작 (newkiwoom)")
     logger.info(f"  ROOT_DIR: {ROOT_DIR}")
-    logger.info(f"  keywords.json: {KEYWORDS_JSON_PATH}")
+    logger.info(f"  news_keywords.json: {NEWS_KEYWORDS_PATH}")
+    logger.info(f"  hotstock_keywords.json: {HOTSTOCK_KEYWORDS_PATH}")
     logger.info(f"  news.db: {NEWS_DB_PATH}")
     logger.info(f"  모니터링 채널: {SOURCE_CHAT_IDS}")
     logger.info("=" * 60)
