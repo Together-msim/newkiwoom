@@ -12,9 +12,9 @@
         <nav class="main-nav">
             <div class="nav-brand">🚀 자동매매 시스템</div>
             <div class="nav-menu">
-                <button class="nav-item active" data-page="watchlist">📊 감시리스트</button>
+                <button class="nav-item" data-page="watchlist">📊 감시리스트</button>
                 <button class="nav-item" data-page="mode1">📈 Mode1</button>
-                <button class="nav-item" data-page="mode2">📉 Mode2</button>
+                <button class="nav-item active" data-page="mode2">📉 Mode2</button>
                 <button class="nav-item" data-page="tradelog">💰 매매일지</button>
                 <button class="nav-item" data-page="seeking-signal">📡 Seeking Signal</button>
                 <button class="nav-item" data-page="siwhang">📊 시황체크</button>
@@ -25,7 +25,7 @@
         <!-- 페이지 컨테이너 -->
         <div id="pageContainer">
             <!-- 감시리스트 페이지 -->
-            <div id="watchlistPage" class="page active">
+            <div id="watchlistPage" class="page">
                 <div class="page-header">
                     <h2>📊 감시리스트 (Mode1 + Mode2)</h2>
                     <div class="page-controls" style="flex-wrap: wrap;">
@@ -292,7 +292,7 @@
             </div>
 
             <!-- Mode2 페이지 -->
-            <div id="mode2Page" class="page">
+            <div id="mode2Page" class="page active">
                 <div class="page-header">
                     <h2>📉 Mode2 자동매매 (저항/지지 레벨)</h2>
                 </div>
@@ -1415,6 +1415,38 @@
             </div>
         </div>
     </div>
+
+    <!-- 모바일 하단 탭바 -->
+    <nav class="mobile-tab-bar">
+        <button class="tab-item" data-page="mode2">
+            <span class="tab-icon">📉</span>
+            <span class="tab-label">Mode2</span>
+        </button>
+        <button class="tab-item" data-page="siwhang">
+            <span class="tab-icon">📊</span>
+            <span class="tab-label">시황체크</span>
+        </button>
+        <button class="tab-item" data-page="watchlist">
+            <span class="tab-icon">👁️</span>
+            <span class="tab-label">감시리스트</span>
+        </button>
+        <button class="tab-item" data-page="mode1">
+            <span class="tab-icon">📈</span>
+            <span class="tab-label">Mode1</span>
+        </button>
+        <button class="tab-item" data-page="seeking-signal">
+            <span class="tab-icon">📡</span>
+            <span class="tab-label">시그널</span>
+        </button>
+        <button class="tab-item" data-page="tradelog">
+            <span class="tab-icon">💰</span>
+            <span class="tab-label">매매일지</span>
+        </button>
+        <button class="tab-item" data-page="test">
+            <span class="tab-icon">🧪</span>
+            <span class="tab-label">Test</span>
+        </button>
+    </nav>
 
     <script src="/static/js/app.js"></script>
 </body>

@@ -1,39 +1,40 @@
 // ========== 페이지 전환 ==========
 document.addEventListener('DOMContentLoaded', () => {
-    // 네비게이션 클릭 이벤트
+    // 상단 nav 클릭
     document.querySelectorAll('.nav-item').forEach(item => {
-        item.addEventListener('click', () => {
-            const page = item.dataset.page;
-            switchPage(page);
-        });
+        item.addEventListener('click', () => switchPage(item.dataset.page));
+    });
+    // 하단 탭바 클릭
+    document.querySelectorAll('.tab-item').forEach(item => {
+        item.addEventListener('click', () => switchPage(item.dataset.page));
     });
 
-    // 초기 페이지 로드
-    loadWatchlist();
+    // 초기 페이지: mode2
     loadMode2List();
+    _syncTabBar('mode2');
 
     // 이벤트 리스너 등록
     setupEventListeners();
 });
 
-function switchPage(pageName) {
-    // 네비게이션 활성화
-    document.querySelectorAll('.nav-item').forEach(item => {
-        item.classList.remove('active');
-        if (item.dataset.page === pageName) {
-            item.classList.add('active');
-        }
+function _syncTabBar(pageName) {
+    document.querySelectorAll('.tab-item').forEach(item => {
+        item.classList.toggle('active', item.dataset.page === pageName);
     });
+}
+
+function switchPage(pageName) {
+    // 상단 nav 활성화
+    document.querySelectorAll('.nav-item').forEach(item => {
+        item.classList.toggle('active', item.dataset.page === pageName);
+    });
+    // 하단 탭바 활성화
+    _syncTabBar(pageName);
 
     // 페이지 표시
-    document.querySelectorAll('.page').forEach(page => {
-        page.classList.remove('active');
-    });
-
+    document.querySelectorAll('.page').forEach(page => page.classList.remove('active'));
     const targetPage = document.getElementById(pageName + 'Page');
-    if (targetPage) {
-        targetPage.classList.add('active');
-    }
+    if (targetPage) targetPage.classList.add('active');
 
     // 페이지별 데이터 로드
     if (pageName === 'watchlist') loadWatchlist();
@@ -41,7 +42,7 @@ function switchPage(pageName) {
     else if (pageName === 'mode2') loadMode2List();
     else if (pageName === 'tradelog') loadTradelog();
     else if (pageName === 'siwhang') loadSiwhang();
-    else if (pageName === 'test') loadMode2PickList(); // Test 페이지 진입 시 picklist 로드
+    else if (pageName === 'test') loadMode2PickList();
 }
 
 function toggleSupport1Mode(mode) {
@@ -1607,6 +1608,21 @@ async function handleMode2Lookup() {
             // Mode2 전용 차트 그리기
             window.lastMode2ChartData = result.data; // 리사이즈 시 재렌더링용
             drawMode2CandlestickChart(result.data);
+
+            // 전일 OHLC → 디마크 입력란 자동 채움 + 계산
+            const ch = result.data.chart;
+            if (ch) {
+                const o = parseFloat(ch.yesterday_open), h = parseFloat(ch.yesterday_high),
+                      l = parseFloat(ch.yesterday_low),  c = parseFloat(ch.yesterday_close);
+                if (o && h && l && c) {
+                    document.getElementById('demarkOpen').value  = o;
+                    document.getElementById('demarkHigh').value  = h;
+                    document.getElementById('demarkLow').value   = l;
+                    document.getElementById('demarkClose').value = c;
+                    calcAndFillDemark();
+                }
+            }
+
             showToast('✓ 종목명 & 차트 조회 완료', 'success');
         } else {
             // 차트 컨테이너 숨김

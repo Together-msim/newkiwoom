@@ -1420,6 +1420,108 @@ tbody tr.inactive {
 }
 
 /* ============================================================
+   모바일 하단 탭바
+   ============================================================ */
+
+.mobile-tab-bar {
+    display: none; /* 데스크탑: 숨김 */
+}
+
+@media (max-width: 768px) {
+    /* 상단 nav 숨기고 하단 탭바 표시 */
+    .main-nav {
+        display: none !important;
+    }
+
+    .mobile-tab-bar {
+        display: flex;
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        z-index: 1000;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        box-shadow: 0 -2px 12px rgba(0,0,0,0.15);
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+    }
+    .mobile-tab-bar::-webkit-scrollbar { display: none; }
+
+    .tab-item {
+        flex: 0 0 auto;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 2px;
+        padding: 6px 14px 8px;
+        background: transparent;
+        border: none;
+        cursor: pointer;
+        min-width: 60px;
+        border-top: 3px solid transparent;
+        transition: all 0.2s;
+    }
+    .tab-item.active {
+        background: rgba(255,255,255,0.15);
+        border-top-color: white;
+    }
+    .tab-item:active {
+        background: rgba(255,255,255,0.2);
+    }
+    .tab-icon {
+        font-size: 18px;
+        line-height: 1;
+    }
+    .tab-label {
+        font-size: 10px;
+        font-weight: 600;
+        color: rgba(255,255,255,0.85);
+        white-space: nowrap;
+    }
+    .tab-item.active .tab-label {
+        color: white;
+    }
+
+    /* 페이지 하단 여백 — 탭바 높이(~56px) 확보 */
+    .page {
+        padding-bottom: 68px !important;
+    }
+}
+
+/* 가로모드에서도 하단 탭바 표시 */
+@media (max-height: 500px) and (orientation: landscape) {
+    .main-nav {
+        display: none !important;
+    }
+    .mobile-tab-bar {
+        display: flex;
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        z-index: 1000;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        box-shadow: 0 -2px 12px rgba(0,0,0,0.15);
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+    }
+    .mobile-tab-bar::-webkit-scrollbar { display: none; }
+    .tab-item {
+        flex-direction: row;
+        gap: 5px;
+        padding: 6px 14px;
+    }
+    .tab-icon { font-size: 15px; }
+    .tab-label { font-size: 11px; }
+    .page {
+        padding-bottom: 52px !important;
+    }
+}
+
+/* ============================================================
    반응형 개선 v2 — 모바일 가로모드 + 데스크탑 시황체크
    ============================================================ */
 
