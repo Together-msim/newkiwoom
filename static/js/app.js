@@ -5411,7 +5411,6 @@ async function loadHotstockParsed() {
         _renderParsedTable('ssUpBody', _parsedData.ssUp, 'ssUp');
         _renderParsedTable('viBody', _parsedData.vi, 'vi');
         _renderParsedTable('ssAllBody', _parsedData.ss, 'ss');
-        filterSiwhangTables();
     } catch (e) { console.error('hotstock parsed error', e); }
 }
 
@@ -5452,7 +5451,8 @@ function _renderParsedTable(tbodyId, data, tableKey) {
         const priceColor = isNeg ? '#1971c2' : '#c92a2a';
         const price = m.price ? `<span style="color:${priceColor}">${m.price}</span><br><span style="font-size:11px;color:#868e96;">${m.change || ''}</span>` : '-';
         const rawEsc = (m.raw_text || '').replace(/\\/g, '\\\\').replace(/`/g, '\\`');
-        return `<tr style="border-bottom:1px solid #f1f3f5;cursor:pointer;" onclick="showHotstockCopyModal(\`${rawEsc}\`)">
+        const searchVal = [m.stock_name, m.theme, related, m.raw_text].join(' ').toLowerCase().replace(/"/g, '&quot;');
+        return `<tr style="border-bottom:1px solid #f1f3f5;cursor:pointer;" data-search="${searchVal}" onclick="showHotstockCopyModal(\`${rawEsc}\`)">
             <td style="padding:5px 4px;width:24px;" onclick="event.stopPropagation()"><input type="checkbox" class="cb-parsed-${tableKey}" data-id="${m.message_id}"></td>
             <td style="padding:5px 8px;font-size:13px;font-weight:500;">${m.stock_name || '-'}</td>
             <td style="padding:5px 8px;font-size:12px;text-align:right;">${price}</td>
@@ -5534,20 +5534,18 @@ function _fmtDatetime(dtStr) {
     return `${mm}/${dd} ${hh}:${mi}`;
 }
 
-function filterSiwhangTables() {
-    const kw = (document.getElementById('siwhangKeyword')?.value || '').toLowerCase();
-    const tableIds = [
-        'ssUpBody', 'viBody', 'ssAllBody',
-        'newsAllBody', 'hotstockAllBody', 'newsFilteredBody', 'hotstockFilteredBody',
-    ];
-    tableIds.forEach(id => {
-        const tbody = document.getElementById(id);
-        if (!tbody) return;
-        tbody.querySelectorAll('tr').forEach(row => {
-            const text = row.textContent.toLowerCase();
-            row.style.display = (!kw || text.includes(kw)) ? '' : 'none';
-        });
+function filterTable(inputEl, tbodyId) {
+    const kw = (inputEl.value || '').toLowerCase().trim();
+    const tbody = document.getElementById(tbodyId);
+    if (!tbody) return;
+    tbody.querySelectorAll('tr').forEach(row => {
+        const text = (row.dataset.search || row.textContent).toLowerCase();
+        row.style.display = (!kw || text.includes(kw)) ? '' : 'none';
     });
+}
+
+function filterSiwhangTables() {
+    // no-op: 각 카드별 검색으로 교체됨
 }
 
 async function loadNewsFilter() {
@@ -5558,7 +5556,6 @@ async function loadNewsFilter() {
         _loadNewsFiltered(qs), _loadHotstockFiltered(qs),
         loadKeywords(), loadThemes(), loadSavedNews(),
     ]);
-    filterSiwhangTables(); // 검색 키워드 유지
 }
 
 async function _loadNewsAll(qs) {
@@ -5612,7 +5609,8 @@ function _renderMsgTable(tbodyId, data, tableKey) {
         const dt = _fmtDatetime(m.received_at);
         const text = (m.text || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         const preview = text.length > 90 ? text.slice(0, 90) + '…' : text;
-        return `<tr style="border-bottom:1px solid #f1f3f5;">
+        const searchVal = (m.text || '').toLowerCase().replace(/"/g, '&quot;');
+        return `<tr style="border-bottom:1px solid #f1f3f5;" data-search="${searchVal}">
             <td style="padding:4px 4px;width:24px;"><input type="checkbox" class="msg-cb cb-${tableKey}" data-id="${m.id}" onchange="_onMsgCbChange('${tableKey}')"></td>
             <td style="padding:4px 8px;font-size:12px;line-height:1.4;" title="${text}">${preview}</td>
             <td style="padding:4px 6px;font-size:11px;color:#868e96;text-align:right;white-space:nowrap;">${dt}</td>

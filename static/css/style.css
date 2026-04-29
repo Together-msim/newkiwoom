@@ -1546,9 +1546,7 @@ tbody tr.inactive {
         font-size: 12px !important;
         padding: 5px 8px !important;
     }
-    #siwhangKeyword {
-        width: 140px !important;
-    }
+    /* #siwhangKeyword removed — replaced by per-card search inputs */
 
     /* 시황체크 카드 여백 축소 */
     #siwhangPage .card {
@@ -1590,10 +1588,7 @@ tbody tr.inactive {
         flex-wrap: wrap;
         gap: 8px;
     }
-    #siwhangKeyword {
-        width: 100% !important;
-        max-width: 220px;
-    }
+    /* #siwhangKeyword removed — replaced by per-card search inputs */
     /* 관심종목 input 전체폭 */
     #watchlistInput {
         width: 100% !important;
