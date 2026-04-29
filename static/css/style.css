@@ -1418,3 +1418,203 @@ tbody tr.inactive {
         min-height: 120px;
     }
 }
+
+/* ============================================================
+   반응형 개선 v2 — 모바일 가로모드 + 데스크탑 시황체크
+   ============================================================ */
+
+/* ── 데스크탑: 시황체크 SS⬆️ + VI 카드 2열 나란히 ──────────── */
+@media (min-width: 1024px) {
+    .siwhang-top-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+    }
+    .siwhang-top-grid > .card {
+        margin-bottom: 0 !important;
+    }
+}
+
+/* ── 시황체크 테이블 가로스크롤 (모든 환경) ─────────────────── */
+.siwhang-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+.siwhang-table-wrap table {
+    min-width: 600px;
+}
+
+/* ── 폰 가로모드: max-height 기준 감지 (width와 무관) ───────── */
+@media (max-height: 500px) and (orientation: landscape) {
+
+    /* 네비: 1줄 수평 */
+    .main-nav {
+        flex-direction: row !important;
+        padding: 0 12px;
+        flex-wrap: nowrap;
+    }
+    .nav-brand {
+        padding: 10px 12px !important;
+        font-size: 15px !important;
+        margin-right: 8px;
+        white-space: nowrap;
+        flex-shrink: 0;
+    }
+    .nav-menu {
+        flex-direction: row !important;
+        overflow-x: auto;
+        flex: 1;
+    }
+    .nav-item {
+        padding: 10px 14px !important;
+        font-size: 13px !important;
+    }
+
+    /* 페이지 패딩 최소화 */
+    .page {
+        padding: 8px 12px !important;
+    }
+    .page-header {
+        margin-bottom: 10px !important;
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+    .page-header h2 {
+        font-size: 16px !important;
+    }
+
+    /* Mode2 폼: 코드입력 한 줄 wrap */
+    .code-input-row {
+        flex-direction: row !important;
+        flex-wrap: wrap;
+        gap: 6px !important;
+    }
+    .code-input-row input,
+    .code-input-row select {
+        font-size: 14px !important;
+        padding: 6px 10px !important;
+    }
+
+    /* Mode2 레벨입력 2열 그리드 */
+    .chart-input-grid {
+        grid-template-columns: 1fr !important;
+        gap: 8px !important;
+    }
+    .chart-area {
+        display: none !important; /* 전략차트 이미지 숨김 — 세로공간 절약 */
+    }
+    .input-levels {
+        display: grid !important;
+        grid-template-columns: 1fr 1fr !important;
+        gap: 6px !important;
+    }
+    .level-input {
+        flex-direction: row !important;
+        align-items: center !important;
+        gap: 6px !important;
+        padding: 6px 8px !important;
+    }
+    .level-input label {
+        min-width: 60px !important;
+        font-size: 12px !important;
+    }
+    .input-group input,
+    .input-group select {
+        font-size: 14px !important;
+        padding: 5px 8px !important;
+    }
+
+    /* 디마크 입력 줄: 압축 */
+    #mode2Form > div[style*="background: #f8f9fa"] {
+        padding: 6px 10px !important;
+    }
+
+    /* Mode2 섹션 리스트 헤더 */
+    .list-section .page-header,
+    .list-section > div:first-child {
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+
+    /* 시황체크 page-controls 압축 */
+    #siwhangPage .page-controls {
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+    #siwhangPage .page-controls input,
+    #siwhangPage .page-controls button {
+        font-size: 12px !important;
+        padding: 5px 8px !important;
+    }
+    #siwhangKeyword {
+        width: 140px !important;
+    }
+
+    /* 시황체크 카드 여백 축소 */
+    #siwhangPage .card {
+        margin-bottom: 8px !important;
+        padding: 10px !important;
+    }
+
+    /* 테이블 폰트 축소 */
+    .siwhang-table-wrap table,
+    #siwhangPage table {
+        font-size: 11px !important;
+    }
+    #siwhangPage th,
+    #siwhangPage td {
+        padding: 4px 5px !important;
+    }
+
+    /* 관심종목 태그 작게 */
+    #watchlistTags span {
+        font-size: 11px !important;
+        padding: 2px 6px !important;
+    }
+
+    /* 버튼 전반 */
+    .btn {
+        padding: 6px 12px !important;
+        font-size: 13px !important;
+        min-height: 34px !important;
+    }
+}
+
+/* ── 모바일 세로: 시황체크 테이블 가로스크롤 보강 ────────────── */
+@media (max-width: 768px) {
+    .siwhang-table-wrap {
+        margin: 0 -4px; /* 카드 패딩 보정 */
+    }
+    /* 시황체크 page-controls wrap */
+    #siwhangPage .page-controls {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+    #siwhangKeyword {
+        width: 100% !important;
+        max-width: 220px;
+    }
+    /* 관심종목 input 전체폭 */
+    #watchlistInput {
+        width: 100% !important;
+        max-width: 200px;
+    }
+    /* 시황체크 SS2열 — 모바일 세로는 1열 유지 */
+    .siwhang-top-grid {
+        display: block;
+    }
+    .siwhang-top-grid > .card {
+        margin-bottom: 16px !important;
+    }
+    /* 전체뉴스/급등주 2열 → 1열 */
+    .siwhang-all-grid {
+        grid-template-columns: 1fr !important;
+    }
+}
+
+/* 가로모드에서도 all-grid 1열 */
+@media (max-height: 500px) and (orientation: landscape) {
+    .siwhang-all-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+}

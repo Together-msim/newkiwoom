@@ -376,6 +376,10 @@
                                     <label>1차 지지</label>
                                     <div class="input-group">
                                         <input type="number" name="support_1_price" placeholder="가격">
+                                        <select name="support_1_mode" id="support1Mode" onchange="toggleSupport1Mode(this.value)">
+                                            <option value="손절">손절</option>
+                                            <option value="물타기">물타기</option>
+                                        </select>
                                         <select name="support_1_loss_pct" id="support1LossPct">
                                             <option value="0">0%</option>
                                             <option value="25">25%</option>
@@ -383,6 +387,7 @@
                                             <option value="75">75%</option>
                                             <option value="100">100%</option>
                                         </select>
+                                        <input type="number" name="support_1_add_budget_manwon" id="support1AddBudget" placeholder="추가예산(만원)" style="display:none; width:120px;">
                                     </div>
                                 </div>
 
@@ -402,9 +407,26 @@
                             </div>
                         </div>
 
+                        <!-- 디마크 자동계산 -->
+                        <div style="margin-top: 12px; padding: 10px 14px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+                            <span style="font-size: 12px; font-weight: 600; color: #495057; white-space: nowrap;">📐 디마크 (전일)</span>
+                            <input type="number" id="demarkOpen"  placeholder="시가"  style="width:80px;padding:4px 8px;border:1px solid #dee2e6;border-radius:4px;font-size:12px;">
+                            <input type="number" id="demarkHigh"  placeholder="고가"  style="width:80px;padding:4px 8px;border:1px solid #dee2e6;border-radius:4px;font-size:12px;">
+                            <input type="number" id="demarkLow"   placeholder="저가"  style="width:80px;padding:4px 8px;border:1px solid #dee2e6;border-radius:4px;font-size:12px;">
+                            <input type="number" id="demarkClose" placeholder="종가"  style="width:80px;padding:4px 8px;border:1px solid #dee2e6;border-radius:4px;font-size:12px;">
+                            <button type="button" class="btn btn-secondary" style="padding:4px 12px;font-size:12px;" onclick="calcAndFillDemark()">자동입력</button>
+                            <span id="demarkResult" style="font-size:11px;color:#868e96;"></span>
+                        </div>
+
                         <!-- 일봉 차트 표시 영역 (폼 밖으로 이동) -->
                         <div id="mode2ChartContainer" style="display: none; width: 100%; margin-top: 20px; padding: 16px; background: #ffffff; border-radius: 8px; border: 2px solid #dee2e6; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
-                            <div style="font-size: 13px; font-weight: 600; color: #495057; margin-bottom: 12px; text-align: center;">📊 일봉 차트 (참고)</div>
+                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                                <div style="font-size: 13px; font-weight: 600; color: #495057; text-align: center;">📊 일봉 차트 (참고)</div>
+                                <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:#495057;cursor:pointer;">
+                                    <input type="checkbox" id="demarkOverlayChk" onchange="redrawMode2Chart()">
+                                    디마크 오버레이
+                                </label>
+                            </div>
                             <div style="overflow-x: auto; -webkit-overflow-scrolling: touch;">
                                 <canvas id="mode2CandlestickChart" width="1200" height="400"></canvas>
                             </div>
@@ -646,9 +668,10 @@
                 <div class="page-header">
                     <h2>📊 시황체크</h2>
                     <div class="page-controls">
+                        <input type="text" id="siwhangKeyword" placeholder="🔍 뉴스/급등주 검색..." oninput="filterSiwhangTables()" style="padding: 6px 10px; border: 1px solid #dee2e6; border-radius: 6px; font-size: 14px; width: 200px;">
                         <input type="date" id="newsfilterDate" class="filter-input" style="padding: 6px 10px; border: 1px solid #dee2e6; border-radius: 6px; font-size: 14px;">
                         <button class="btn btn-secondary" onclick="loadNewsFilter()">🔄 새로고침</button>
-                        <button class="btn btn-danger" style="font-size: 13px;" onclick="cleanupOldMessages()">🗑️ 1일 지난 뉴스 삭제</button>
+                        <button class="btn btn-danger" style="font-size: 13px;" onclick="cleanupOldMessages()">🗑️ 1일 지난 메시지 삭제 (뉴스+급등주)</button>
                     </div>
                 </div>
 
@@ -677,7 +700,9 @@
                 </div>
 
                 <!-- 급등주 타입별 테이블 -->
-                <div class="card" style="margin-bottom: 16px;">
+                <div class="siwhang-top-grid" style="margin-bottom: 16px;">
+
+                <div class="card">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                         <h3 style="margin: 0; font-size: 15px;">🚀 상한가 [SS⬆️] <span id="ssUpCount" style="font-weight: normal; color: #868e96; font-size: 13px;"></span></h3>
                         <div style="display:flex;gap:6px;">
@@ -685,7 +710,7 @@
                             <button class="btn btn-secondary" style="font-size: 11px; padding: 3px 8px;" onclick="loadHotstockParsed()">🔄</button>
                         </div>
                     </div>
-                    <div style="max-height: 300px; overflow-y: auto;">
+                    <div class="siwhang-table-wrap" style="max-height: 300px; overflow-y: auto;">
                         <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
                             <thead><tr style="background: #f8f9fa; position: sticky; top: 0;">
                                 <th style="padding: 5px 4px; width: 24px; border-bottom: 1px solid #dee2e6;"><input type="checkbox" onchange="toggleParsedCheckboxes('ssUp', this)"></th>
@@ -701,7 +726,7 @@
                     </div>
                 </div>
 
-                <div class="card" style="margin-bottom: 16px;">
+                <div class="card">
                     <div style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;" onclick="toggleSection('viSection', 'viChevron')">
                         <h3 style="margin: 0; font-size: 15px;">⚡ VI발동 [VI] <span id="viCount" style="font-weight: normal; color: #868e96; font-size: 13px;"></span></h3>
                         <div style="display:flex;gap:6px;align-items:center;" onclick="event.stopPropagation()">
@@ -709,7 +734,7 @@
                             <button class="btn btn-danger" style="font-size: 11px; padding: 3px 8px;" onclick="deleteParsedSelected('vi')">선택 삭제</button>
                         </div>
                     </div>
-                    <div id="viSection" style="margin-top:8px; max-height: 350px; overflow-y: auto;">
+                    <div id="viSection" class="siwhang-table-wrap" style="margin-top:8px; max-height: 350px; overflow-y: auto;">
                         <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
                             <thead><tr style="background: #f8f9fa; position: sticky; top: 0;">
                                 <th style="padding: 5px 4px; width: 24px; border-bottom: 1px solid #dee2e6;"><input type="checkbox" onchange="toggleParsedCheckboxes('vi', this)"></th>
@@ -725,6 +750,8 @@
                     </div>
                 </div>
 
+                </div><!-- /.siwhang-top-grid -->
+
                 <div class="card" style="margin-bottom: 20px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;" onclick="toggleSection('ssAllSection', 'ssAllChevron')">
                         <h3 style="margin: 0; font-size: 15px;">📊 급등 조짐 [SS] <span id="ssAllCount" style="font-weight: normal; color: #868e96; font-size: 13px;"></span></h3>
@@ -733,7 +760,7 @@
                             <button class="btn btn-danger" style="font-size: 11px; padding: 3px 8px;" onclick="deleteParsedSelected('ss')">선택 삭제</button>
                         </div>
                     </div>
-                    <div id="ssAllSection" style="display:none; margin-top:8px; max-height: 400px; overflow-y: auto;">
+                    <div id="ssAllSection" class="siwhang-table-wrap" style="display:none; margin-top:8px; max-height: 400px; overflow-y: auto;">
                         <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
                             <thead><tr style="background: #f8f9fa; position: sticky; top: 0;">
                                 <th style="padding: 5px 4px; width: 24px; border-bottom: 1px solid #dee2e6;"><input type="checkbox" onchange="toggleParsedCheckboxes('ss', this)"></th>
@@ -755,7 +782,7 @@
                         <h3 style="margin: 0; font-size: 15px;">🤖 AI 분석 결과 <span id="siwhangResultCount" style="font-weight: normal; color: #868e96; font-size: 13px;"></span></h3>
                         <span id="siwhangResultChevron" style="color:#868e96;font-size:14px;cursor:pointer;">▼</span>
                     </div>
-                    <div id="siwhangResultSection" style="margin-top:8px; max-height: 400px; overflow-y: auto;">
+                    <div id="siwhangResultSection" class="siwhang-table-wrap" style="margin-top:8px; max-height: 400px; overflow-y: auto;">
                         <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
                             <thead><tr style="background: #f8f9fa; position: sticky; top: 0;">
                                 <th style="padding: 5px 6px; text-align: right; border-bottom: 1px solid #dee2e6; white-space: nowrap;">시간</th>
@@ -773,7 +800,7 @@
                 </div>
 
                 <!-- 오늘 전체 뉴스 + 급등주 (기본 접힘) -->
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
+                <div class="siwhang-all-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
                     <!-- 전체 뉴스 -->
                     <div class="card">
                         <div style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;" onclick="toggleSection('newsAllSection', 'newsAllChevron')">
@@ -784,7 +811,7 @@
                                 <button class="btn btn-danger" style="font-size: 11px; padding: 3px 8px;" onclick="deleteSelectedMessages('newsAll')">선택 삭제</button>
                             </div>
                         </div>
-                        <div id="newsAllSection" style="display:none; margin-top:8px; max-height: 500px; overflow-y: auto;">
+                        <div id="newsAllSection" class="siwhang-table-wrap" style="display:none; margin-top:8px; max-height: 500px; overflow-y: auto;">
                             <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
                                 <thead><tr style="background: #f8f9fa; position: sticky; top: 0;">
                                     <th style="padding: 5px 4px; width: 24px; border-bottom: 1px solid #dee2e6;"><input type="checkbox" onchange="toggleTableCheckboxes('newsAll', this)"></th>
@@ -806,7 +833,7 @@
                                 <button class="btn btn-danger" style="font-size: 11px; padding: 3px 8px;" onclick="deleteSelectedMessages('hotstockAll')">선택 삭제</button>
                             </div>
                         </div>
-                        <div id="hotstockAllSection" style="display:none; margin-top:8px; max-height: 500px; overflow-y: auto;">
+                        <div id="hotstockAllSection" class="siwhang-table-wrap" style="display:none; margin-top:8px; max-height: 500px; overflow-y: auto;">
                             <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
                                 <thead><tr style="background: #f8f9fa; position: sticky; top: 0;">
                                     <th style="padding: 5px 4px; width: 24px; border-bottom: 1px solid #dee2e6;"><input type="checkbox" onchange="toggleTableCheckboxes('hotstockAll', this)"></th>
@@ -832,7 +859,7 @@
                                 <button class="btn btn-danger" style="font-size: 11px; padding: 3px 8px;" onclick="deleteSelectedMessages('newsFiltered')">선택 삭제</button>
                             </div>
                         </div>
-                        <div style="max-height: 500px; overflow-y: auto;">
+                        <div class="siwhang-table-wrap" style="max-height: 500px; overflow-y: auto;">
                             <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
                                 <thead><tr style="background: #f8f9fa; position: sticky; top: 0;">
                                     <th style="padding: 5px 4px; width: 24px; border-bottom: 1px solid #dee2e6;"><input type="checkbox" id="newsSelectAll" onchange="toggleTableCheckboxes('newsFiltered', this)"></th>
@@ -853,7 +880,7 @@
                                 <button class="btn btn-danger" style="font-size: 11px; padding: 3px 8px;" onclick="deleteSelectedMessages('hotstockFiltered')">선택 삭제</button>
                             </div>
                         </div>
-                        <div style="max-height: 500px; overflow-y: auto;">
+                        <div class="siwhang-table-wrap" style="max-height: 500px; overflow-y: auto;">
                             <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
                                 <thead><tr style="background: #f8f9fa; position: sticky; top: 0;">
                                     <th style="padding: 5px 4px; width: 24px; border-bottom: 1px solid #dee2e6;"><input type="checkbox" onchange="toggleTableCheckboxes('hotstockFiltered', this)"></th>
@@ -972,6 +999,7 @@
                         <div style="display: flex; gap: 8px; align-items: center;">
                             <input type="text" id="themeAddInput" placeholder="테마명 수동 추가" style="padding: 5px 10px; border: 1px solid #dee2e6; border-radius: 6px; font-size: 13px; width: 150px;">
                             <button class="btn btn-primary" style="font-size: 12px; padding: 5px 12px;" onclick="addTheme()">+ 추가</button>
+                            <button class="btn btn-danger" style="font-size: 12px; padding: 5px 12px;" onclick="resetThemes()">🗑️ 초기화</button>
                         </div>
                     </div>
                     <div style="max-height: 250px; overflow-y: auto;">
