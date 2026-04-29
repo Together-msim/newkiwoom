@@ -5685,12 +5685,14 @@ async function deleteSelectedMessages(tableKey) {
     } catch (e) { showToast('요청 실패', 'error'); }
 }
 
-async function cleanupOldMessages() {
-    if (!confirm('오늘 날짜 이전 메시지(뉴스+급등주)를 모두 삭제하시겠습니까?\n(스크래핑된 뉴스는 보존됩니다)')) return;
+async function cleanupOldMessages(sourceType) {
+    const label = sourceType === 'hot_stock' ? '급등주' : '뉴스';
+    if (!confirm(`오늘 날짜 이전 ${label} 메시지를 모두 삭제하시겠습니까?\n(스크래핑된 뉴스는 보존됩니다)`)) return;
     try {
         const r = await (await fetch('/api/messages/cleanup', {
             method: 'POST', credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ source_type: sourceType }),
         })).json();
         if (r.success) {
             showToast(`✓ ${r.message}`, 'success');

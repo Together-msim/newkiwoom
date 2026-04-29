@@ -2042,10 +2042,12 @@ def delete_messages():
 @app.route('/api/messages/cleanup', methods=['POST'])
 @auth.login_required
 def cleanup_messages():
-    """1일 지난 메시지 자동 삭제."""
+    """1일 지난 메시지 삭제. source_type 지정 시 해당 타입만."""
+    data = request.json or {}
+    source_type = data.get('source_type') or None
     try:
         ns = _get_news_storage()
-        deleted = ns.cleanup_old_messages()
+        deleted = ns.cleanup_old_messages(source_type=source_type)
         return jsonify({"success": True, "deleted": deleted, "message": f"{deleted}건 삭제됨"})
     except Exception as e:
         logger.error(f"cleanup_messages 실패: {e}")

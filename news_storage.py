@@ -229,8 +229,9 @@ class NewsStorage:
             logger.error(f"delete_messages 실패: {e}")
             return 0
 
-    def cleanup_old_messages(self) -> int:
-        """오늘 날짜 이전 메시지 삭제 (saved_news는 보존). 삭제된 건수 반환."""
+    def cleanup_old_messages(self, source_type: Optional[str] = None) -> int:
+        """오늘 날짜 이전 메시지 삭제 (saved_news는 보존). 삭제된 건수 반환.
+        source_type 지정 시 해당 타입만 삭제."""
         today = date.today().isoformat()
         try:
             with self._conn() as conn:
@@ -241,6 +242,9 @@ class NewsStorage:
                 ]
                 query = "SELECT id FROM messages WHERE date < ?"
                 params: list = [today]
+                if source_type:
+                    query += " AND source_type = ?"
+                    params.append(source_type)
                 if saved_msg_ids:
                     ph = ",".join("?" * len(saved_msg_ids))
                     query += f" AND id NOT IN ({ph})"
@@ -252,7 +256,7 @@ class NewsStorage:
                 conn.execute(f"DELETE FROM filtered_messages WHERE message_id IN ({ph2})", old_ids)
                 cur = conn.execute(f"DELETE FROM messages WHERE id IN ({ph2})", old_ids)
                 deleted = cur.rowcount
-                logger.info(f"cleanup_old_messages: {deleted}건 삭제 (date < {today})")
+                logger.info(f"cleanup_old_messages: {deleted}건 삭제 (date < {today}, source_type={source_type})")
                 return deleted
         except Exception as e:
             logger.error(f"cleanup_old_messages 실패: {e}")
