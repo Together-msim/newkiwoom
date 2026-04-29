@@ -2205,16 +2205,14 @@ function calcAndFillDemark() {
     const h = parseFloat(document.getElementById('demarkHigh')?.value);
     const l = parseFloat(document.getElementById('demarkLow')?.value);
     const c = parseFloat(document.getElementById('demarkClose')?.value);
-    if (!o || !h || !l || !c) { showToast('시가/고가/저가/종가를 모두 입력하세요', 'error'); return; }
+    if (!o || !h || !l || !c) return;
     const dm = _calcDemark(o, h, l, c);
-    // resistance_2_price ← 디마크 고가, support_2_price ← 디마크 저가
-    const r2 = document.querySelector('[name="resistance_2_price"]');
-    const s2 = document.querySelector('[name="support_2_price"]');
-    if (r2) r2.value = dm.targetHigh;
-    if (s2) s2.value = dm.targetLow;
+    const r1 = document.querySelector('[name="resistance_1_price"]');
+    const s1 = document.querySelector('[name="support_1_price"]');
+    if (r1) r1.value = dm.targetHigh;
+    if (s1) s1.value = dm.targetLow;
     const resultEl = document.getElementById('demarkResult');
-    if (resultEl) resultEl.textContent = `목표고가: ${dm.targetHigh.toLocaleString()}  목표저가: ${dm.targetLow.toLocaleString()}`;
-    showToast(`✓ 디마크 입력 완료 (고: ${dm.targetHigh.toLocaleString()}, 저: ${dm.targetLow.toLocaleString()})`, 'success');
+    if (resultEl) resultEl.textContent = `1차저항: ${dm.targetHigh.toLocaleString()}  1차지지: ${dm.targetLow.toLocaleString()}`;
 }
 
 function redrawMode2Chart() {
@@ -4415,6 +4413,20 @@ async function loadWatcherChart(code) {
             // 차트 그리기
             window.lastMode2ChartData = chartDataWithLevels;
             drawMode2CandlestickChart(chartDataWithLevels);
+
+            // 전일 OHLC → 디마크 자동계산
+            const ch = chartResult.data.chart;
+            if (ch) {
+                const o = parseFloat(ch.yesterday_open), h = parseFloat(ch.yesterday_high),
+                      l = parseFloat(ch.yesterday_low),  c = parseFloat(ch.yesterday_close);
+                if (o && h && l && c) {
+                    document.getElementById('demarkOpen').value  = o;
+                    document.getElementById('demarkHigh').value  = h;
+                    document.getElementById('demarkLow').value   = l;
+                    document.getElementById('demarkClose').value = c;
+                    calcAndFillDemark();
+                }
+            }
 
             // 차트 위치로 스크롤
             chartContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
