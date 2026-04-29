@@ -44,6 +44,18 @@ function switchPage(pageName) {
     else if (pageName === 'test') loadMode2PickList(); // Test 페이지 진입 시 picklist 로드
 }
 
+function toggleSupport1Mode(mode) {
+    const lossPct = document.getElementById('support1LossPct');
+    const addBudget = document.getElementById('support1AddBudget');
+    if (mode === '물타기') {
+        lossPct.style.display = 'none';
+        addBudget.style.display = '';
+    } else {
+        lossPct.style.display = '';
+        addBudget.style.display = 'none';
+    }
+}
+
 function setupEventListeners() {
     // Mode1 페이지
     const addMode1 = document.getElementById('addMode1');
@@ -396,15 +408,21 @@ function renderMode2SectionList(sections, allWatchers) {
         watchersBySection[sectionId].push(w);
     });
 
-    // 각 섹션별로 정렬 (자동매매 우선, 그 다음 display_order)
+    // 구역 정렬 우선순위: 3→4→5→1→2 (0=미설정은 맨 뒤)
+    const ZONE_SORT = {3: 0, 4: 1, 5: 2, 1: 3, 2: 4, 0: 5};
     Object.keys(watchersBySection).forEach(sectionId => {
         watchersBySection[sectionId].sort((a, b) => {
-            // 1순위: notify_only (false가 true보다 우선)
+            // 1순위: 구역 (3→4→5→1→2)
+            const za = ZONE_SORT[a.zone || 0] ?? 5;
+            const zb = ZONE_SORT[b.zone || 0] ?? 5;
+            if (za !== zb) return za - zb;
+
+            // 2순위: notify_only (false가 우선)
             const notifyA = a.notify_only ? 1 : 0;
             const notifyB = b.notify_only ? 1 : 0;
             if (notifyA !== notifyB) return notifyA - notifyB;
 
-            // 2순위: display_order
+            // 3순위: display_order
             return (a.display_order || 9999) - (b.display_order || 9999);
         });
     });
@@ -497,7 +515,9 @@ function renderMode2WatcherRow(w, idx) {
             <div class="watcher-cell editable" data-field="budget" ondblclick="enableCellEdit(this, '${w.code}')">${(w.budget / 10000).toFixed(0)}만</div>
             <div class="watcher-cell">${w.quantity}주</div>
             <div class="watcher-cell editable" data-field="support_2_price" ondblclick="enableCellEdit(this, '${w.code}')">${formatNumber(w.support_2_price)}</div>
-            <div class="watcher-cell editable" data-field="support_1_price" ondblclick="enableCellEdit(this, '${w.code}')">${formatNumber(w.support_1_price)}</div>
+            <div class="watcher-cell editable" data-field="support_1_price" ondblclick="enableCellEdit(this, '${w.code}')">
+                ${formatNumber(w.support_1_price)}${w.support_1_price > 0 ? `<span style="font-size:10px;margin-left:3px;color:${w.support_1_mode === '물타기' ? '#1971c2' : '#e03131'};">${w.support_1_mode === '물타기' ? '📥' : '✂️'}</span>` : ''}
+            </div>
             <div class="watcher-cell editable" data-field="resistance_1_price" ondblclick="enableCellEdit(this, '${w.code}')">${formatNumber(w.resistance_1_price)}</div>
             <div class="watcher-cell editable" data-field="resistance_2_price" ondblclick="enableCellEdit(this, '${w.code}')">${formatNumber(w.resistance_2_price)}</div>
             <div class="watcher-cell">
@@ -517,7 +537,7 @@ function renderMode2WatcherRow(w, idx) {
                 </div>
             </div>
             <div class="watcher-cell"><span class="status-badge status-${w.status}">${getStatusText(w.status)}</span></div>
-            <div class="watcher-cell monitoring-status ${getMonitoringStatusClass(w.monitoring_status)}">${w.monitoring_status || '-'}</div>
+            <div class="watcher-cell monitoring-status ${getMonitoringStatusClass(w.monitoring_status)}">${renderZoneCell(w)}</div>
             <div class="watcher-cell editable" data-field="note" title="${w.note || ''}" ondblclick="enableCellEdit(this, '${w.code}')">${truncateText(w.note || '', 20)}</div>
             <div class="watcher-actions">
                 <div class="active-toggle ${w.active ? 'on' : 'off'}" onclick="toggleActive('${w.code}', ${!w.active})">
@@ -532,10 +552,38 @@ function renderMode2WatcherRow(w, idx) {
 
 function getMonitoringStatusClass(status) {
     if (!status) return '';
-    if (status.includes('손절') || status.includes('이탈')) return 'danger';
-    if (status.includes('익절') || status.includes('저항 통과')) return 'success';
+    if (status.includes('5구역') || status.includes('손절') || status.includes('이탈')) return 'danger';
+    if (status.includes('4구역')) return 'warning';
+    if (status.includes('1구역') || status.includes('익절') || status.includes('저항 통과')) return 'success';
+    if (status.includes('2구역')) return 'success';
     if (status.includes('매수타점')) return 'warning';
     return '';
+}
+
+function renderZoneCell(w) {
+    const zone = w.zone || 0;
+    const status = w.monitoring_status || '';
+    if (!status && !zone) return '-';
+
+    // 진입 시각
+    let enteredStr = '';
+    if (w.zone_entered_at) {
+        const d = new Date(w.zone_entered_at);
+        enteredStr = `<span style="font-size:10px;color:#868e96;display:block;">${d.toLocaleTimeString('ko-KR', {hour:'2-digit',minute:'2-digit'})}</span>`;
+    }
+
+    // 왕복 카운트
+    let transStr = '';
+    if (w.zone_transitions && Object.keys(w.zone_transitions).length > 0) {
+        const parts = Object.entries(w.zone_transitions)
+            .filter(([,v]) => v > 0)
+            .map(([k,v]) => `${k}구역 ${v}회`);
+        if (parts.length > 0) {
+            transStr = `<span style="font-size:10px;color:#868e96;display:block;">↔ ${parts.join(' / ')}</span>`;
+        }
+    }
+
+    return `${status}${enteredStr}${transStr}`;
 }
 
 function truncateText(text, maxLen) {
@@ -574,7 +622,9 @@ async function handleMode2Submit(e) {
         resistance_2_price: parseInt(formData.get('resistance_2_price')) || 0,
         resistance_2_profit_pct: parseFloat(formData.get('resistance_2_profit_pct')) || 0,
         support_1_price: parseInt(formData.get('support_1_price')) || 0,
+        support_1_mode: formData.get('support_1_mode') || '손절',
         support_1_loss_pct: parseFloat(formData.get('support_1_loss_pct')) || 0,
+        support_1_add_budget: (parseInt(formData.get('support_1_add_budget_manwon')) || 0) * 10000,
         support_2_price: parseInt(formData.get('support_2_price')) || 0,
         support_2_loss_pct: parseFloat(formData.get('support_2_loss_pct')) || 0,
     };
@@ -1605,7 +1655,11 @@ async function selectMode2Row(code) {
             document.querySelector('input[name="resistance_1_price"]').value = w.resistance_1_price;
             document.querySelector('select[name="resistance_1_profit_pct"]').value = w.resistance_1_profit_pct;
             document.querySelector('input[name="support_1_price"]').value = w.support_1_price;
+            const s1modeLoad = w.support_1_mode || '손절';
+            document.querySelector('select[name="support_1_mode"]').value = s1modeLoad;
+            toggleSupport1Mode(s1modeLoad);
             document.querySelector('select[name="support_1_loss_pct"]').value = w.support_1_loss_pct;
+            document.getElementById('support1AddBudget').value = w.support_1_add_budget ? Math.round(w.support_1_add_budget / 10000) : '';
             document.querySelector('input[name="support_2_price"]').value = w.support_2_price;
             document.querySelector('select[name="support_2_loss_pct"]').value = w.support_2_loss_pct;
 
@@ -2121,6 +2175,36 @@ function drawMode2CandlestickChart(data) {
     drawCandlestickChart(data, 'mode2CandlestickChart', 'mode2ChartContainer');
 }
 
+function _calcDemark(open, high, low, close) {
+    // Demark pivot formula
+    let x;
+    if (close < open)      x = high + 2 * low + close;
+    else if (close > open) x = 2 * high + low + close;
+    else                   x = high + low + 2 * close;
+    return { targetHigh: Math.round(x / 2 - low), targetLow: Math.round(x / 2 - high) };
+}
+
+function calcAndFillDemark() {
+    const o = parseFloat(document.getElementById('demarkOpen')?.value);
+    const h = parseFloat(document.getElementById('demarkHigh')?.value);
+    const l = parseFloat(document.getElementById('demarkLow')?.value);
+    const c = parseFloat(document.getElementById('demarkClose')?.value);
+    if (!o || !h || !l || !c) { showToast('시가/고가/저가/종가를 모두 입력하세요', 'error'); return; }
+    const dm = _calcDemark(o, h, l, c);
+    // resistance_2_price ← 디마크 고가, support_2_price ← 디마크 저가
+    const r2 = document.querySelector('[name="resistance_2_price"]');
+    const s2 = document.querySelector('[name="support_2_price"]');
+    if (r2) r2.value = dm.targetHigh;
+    if (s2) s2.value = dm.targetLow;
+    const resultEl = document.getElementById('demarkResult');
+    if (resultEl) resultEl.textContent = `목표고가: ${dm.targetHigh.toLocaleString()}  목표저가: ${dm.targetLow.toLocaleString()}`;
+    showToast(`✓ 디마크 입력 완료 (고: ${dm.targetHigh.toLocaleString()}, 저: ${dm.targetLow.toLocaleString()})`, 'success');
+}
+
+function redrawMode2Chart() {
+    if (window.lastMode2ChartData) drawMode2CandlestickChart(window.lastMode2ChartData);
+}
+
 function drawCandlestickChart(data, canvasId, containerId) {
     const canvas = document.getElementById(canvasId);
 
@@ -2341,6 +2425,37 @@ function drawCandlestickChart(data, canvasId, containerId) {
             ctx.setLineDash([]);
         }
     });
+
+    // ── 디마크 오버레이 ───────────────────────────────────────
+    const demarkChk = document.getElementById('demarkOverlayChk');
+    if (demarkChk && demarkChk.checked) {
+        const dO = parseFloat(document.getElementById('demarkOpen')?.value);
+        const dH = parseFloat(document.getElementById('demarkHigh')?.value);
+        const dL = parseFloat(document.getElementById('demarkLow')?.value);
+        const dC = parseFloat(document.getElementById('demarkClose')?.value);
+        if (dO && dH && dL && dC) {
+            const dm = _calcDemark(dO, dH, dL, dC);
+            const demarkLevels = [
+                { price: dm.targetHigh, label: '디마크고', color: '#e64980' },
+                { price: dm.targetLow,  label: '디마크저', color: '#7950f2' },
+            ];
+            demarkLevels.forEach(lv => {
+                const ly = priceToY(lv.price);
+                ctx.strokeStyle = lv.color;
+                ctx.lineWidth = 2;
+                ctx.setLineDash([8, 4]);
+                ctx.beginPath();
+                ctx.moveTo(chartLeft, ly);
+                ctx.lineTo(chartRight, ly);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                ctx.fillStyle = lv.color;
+                ctx.font = 'bold 12px sans-serif';
+                ctx.textAlign = 'left';
+                ctx.fillText(`${lv.label} ${lv.price.toLocaleString()}`, chartRight + 5, ly + 4);
+            });
+        }
+    }
 
     // 꺾은선 그래프
     ctx.strokeStyle = '#228be6';
@@ -4225,7 +4340,11 @@ function fillMode2Form(watcher) {
     document.querySelector('input[name="resistance_1_price"]').value = watcher.resistance_1_price || '';
     document.querySelector('select[name="resistance_1_profit_pct"]').value = watcher.resistance_1_profit_pct || 50;
     document.querySelector('input[name="support_1_price"]').value = watcher.support_1_price || '';
+    const s1mode = watcher.support_1_mode || '손절';
+    document.querySelector('select[name="support_1_mode"]').value = s1mode;
+    toggleSupport1Mode(s1mode);
     document.querySelector('select[name="support_1_loss_pct"]').value = watcher.support_1_loss_pct || 50;
+    document.getElementById('support1AddBudget').value = watcher.support_1_add_budget ? Math.round(watcher.support_1_add_budget / 10000) : '';
     document.querySelector('input[name="support_2_price"]').value = watcher.support_2_price || '';
     document.querySelector('select[name="support_2_loss_pct"]').value = watcher.support_2_loss_pct || 50;
 }
@@ -4725,7 +4844,9 @@ async function executeBulkAdd() {
             resistance_2_price: parseInt(resistance_2) || 0,
             resistance_2_profit_pct: 0,
             support_1_price: parseInt(support_1) || 0,
+            support_1_mode: '손절',
             support_1_loss_pct: 0,
+            support_1_add_budget: 0,
             support_2_price: parseInt(support_2) || 0,
             support_2_loss_pct: 0,
             section: targetSectionId
@@ -5290,6 +5411,7 @@ async function loadHotstockParsed() {
         _renderParsedTable('ssUpBody', _parsedData.ssUp, 'ssUp');
         _renderParsedTable('viBody', _parsedData.vi, 'vi');
         _renderParsedTable('ssAllBody', _parsedData.ss, 'ss');
+        filterSiwhangTables();
     } catch (e) { console.error('hotstock parsed error', e); }
 }
 
@@ -5326,9 +5448,12 @@ function _renderParsedTable(tbodyId, data, tableKey) {
             ? m.watchlist_match.map(n => `<span style="background:#fff3bf;border:1px solid #ffd43b;border-radius:10px;padding:1px 6px;font-size:11px;">🔔${n}</span>`).join(' ')
             : '<span style="color:#868e96;">-</span>';
         const related = (m.related_stocks || []).join(', ') || '-';
-        const price = m.price ? `<span style="color:${m.change && m.change.startsWith('+') ? '#c92a2a' : '#1971c2'}">${m.price}</span><br><span style="font-size:11px;color:#868e96;">${m.change || ''}</span>` : '-';
-        return `<tr style="border-bottom:1px solid #f1f3f5;">
-            <td style="padding:5px 4px;width:24px;"><input type="checkbox" class="cb-parsed-${tableKey}" data-id="${m.message_id}"></td>
+        const isNeg = m.change && (m.change.startsWith('-') || m.change.startsWith('▼'));
+        const priceColor = isNeg ? '#1971c2' : '#c92a2a';
+        const price = m.price ? `<span style="color:${priceColor}">${m.price}</span><br><span style="font-size:11px;color:#868e96;">${m.change || ''}</span>` : '-';
+        const rawEsc = (m.raw_text || '').replace(/\\/g, '\\\\').replace(/`/g, '\\`');
+        return `<tr style="border-bottom:1px solid #f1f3f5;cursor:pointer;" onclick="showHotstockCopyModal(\`${rawEsc}\`)">
+            <td style="padding:5px 4px;width:24px;" onclick="event.stopPropagation()"><input type="checkbox" class="cb-parsed-${tableKey}" data-id="${m.message_id}"></td>
             <td style="padding:5px 8px;font-size:13px;font-weight:500;">${m.stock_name || '-'}</td>
             <td style="padding:5px 8px;font-size:12px;text-align:right;">${price}</td>
             <td style="padding:5px 8px;font-size:12px;">${m.theme || '-'}</td>
@@ -5337,6 +5462,25 @@ function _renderParsedTable(tbodyId, data, tableKey) {
             <td style="padding:5px 6px;font-size:11px;color:#868e96;text-align:right;white-space:nowrap;">${_fmtDatetime(m.received_at)}</td>
         </tr>`;
     }).join('');
+}
+
+function showHotstockCopyModal(rawText) {
+    const existing = document.getElementById('hotstockCopyModal');
+    if (existing) existing.remove();
+    const modal = document.createElement('div');
+    modal.id = 'hotstockCopyModal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;';
+    modal.innerHTML = `
+        <div style="background:#fff;border-radius:12px;padding:20px;max-width:560px;width:90%;max-height:80vh;display:flex;flex-direction:column;gap:12px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+                <strong style="font-size:14px;">📋 원문 복사</strong>
+                <button onclick="document.getElementById('hotstockCopyModal').remove()" style="border:none;background:none;font-size:18px;cursor:pointer;color:#868e96;">✕</button>
+            </div>
+            <textarea id="hotstockCopyText" readonly style="flex:1;min-height:200px;resize:vertical;font-size:12px;line-height:1.6;border:1px solid #dee2e6;border-radius:6px;padding:10px;font-family:monospace;white-space:pre;">${rawText.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea>
+            <button onclick="navigator.clipboard.writeText(document.getElementById('hotstockCopyText').value).then(()=>{showToast('✓ 복사됨','success');document.getElementById('hotstockCopyModal').remove();})" style="background:#339af0;color:#fff;border:none;border-radius:6px;padding:8px 20px;font-size:13px;cursor:pointer;font-weight:600;">📋 클립보드 복사</button>
+        </div>`;
+    modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+    document.body.appendChild(modal);
 }
 
 // ─── AI 분석 결과 ─────────────────────────────────────────
@@ -5390,6 +5534,22 @@ function _fmtDatetime(dtStr) {
     return `${mm}/${dd} ${hh}:${mi}`;
 }
 
+function filterSiwhangTables() {
+    const kw = (document.getElementById('siwhangKeyword')?.value || '').toLowerCase();
+    const tableIds = [
+        'ssUpBody', 'viBody', 'ssAllBody',
+        'newsAllBody', 'hotstockAllBody', 'newsFilteredBody', 'hotstockFilteredBody',
+    ];
+    tableIds.forEach(id => {
+        const tbody = document.getElementById(id);
+        if (!tbody) return;
+        tbody.querySelectorAll('tr').forEach(row => {
+            const text = row.textContent.toLowerCase();
+            row.style.display = (!kw || text.includes(kw)) ? '' : 'none';
+        });
+    });
+}
+
 async function loadNewsFilter() {
     const date = _newsFilterDate();
     const qs = date ? `?date=${date}` : '';
@@ -5398,6 +5558,7 @@ async function loadNewsFilter() {
         _loadNewsFiltered(qs), _loadHotstockFiltered(qs),
         loadKeywords(), loadThemes(), loadSavedNews(),
     ]);
+    filterSiwhangTables(); // 검색 키워드 유지
 }
 
 async function _loadNewsAll(qs) {
@@ -5511,7 +5672,7 @@ async function deleteSelectedMessages(tableKey) {
 }
 
 async function cleanupOldMessages() {
-    if (!confirm('오늘 날짜 이전 뉴스를 모두 삭제하시겠습니까?\n(스크래핑된 뉴스는 보존됩니다)')) return;
+    if (!confirm('오늘 날짜 이전 메시지(뉴스+급등주)를 모두 삭제하시겠습니까?\n(스크래핑된 뉴스는 보존됩니다)')) return;
     try {
         const r = await (await fetch('/api/messages/cleanup', {
             method: 'POST', credentials: 'same-origin',
@@ -5888,6 +6049,16 @@ async function addTheme() {
             showToast(`✓ "${name}" 추가`, 'success');
             await loadThemes();
         } else { showToast(r.error, 'error'); }
+    } catch (e) { showToast('요청 실패', 'error'); }
+}
+
+async function resetThemes() {
+    if (!confirm('테마 라이브러리 전체를 초기화하시겠습니까?\n(모든 테마가 삭제됩니다)')) return;
+    try {
+        const res = await fetch('/api/themes/reset', { method: 'POST', credentials: 'same-origin' });
+        const r = await res.json();
+        if (r.success) { showToast('✓ 테마 초기화 완료', 'success'); await loadThemes(); }
+        else showToast(r.error || '초기화 실패', 'error');
     } catch (e) { showToast('요청 실패', 'error'); }
 }
 

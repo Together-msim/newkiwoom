@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Overview
 
 Korean stock auto-trading system with two interfaces:
-1. **Web UI** (`web_app.py`) - Multi-page SPA: Watchlist, Mode1, Mode2, Tradelog, NewsFilter, Test
+1. **Web UI** (`web_app.py`) - Multi-page SPA: Watchlist, Mode1, Mode2, Tradelog, 시황체크(Siwhang), Test
 2. **Signal Listener** (`signal_listener.py`) - Telegram channel archiver + keyword filter
 
 **Active strategies:**
@@ -110,7 +110,8 @@ scp -i /Users/msim/Downloads/ssh-key-2026-04-26.key \
 ### Data Flow
 ```
 Web UI → Flask API → Mode1/Mode2Manager → PriceMonitor → KiwoomClientAsync → Telegram
-Telegram Channels → signal_listener (Pyrogram) → news.db → Web UI NewsFilter
+Telegram Channels → signal_listener (Pyrogram) → news.db → Web UI 시황체크
+/siwhang skill → Oracle API (hotstock/parsed + news/today + watchlist) → AI 분석 → siwhang_results → Telegram
 ```
 
 ### Core Services
@@ -176,8 +177,9 @@ Mode1/Mode2: waiting_buy → waiting_sell → auto_sold | manual_sold
 ### Watcher Data Files
 - `.data/mode1_watchers.json` — Mode1 감시종목
 - `.data/mode2_watchers.json` — Mode2 감시종목
-- `.data/news.db` — 뉴스/급등주 SQLite DB
+- `.data/news.db` — 뉴스/급등주 SQLite DB (tables: messages, filtered_messages, themes, saved_news, siwhang_results)
 - `.data/keywords.json` — 키워드 필터 설정
+- `.data/watchlist.json` — 수동 추가 관심종목 (`[{"code":"005930","name":"삼성전자"}]`)
 
 ## Environment Variables
 
@@ -221,23 +223,29 @@ IGNORE_MARKET_HOURS=1     # 시간 검증 스킵
 | `news-insight` | `/news-insight` | 마지막 실행 이후 신규 뉴스 증분 분석 |
 | `news-insight-selected` | `/news-insight-selected` | 선택한 뉴스만 심층 분석 |
 | `news-grouping` | `/news-grouping` | 테마별 그룹핑 + 강도(H/M/L) |
+| `siwhang` | `/siwhang [1h\|2h]` | 급등주 시황 부합 여부 + 관심종목 매칭 AI 분석 → Oracle 저장 + 텔레그램 알림 |
 
 프롬프트 커스터마이징: `.claude/skills/<skill>/prompts/`
+
+**⚠️ `.claude/` 디렉터리는 `.gitignore`에 등록됨 — git push로 배포 불가.**  
+Oracle 서버에 스킬 파일 배포 시 scp 사용:
+```bash
+scp -i /Users/msim/Downloads/ssh-key-2026-04-26.key \
+  -r .claude/skills/siwhang opc@152.67.207.143:~/newkiwoom/.claude/skills/
+```
+
+**시황체크 스킬 분석 기준 수정**: `.claude/skills/siwhang/prompts/analysis.md` 편집
 
 ## TODO (구현 대기)
 
 ### High Priority
-1. **뉴스필터 개선** (진행 예정)
+1. **매매일지 페이지** — 확정 손익 내역, 통계, Date filter
+
+2. **계좌 polling** — 보유종목 주기 조회, 수동매도 자동 감지
+
+3. **시황체크 고도화** (선택)
    - 뉴스 / 급등주 키워드 세트 분리 독립 관리
-   - Include/Exclude 키워드 bulk edit (textarea 편집 방식)
-   - 4개 테이블(전체뉴스/급등주, 필터뉴스/급등주) 체크박스 선택 삭제
    - 1일 자동 삭제 (매일 자정)
-   - 중요 뉴스 스크래핑 → `saved_news` 테이블 영구 보관
-   - 날짜/시간 표시 + 키워드 검색
-
-2. **매매일지 페이지** — 확정 손익 내역, 통계, Date filter
-
-3. **계좌 polling** — 보유종목 주기 조회, 수동매도 자동 감지
 
 ## Known Issues & Lessons
 
@@ -252,3 +260,41 @@ IGNORE_MARKET_HOURS=1     # 시간 검증 스킵
 
 ### 단위 변환
 Budget: UI 입력/표시는 만원 단위, API 저장은 원 단위. 변환은 프론트엔드에서만.
+
+### UTC vs KST 날짜 불일치
+`messages.received_at`은 UTC 저장. `messages.date`는 KST 날짜 저장.  
+당일 데이터 조회 시 `since=<UTC_ISO>` 대신 `date=YYYY-MM-DD` 파라미터 사용.  
+예: 20:39 KST 저장 → `received_at` UTC로는 다음날이 될 수 있음.
+
+### Oracle SSH 복합 명령어 exit 255
+SSH에서 `kill && restart` 같은 복합 명령은 간혹 exit 255로 실패.  
+→ kill과 start를 **별도 SSH 호출로 분리**하고 ps aux로 확인.
+
+### 급등주 메시지 파싱 (hotstock regex)
+`[SS⬆️]` / `[VI]` / `[SS]` 태그별 파싱:
+- `[SS⬆️]` = 상한가, `[VI]` = VI 발동, `[SS]` = 급등 조짐 (confirmed surge 아님)
+- `테마 : 테마명` 줄에서 테마 추출
+- `Y 테마명 : 종목A, 종목B` 줄에서 관련주 추출
+- 관심종목 매칭은 메인종목 + 관련주 전체 대상으로 비교
+
+### 로컬 PC에서 Oracle API 직접 호출 불가 (VPN 환경)
+로컬 개발 PC에서 `https://www.nomaddoklip.xyz` 직접 호출은 **회사 VPN 환경에서 DNS 타임아웃**으로 실패함.  
+→ Claude Code 스킬 등에서 Oracle API 데이터가 필요할 때는 **SSH로 오라클 서버에 붙어서 localhost로 호출**해야 함.
+
+```bash
+# 올바른 패턴: SSH → Oracle 서버에서 localhost 호출
+ssh -i /Users/msim/Downloads/ssh-key-2026-04-26.key opc@152.67.207.143 '
+  source ~/newkiwoom/.venv/bin/activate
+  export $(grep -v "^#" ~/newkiwoom/.env | xargs)
+  curl -sk -u "$WEB_USERNAME:$WEB_PASSWORD" "https://localhost/api/news/today?date=2026-04-29"
+'
+
+# 잘못된 패턴 (VPN 환경에서 실패)
+curl -u "..." "https://www.nomaddoklip.xyz/api/..."
+```
+
+### 시황체크 (Siwhang) 아키텍처
+- AI 분석은 로컬 PC (Claude Code 스킬)에서 실행, 데이터는 Oracle API 조회
+- `/siwhang` 스킬: `last_run.txt` 기준 증분 → Oracle fetch → AI 분석 → Oracle POST 저장 → 텔레그램
+- `[SS]` 종목은 watchlist_match 있는 것만 분석 (토큰 절약)
+- 분석 결과는 `siwhang_results` 테이블 + 웹UI `#siwhang` 섹션에서 확인

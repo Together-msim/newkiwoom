@@ -122,24 +122,26 @@ _reload_thread = None
 _reload_thread_stop_event = threading.Event()
 
 # ─── 테마 파싱 ────────────────────────────────────────────────
-# Seeking Signal 메시지 포맷에서 테마 추출
-# 패턴 예: [테마명] 또는 #테마명 또는 「테마명」
-_THEME_PATTERNS = [
-    re.compile(r"[【\[「『]([^】\]」』]{1,30})[】\]」』]"),  # 【테마】 [테마] 「테마」
-    re.compile(r"테마\s*[:：]\s*([^\s,，\n]{1,30})"),         # 테마: 테마명
-    re.compile(r"#([가-힣a-zA-Z0-9]{2,20})"),                # #태그
-]
+# 급등주 메시지 포맷: ✅ 테마 : 테마A , 테마B\n✅ ...
+_HOTSTOCK_THEME_PATTERN = re.compile(
+    r'✅\s*테마\s*[：:]\s*(.*?)(?=✅|$)', re.DOTALL
+)
+# 불필요 테마 필터 (메시지 타입 태그)
+_THEME_BLACKLIST = {'SS', 'VI', 'SS⬆', '단독', '리포트 브리핑', '특징주', '브리핑', '뉴스'}
 
 
 def extract_themes(text: str) -> list[str]:
-    """메시지 텍스트에서 테마 키워드를 추출합니다."""
+    """급등주 메시지의 ✅ 테마 : 섹션에서 테마를 추출합니다."""
+    m = _HOTSTOCK_THEME_PATTERN.search(text)
+    if not m:
+        return []
+    raw = m.group(1).replace('\n', ' ')
     themes = []
-    for pattern in _THEME_PATTERNS:
-        for match in pattern.finditer(text):
-            theme = match.group(1).strip()
-            if theme and len(theme) >= 2:
-                themes.append(theme)
-    return list(set(themes))
+    for part in re.split(r'[,，]', raw):
+        theme = part.strip()
+        if theme and len(theme) >= 2 and theme not in _THEME_BLACKLIST:
+            themes.append(theme)
+    return list(dict.fromkeys(themes))  # 순서 유지 중복 제거
 
 
 # ─── 유틸리티 ────────────────────────────────────────────────

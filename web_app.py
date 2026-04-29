@@ -1666,7 +1666,7 @@ def delete_watchlist(code):
 import re as _re
 
 _TAG_PATTERN = _re.compile(r'^\[(SS⬆️?|VI|SS)\]', _re.UNICODE)
-_PRICE_PATTERN = _re.compile(r'현재가\s*:\s*([\d,]+)\s*\(([^)]+)\)')
+_PRICE_PATTERN = _re.compile(r'현재가\s*:\s*(-?[\d,]+)\s*\(([^)]+)\)')
 _THEME_PATTERN = _re.compile(r'테마\s*[：:]\s*(.+)')
 _RELATED_PATTERN = _re.compile(r'^Y\s+[^:：]+[：:]\s*(.+)', _re.MULTILINE)
 
@@ -1752,6 +1752,7 @@ def get_hotstock_parsed():
             parsed['message_id'] = msg['id']
             parsed['received_at'] = msg.get('received_at')
             parsed['watchlist_match'] = matches
+            parsed['raw_text'] = msg.get('text', '')
             result.append(parsed)
 
         return jsonify({'success': True, 'data': result, 'count': len(result)})
@@ -2155,6 +2156,21 @@ def delete_theme(theme_id):
         return jsonify({"success": True})
     except Exception as e:
         logger.error(f"delete_theme 실패: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/themes/reset', methods=['POST'])
+@auth.login_required
+def reset_themes():
+    """테마 라이브러리 전체 초기화"""
+    try:
+        ns = _get_news_storage()
+        with ns._conn() as conn:
+            conn.execute("DELETE FROM themes")
+        logger.info("테마 라이브러리 초기화 완료")
+        return jsonify({"success": True, "message": "테마 라이브러리가 초기화되었습니다"})
+    except Exception as e:
+        logger.error(f"reset_themes 실패: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 

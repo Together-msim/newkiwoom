@@ -106,6 +106,12 @@ class Mode2Manager:
             watcher['monitoring_status'] = ''
             changed = True
 
+        # 구역 필드
+        for field, default in [('zone', 0), ('zone_entered_at', None), ('zone_transitions', {})]:
+            if field not in watcher:
+                watcher[field] = default
+                changed = True
+
         return changed
 
     def _save_watchers(self):
@@ -163,6 +169,9 @@ class Mode2Manager:
             "display_order": data.get("display_order", 9999),  # 섹션 내 순서
             "note": data.get("note", "")[:500],  # 자유노트 (최대 500자)
             "monitoring_status": "",  # 모니터링 상태 (실시간 업데이트)
+            "zone": 0,               # 현재 구역 (1~5)
+            "zone_entered_at": None, # 현재 구역 진입 시각
+            "zone_transitions": {},  # 인접 구역 왕복 카운트 {"3-4": 2, "4-5": 1, ...}
             "buy_target_price": buy_target_price,
             "budget": budget,
             "quantity": quantity,
@@ -171,7 +180,9 @@ class Mode2Manager:
             "resistance_2_price": data.get("resistance_2_price", 0),
             "resistance_2_profit_pct": data.get("resistance_2_profit_pct", 0),
             "support_1_price": data.get("support_1_price", 0),
+            "support_1_mode": data.get("support_1_mode", "손절"),  # "손절" | "물타기"
             "support_1_loss_pct": data.get("support_1_loss_pct", 0),
+            "support_1_add_budget": data.get("support_1_add_budget", 0),  # 물타기 추가 예산 (원)
             "support_2_price": data.get("support_2_price", 0),
             "support_2_loss_pct": data.get("support_2_loss_pct", 0),
             "polling_interval": data.get("polling_interval", 30 if not data.get("notify_only") else 180),  # 자동:30초, 알림:3분
@@ -210,8 +221,9 @@ class Mode2Manager:
         # 변경사항 감지를 위한 비교 필드
         tracked_fields = [
             'buy_target_price', 'budget', 'resistance_1_price', 'resistance_1_profit_pct',
-            'resistance_2_price', 'resistance_2_profit_pct', 'support_1_price', 'support_1_loss_pct',
-            'support_2_price', 'support_2_loss_pct', 'polling_interval', 'notify_only', 'note'
+            'resistance_2_price', 'resistance_2_profit_pct', 'support_1_price', 'support_1_mode',
+            'support_1_loss_pct', 'support_1_add_budget', 'support_2_price', 'support_2_loss_pct',
+            'polling_interval', 'notify_only', 'note'
         ]
 
         has_changes = False
@@ -368,6 +380,30 @@ class Mode2Manager:
         })
         self._save_watchers()
         logger.info(f"Mode2 매수 기록: {code} @ {price:,}원 x {quantity}주")
+        return True
+
+    def record_add_buy(self, code: str, price: float, quantity: int) -> bool:
+        """물타기(추가매수) 체결 기록 — 평균단가 재계산"""
+        if code not in self.watchers:
+            return False
+
+        watcher = self.watchers[code]
+        prev_qty = watcher.get('bought_quantity', 0)
+        prev_price = watcher.get('bought_price', 0)
+
+        new_qty = prev_qty + quantity
+        avg_price = round((prev_price * prev_qty + price * quantity) / new_qty) if new_qty > 0 else price
+
+        watcher.update({
+            "bought_price": avg_price,
+            "bought_quantity": new_qty,
+            "updated_at": datetime.now().isoformat(),
+        })
+        if 'support_1' not in watcher.get('sold_history', []):
+            watcher.setdefault('sold_history', []).append('support_1')
+
+        self._save_watchers()
+        logger.info(f"Mode2 물타기 기록: {code} @ {price:,}원 x {quantity}주 → 평균단가 {avg_price:,}원, 총 {new_qty}주")
         return True
 
     def record_sell(self, code: str, sold_quantity: int = None, sold_reason: str = None, is_auto: bool = True) -> bool:
@@ -556,12 +592,45 @@ class Mode2Manager:
         old_status = self.watchers[code].get('monitoring_status', '')
         self.watchers[code]['monitoring_status'] = status
 
-        # 상태 변경 시 텔레그램 알림 (여기서는 로그만)
         if old_status != status and status:
             logger.info(f"모니터링 상태 변경: {code} -> {status}")
 
         # 메모리에만 저장 (디스크 I/O 최소화)
         return True
+
+    def update_zone(self, code: str, new_zone: int) -> bool:
+        """구역 업데이트 — 진입 시각 및 인접 구역 왕복 카운트 관리"""
+        if code not in self.watchers:
+            return False
+
+        watcher = self.watchers[code]
+        old_zone = watcher.get('zone', 0)
+
+        if old_zone == new_zone:
+            return False
+
+        now_iso = datetime.now().isoformat()
+
+        # 인접 구역 왕복 카운트 (3↔4, 4↔5, 2↔3, 1↔2)
+        if old_zone > 0 and abs(old_zone - new_zone) == 1:
+            pair = f"{min(old_zone, new_zone)}-{max(old_zone, new_zone)}"
+            transitions = watcher.get('zone_transitions', {})
+            transitions[pair] = transitions.get(pair, 0) + 1
+            watcher['zone_transitions'] = transitions
+
+        watcher['zone'] = new_zone
+        watcher['zone_entered_at'] = now_iso
+        logger.info(f"구역 변경: {code} {old_zone}→{new_zone}")
+        return True
+
+    def get_or_create_stopped_section(self) -> str:
+        """'모니터링 중지' 섹션 ID 조회 또는 생성"""
+        for s in self.sections:
+            if s.get('name') == '모니터링 중지':
+                return s['id']
+        # 없으면 맨 마지막 순서로 생성
+        section = self.add_section('모니터링 중지')
+        return section['id']
 
     def get_all_sections(self) -> List[Dict]:
         """모든 섹션 조회"""

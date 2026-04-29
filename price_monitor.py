@@ -293,34 +293,55 @@ class PriceMonitor:
                     )
                     return {'action': 'sell', 'price': current_price, 'quantity': sell_qty, 'reason': 'support_2', 'ratio': support_2_pct}
 
-                # 1차 지지 (손절)
+                # 1차 지지 (손절 or 물타기)
                 support_1 = watcher.get('support_1_price', 0)
-                support_1_pct = watcher.get('support_1_loss_pct', 0)
+                support_1_mode = watcher.get('support_1_mode', '손절')
 
-                # 이미 매도한 레벨은 건너뛰기
-                if support_1 > 0 and support_1_pct > 0 and current_price <= support_1 and 'support_1' not in sold_history:
-                    loss_pct = ((current_price - bought_price) / bought_price) * 100
-                    # 현재 보유 수량(모수) 기준 비중 계산
-                    current_bought_qty = watcher.get('bought_quantity', 0)
-                    sell_qty = int(current_bought_qty * support_1_pct / 100)
-                    logger.info(f"Mode2 | {code} | 1차 지지 하락 손절: {current_price:,}원 ({loss_pct:.1f}%), 매도: {sell_qty}주 ({support_1_pct}%)")
-
+                if support_1 > 0 and current_price <= support_1 and 'support_1' not in sold_history:
                     mode_icon = "🔔" if notify_only else "🤖"
-                    mode_text = "[감시중]" if notify_only else "[자동매매]"
-                    await self.send_notification(
-                        f"⚠️ {mode_icon} Mode2 {mode_text} 손절 시그널 (1차 지지)\n"
-                        f"\n"
-                        f"종목: {watcher.get('name', code)} ({code})\n"
-                        f"매수가: {bought_price:,}원\n"
-                        f"현재가: {current_price:,}원\n"
-                        f"손실률: 📉 {loss_pct:.1f}%\n"
-                        f"매도 수량: {sell_qty}주 ({support_1_pct}%)\n"
-                        f"잔여: {current_bought_qty - sell_qty}주\n"
-                        f"\n"
-                        f"{'━' * 25}\n"
-                        f"{'📱 알림만 발송 (수동 매도 필요)' if notify_only else '🤖 자동 손절 매도 주문 실행 예정'}"
-                    )
-                    return {'action': 'sell', 'price': current_price, 'quantity': sell_qty, 'reason': 'support_1', 'ratio': support_1_pct}
+                    mode_text_label = "[감시중]" if notify_only else "[자동매매]"
+
+                    if support_1_mode == '물타기':
+                        add_budget = watcher.get('support_1_add_budget', 0)
+                        add_qty = int(add_budget / current_price) if add_budget > 0 and current_price > 0 else 0
+                        loss_pct = ((current_price - bought_price) / bought_price) * 100
+                        logger.info(f"Mode2 | {code} | 1차 지지 물타기: {current_price:,}원 ({loss_pct:.1f}%), 추가매수: {add_qty}주")
+
+                        await self.send_notification(
+                            f"📥 {mode_icon} Mode2 {mode_text_label} 물타기 시그널 (1차 지지)\n"
+                            f"\n"
+                            f"종목: {watcher.get('name', code)} ({code})\n"
+                            f"매수가(평균): {bought_price:,}원\n"
+                            f"현재가: {current_price:,}원 ({loss_pct:+.1f}%)\n"
+                            f"추가매수 수량: {add_qty}주 (예산: {add_budget:,}원)\n"
+                            f"\n"
+                            f"{'━' * 25}\n"
+                            f"{'📱 알림만 발송 (수동 추가매수 필요)' if notify_only else '🤖 자동 추가매수 주문 실행 예정'}"
+                        )
+                        if add_qty > 0:
+                            return {'action': 'add_buy', 'price': current_price, 'quantity': add_qty, 'reason': 'support_1'}
+                    else:
+                        support_1_pct = watcher.get('support_1_loss_pct', 0)
+                        if support_1_pct > 0:
+                            loss_pct = ((current_price - bought_price) / bought_price) * 100
+                            current_bought_qty = watcher.get('bought_quantity', 0)
+                            sell_qty = int(current_bought_qty * support_1_pct / 100)
+                            logger.info(f"Mode2 | {code} | 1차 지지 손절: {current_price:,}원 ({loss_pct:.1f}%), 매도: {sell_qty}주 ({support_1_pct}%)")
+
+                            await self.send_notification(
+                                f"⚠️ {mode_icon} Mode2 {mode_text_label} 손절 시그널 (1차 지지)\n"
+                                f"\n"
+                                f"종목: {watcher.get('name', code)} ({code})\n"
+                                f"매수가: {bought_price:,}원\n"
+                                f"현재가: {current_price:,}원\n"
+                                f"손실률: 📉 {loss_pct:.1f}%\n"
+                                f"매도 수량: {sell_qty}주 ({support_1_pct}%)\n"
+                                f"잔여: {current_bought_qty - sell_qty}주\n"
+                                f"\n"
+                                f"{'━' * 25}\n"
+                                f"{'📱 알림만 발송 (수동 매도 필요)' if notify_only else '🤖 자동 손절 매도 주문 실행 예정'}"
+                            )
+                            return {'action': 'sell', 'price': current_price, 'quantity': sell_qty, 'reason': 'support_1', 'ratio': support_1_pct}
 
             return None
 
@@ -882,6 +903,8 @@ class PriceMonitor:
                                         f"{'━' * 25}\n"
                                         f"모드: {mode_text} | 상태: waiting_sell"
                                     )
+                                    # 미설정 레벨 안내
+                                    await self._notify_unset_levels(code, watcher)
 
                             # 매도 시그널
                             elif result['action'] == 'sell':
@@ -944,6 +967,33 @@ class PriceMonitor:
                                             f"모드: {mode_text} | 사유: {reason_text}"
                                         )
 
+                            # 물타기(추가매수) 시그널
+                            elif result['action'] == 'add_buy':
+                                add_order_result = self.kiwoom.place_buy_order(
+                                    symbol=code,
+                                    quantity=result['quantity'],
+                                    price=result['price'],
+                                    order_type="limit",
+                                    simulation_mode=simulation_mode
+                                )
+
+                                if add_order_result['success'] and self.mode2_mgr:
+                                    self.mode2_mgr.record_add_buy(code, result['price'], result['quantity'])
+                                    updated = self.mode2_mgr.get_watcher(code) or watcher
+                                    await self.send_notification(
+                                        f"✅ 📥 Mode2 [자동매매] 물타기 매수 체결 완료\n"
+                                        f"\n"
+                                        f"종목: {watcher.get('name', code)} ({code})\n"
+                                        f"추가매수가: {result['price']:,}원\n"
+                                        f"추가수량: {result['quantity']}주\n"
+                                        f"평균단가: {updated.get('bought_price', 0):,}원\n"
+                                        f"총보유: {updated.get('bought_quantity', 0)}주\n"
+                                        f"주문번호: {add_order_result.get('order_no', 'N/A')}\n"
+                                        f"\n"
+                                        f"{'━' * 25}\n"
+                                        f"모드: {mode_text} | 다음: 2차 지지({watcher.get('support_2_price', 0):,}원) 손절 감시"
+                                    )
+
                         except Exception as e:
                             logger.error(f"Mode2 주문 처리 실패 ({code}): {e}")
                             continue
@@ -973,81 +1023,123 @@ class PriceMonitor:
         self.monitor_task = asyncio.create_task(self.monitor_loop())
         logger.info("모니터링 태스크 생성 완료")
 
-    async def _update_monitoring_status(self, code: str, watcher: dict, current_price: float):
-        """모니터링 상태 실시간 업데이트 및 알림"""
-        old_status = watcher.get('monitoring_status', '')
-        new_status = ''
+    async def _notify_unset_levels(self, code: str, watcher: dict):
+        """매수 완료 후 비중이 미설정된 레벨을 텔레그램으로 안내"""
+        unset = []
 
+        if watcher.get('support_1_price', 0) > 0:
+            s1_mode = watcher.get('support_1_mode', '손절')
+            if s1_mode == '물타기':
+                if not watcher.get('support_1_add_budget', 0):
+                    unset.append(f"• 1차 지지 ({watcher['support_1_price']:,}원) — 물타기 예산 미설정")
+            else:
+                if not watcher.get('support_1_loss_pct', 0):
+                    unset.append(f"• 1차 지지 ({watcher['support_1_price']:,}원) — 손절 비중 미설정")
+
+        if watcher.get('support_2_price', 0) > 0 and not watcher.get('support_2_loss_pct', 0):
+            unset.append(f"• 2차 지지 ({watcher['support_2_price']:,}원) — 손절 비중 미설정")
+
+        if watcher.get('resistance_1_price', 0) > 0 and not watcher.get('resistance_1_profit_pct', 0):
+            unset.append(f"• 1차 저항 ({watcher['resistance_1_price']:,}원) — 익절 비중 미설정")
+
+        if watcher.get('resistance_2_price', 0) > 0 and not watcher.get('resistance_2_profit_pct', 0):
+            unset.append(f"• 2차 저항 ({watcher['resistance_2_price']:,}원) — 익절 비중 미설정")
+
+        if unset:
+            await self.send_notification(
+                f"📋 Mode2 수동 매매 필요 안내\n"
+                f"\n"
+                f"종목: {watcher.get('name', code)} ({code})\n"
+                f"\n"
+                f"아래 레벨은 비중이 미설정되어 자동 주문이 실행되지 않습니다.\n"
+                f"가격 도달 시 수동으로 매매하세요:\n"
+                f"\n"
+                + "\n".join(unset)
+            )
+
+    def _calc_zone(self, watcher: dict, current_price: float) -> int:
+        """현재가 기준 구역 계산 (1~5)
+        1: 급등 (resistance_2 이상, 또는 resistance_1 이상 & resistance_2 없음)
+        2: 1차저항 돌파 (resistance_1 이상 ~ resistance_2 미만)
+        3: 횡보/눌림 대기 (buy_target 이상 ~ resistance_1 미만)
+        4: 1차지지 이하 ~ buy_target 미만
+        5: 하락 (support_1 미만, 또는 support_2 이하)
+        """
         buy_target = watcher.get('buy_target_price', 0)
         support_1 = watcher.get('support_1_price', 0)
         support_2 = watcher.get('support_2_price', 0)
         resistance_1 = watcher.get('resistance_1_price', 0)
         resistance_2 = watcher.get('resistance_2_price', 0)
 
-        # 상태 판정
-        if watcher['status'] == 'waiting_buy':
-            if buy_target > 0 and current_price < buy_target:
-                new_status = '매수타점 도달'
-        elif watcher['status'] == 'waiting_sell':
+        if resistance_2 > 0 and current_price >= resistance_2:
+            return 1
+        if resistance_1 > 0 and current_price >= resistance_1:
+            return 1 if resistance_2 == 0 else 2
+        if buy_target > 0 and current_price >= buy_target:
+            return 3
+        if support_1 > 0 and current_price >= support_1:
+            return 4
+        if support_2 > 0 and current_price <= support_2:
+            return 5
+        if support_1 > 0 and current_price < support_1:
+            return 5
+        return 3  # 레벨 미설정 시 기본 횡보
+
+    async def _update_monitoring_status(self, code: str, watcher: dict, current_price: float):
+        """구역 기반 모니터링 상태 업데이트"""
+        buy_target = watcher.get('buy_target_price', 0)
+        support_1 = watcher.get('support_1_price', 0)
+        support_2 = watcher.get('support_2_price', 0)
+        resistance_1 = watcher.get('resistance_1_price', 0)
+        resistance_2 = watcher.get('resistance_2_price', 0)
+
+        new_zone = self._calc_zone(watcher, current_price)
+
+        # 구역 레이블
+        zone_labels = {
+            1: '1구역 🚀 급등',
+            2: '2구역 💰 1차저항 돌파',
+            3: '3구역 ⏳ 횡보/눌림 대기',
+            4: '4구역 ⚠️ 1차지지 이탈',
+            5: '5구역 📉 하락',
+        }
+        new_status = zone_labels.get(new_zone, '')
+
+        # 매수 전 상태 보완
+        if watcher.get('status') == 'waiting_buy' and new_zone == 3:
+            if buy_target > 0 and current_price <= buy_target:
+                new_status = '3구역 🎯 매수타점 도달'
+
+        # 구역 업데이트 (메모리)
+        zone_changed = False
+        if self.mode2_mgr:
+            zone_changed = self.mode2_mgr.update_zone(code, new_zone)
+            self.mode2_mgr.update_monitoring_status(code, new_status)
+
+        # 1구역/5구역 진입 → 모니터링 중지 섹션 자동 이동
+        if zone_changed and new_zone in (1, 5) and self.mode2_mgr:
+            stopped_section = self.mode2_mgr.get_or_create_stopped_section()
+            self.mode2_mgr.move_watcher_to_section(code, stopped_section)
+            self.mode2_mgr.update_watcher(code, {'active': False})
+            logger.info(f"Mode2 | {code} | {new_zone}구역 진입 → 모니터링 중지 섹션 이동")
+
+        # 텔레그램 알림: waiting_sell 상태의 중요 구역 변경만
+        if zone_changed and watcher.get('status') == 'waiting_sell':
+            notify_only = watcher.get('notify_only', False)
+            mode_icon = "🔔" if notify_only else "🤖"
+            mode_text = "[감시중]" if notify_only else "[자동매매]"
             bought_price = watcher.get('bought_price', 0)
-            if bought_price > 0:
-                # 저항선 돌파 체크 (위에서 아래로)
-                if resistance_2 > 0 and current_price >= resistance_2:
-                    new_status = '2차저항 통과 (익절 구간)'
-                elif resistance_1 > 0 and current_price >= resistance_1:
-                    new_status = '1차저항 통과 (익절 구간)'
-                # 지지선 이탈 체크
-                elif support_2 > 0 and current_price <= support_2:
-                    new_status = '2차지지 이탈 (손절 구간)'
-                elif support_1 > 0 and current_price <= support_1:
-                    new_status = '1차지지 이탈 (손절 구간)'
-                else:
-                    # 정상 범위
-                    if support_1 > 0 and resistance_1 > 0:
-                        new_status = f'정상 범위 ({support_1:,}~{resistance_1:,})'
+            profit_pct = ((current_price - bought_price) / bought_price * 100) if bought_price > 0 else 0
 
-        # 상태 변경 시 업데이트 및 알림
-        if old_status != new_status and new_status:
-            if self.mode2_mgr:
-                self.mode2_mgr.update_monitoring_status(code, new_status)
-
-            # 중요 상태 변경 시 텔레그램 알림
-            if new_status in ['매수타점 도달', '2차지지 이탈 (손절 구간)', '1차지지 이탈 (손절 구간)',
-                              '2차저항 통과 (익절 구간)', '1차저항 통과 (익절 구간)']:
-
-                # 감시중 vs 자동매매 모드 구분
-                notify_only = watcher.get('notify_only', False)
-                mode_icon = "🔔" if notify_only else "🤖"
-                mode_text = "[감시중]" if notify_only else "[자동매매]"
-
-                # 상태별 이모지
-                status_emoji = "🎯"
-                if "익절" in new_status:
-                    status_emoji = "💰"
-                elif "손절" in new_status:
-                    status_emoji = "⚠️"
-                elif "매수타점" in new_status:
-                    status_emoji = "🎯"
-
-                # 추가 정보
-                extra_info = ""
-                if watcher['status'] == 'waiting_buy':
-                    target = watcher.get('buy_target_price', 0)
-                    diff_pct = ((current_price - target) / target * 100) if target > 0 else 0
-                    extra_info = f"\n매수타점: {target:,}원 ({diff_pct:+.1f}%)"
-                elif watcher['status'] == 'waiting_sell':
-                    bought_price = watcher.get('bought_price', 0)
-                    if bought_price > 0:
-                        profit_pct = ((current_price - bought_price) / bought_price * 100)
-                        extra_info = f"\n매수가: {bought_price:,}원\n수익률: {profit_pct:+.1f}%"
-
-                await self.send_notification(
-                    f"{status_emoji} {mode_icon} Mode2 {mode_text} 상태 변경\n"
-                    f"\n"
-                    f"종목: {watcher.get('name', code)} ({code})\n"
-                    f"현재가: {current_price:,}원{extra_info}\n"
-                    f"\n"
-                    f"상태: {new_status}\n"
-                    f"{'━' * 25}\n"
-                    f"{'알림만 발송됩니다' if notify_only else '조건 만족 시 자동 주문 실행'}"
-                )
+            zone_emoji = {1: '🚀', 2: '💰', 3: '⏳', 4: '⚠️', 5: '📉'}
+            await self.send_notification(
+                f"{zone_emoji.get(new_zone, '📊')} {mode_icon} Mode2 {mode_text} 구역 변경\n"
+                f"\n"
+                f"종목: {watcher.get('name', code)} ({code})\n"
+                f"현재가: {current_price:,}원\n"
+                f"수익률: {profit_pct:+.1f}%\n"
+                f"\n"
+                f"구역: {new_status}\n"
+                f"{'━' * 25}\n"
+                f"{'알림만 발송됩니다' if notify_only else '조건 만족 시 자동 주문 실행'}"
+            )
