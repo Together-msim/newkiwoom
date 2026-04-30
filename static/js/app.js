@@ -5324,7 +5324,7 @@ let _watchlistData = [];
 
 // ─── 시황체크 진입점 ───────────────────────────────────────
 async function loadSiwhang() {
-    await Promise.all([loadWatchlist_siwhang(), loadHotstockParsed(), loadSiwhangResults(), loadNewsFilter()]);
+    await Promise.all([loadWatchlist_siwhang(), loadHotstockParsed(), loadSiwhangResults(), loadNewsFilter(), loadListeningStatus()]);
 }
 
 // ─── 관심종목 관리 ─────────────────────────────────────────
@@ -5705,6 +5705,41 @@ async function deleteSelectedMessages(tableKey) {
             else if (tableKey === 'hotstockFiltered') await _loadHotstockFiltered(qs);
         } else { showToast(r.error || '삭제 실패', 'error'); }
     } catch (e) { showToast('요청 실패', 'error'); }
+}
+
+async function loadListeningStatus() {
+    try {
+        const r = await (await fetch('/api/listening/status', { credentials: 'same-origin' })).json();
+        updateListeningBtn(r.paused);
+    } catch (e) {
+        const btn = document.getElementById('listeningToggleBtn');
+        if (btn) btn.textContent = '🔊 리스닝 상태';
+    }
+}
+
+function updateListeningBtn(paused) {
+    const btn = document.getElementById('listeningToggleBtn');
+    if (!btn) return;
+    if (paused) {
+        btn.textContent = '🔴 Stop-Listening 중 (클릭 시 재개)';
+        btn.className = 'btn btn-danger';
+    } else {
+        btn.textContent = '🔊 Stop-Listening';
+        btn.className = 'btn btn-secondary';
+    }
+}
+
+async function toggleListening() {
+    try {
+        const statusR = await (await fetch('/api/listening/status', { credentials: 'same-origin' })).json();
+        const isPaused = statusR.paused;
+        const endpoint = isPaused ? '/api/listening/resume' : '/api/listening/pause';
+        const r = await (await fetch(endpoint, { method: 'POST', credentials: 'same-origin' })).json();
+        if (r.success) {
+            updateListeningBtn(r.paused);
+            showToast(r.paused ? '🔇 신규 뉴스 수신 정지됨' : '🔊 뉴스 수신 재개됨', r.paused ? 'error' : 'success');
+        }
+    } catch (e) { showToast('상태 변경 실패', 'error'); }
 }
 
 async function cleanupOldMessages(sourceType) {

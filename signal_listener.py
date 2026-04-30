@@ -121,6 +121,13 @@ telegram_bot = Bot(token=BOT_TOKEN)
 _reload_thread = None
 _reload_thread_stop_event = threading.Event()
 
+# ─── 리스닝 일시정지 제어 ─────────────────────────────────────
+# web_app이 .data/listening_paused 파일을 생성/삭제해서 제어
+LISTENING_PAUSED_FLAG = ROOT_DIR / ".data" / "listening_paused"
+
+def is_listening_paused() -> bool:
+    return LISTENING_PAUSED_FLAG.exists()
+
 # ─── 테마 파싱 ────────────────────────────────────────────────
 # 급등주 메시지 포맷: ✅ 테마 : 테마A , 테마B\n✅ ...
 _HOTSTOCK_THEME_PATTERN = re.compile(
@@ -190,6 +197,10 @@ async def send_notification(text: str, source_chat_id: int, dest_chat_id: int):
 
 @pyrogram_client.on_message()
 async def handle_message(client, message):
+    # 리스닝 일시정지 중이면 아카이빙/전달 모두 스킵
+    if is_listening_paused():
+        return
+
     news_keyword_filter.reload_if_changed()
     hotstock_keyword_filter.reload_if_changed()
 

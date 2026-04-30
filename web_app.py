@@ -4,6 +4,7 @@ Mode2 전략 관리 웹 인터페이스
 """
 import os
 import logging
+from pathlib import Path
 from flask import Flask, render_template, jsonify, request
 from flask_cors import CORS
 from flask_httpauth import HTTPBasicAuth
@@ -2053,6 +2054,33 @@ def delete_messages():
     except Exception as e:
         logger.error(f"delete_messages 실패: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+_LISTENING_PAUSED_FLAG = Path(".data/listening_paused")
+
+@app.route('/api/listening/status', methods=['GET'])
+@auth.login_required
+def get_listening_status():
+    """리스닝 일시정지 상태 조회"""
+    return jsonify({"paused": _LISTENING_PAUSED_FLAG.exists()})
+
+@app.route('/api/listening/pause', methods=['POST'])
+@auth.login_required
+def pause_listening():
+    """신규 메시지 수신 일시정지"""
+    _LISTENING_PAUSED_FLAG.parent.mkdir(exist_ok=True)
+    _LISTENING_PAUSED_FLAG.touch()
+    logger.info("🔇 리스닝 일시정지 ON")
+    return jsonify({"success": True, "paused": True})
+
+@app.route('/api/listening/resume', methods=['POST'])
+@auth.login_required
+def resume_listening():
+    """신규 메시지 수신 재개"""
+    if _LISTENING_PAUSED_FLAG.exists():
+        _LISTENING_PAUSED_FLAG.unlink()
+    logger.info("🔊 리스닝 재개")
+    return jsonify({"success": True, "paused": False})
 
 
 @app.route('/api/messages/cleanup', methods=['POST'])
