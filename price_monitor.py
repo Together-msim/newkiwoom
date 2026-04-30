@@ -732,7 +732,7 @@ class PriceMonitor:
         watchers = self.mode2_mgr.get_all_watchers(active_only=True)
         paused_names = []
         for w in watchers:
-            if w.get('status') == 'waiting_buy' and not w.get('notify_only', True):
+            if not w.get('notify_only', True):
                 code = w['code']
                 self.mode2_mgr.update_watcher(code, {
                     'notify_only': True,
