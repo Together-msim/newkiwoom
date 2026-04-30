@@ -176,9 +176,11 @@ Mode1/Mode2: waiting_buy → waiting_sell → auto_sold | manual_sold
 
 ### Watcher Data Files
 - `.data/mode1_watchers.json` — Mode1 감시종목
-- `.data/mode2_watchers.json` — Mode2 감시종목
+- `.data/mode2_watchers.json` — Mode2 감시종목 (구조: `{sections:[...], watchers:{code: {...}}}`)
 - `.data/news.db` — 뉴스/급등주 SQLite DB (tables: messages, filtered_messages, themes, saved_news, siwhang_results)
-- `.data/keywords.json` — 키워드 필터 설정
+- `.data/news_keywords.json` — 뉴스 키워드 필터 (include/exclude 분리)
+- `.data/hotstock_keywords.json` — 급등주 키워드 필터 (include만)
+- `.data/keywords.json` — 구형 단일 키워드 파일 (하위호환용)
 - `.data/watchlist.json` — 수동 추가 관심종목 (`[{"code":"005930","name":"삼성전자"}]`)
 
 ## Environment Variables
@@ -244,7 +246,6 @@ scp -i /Users/msim/Downloads/ssh-key-2026-04-26.key \
 2. **계좌 polling** — 보유종목 주기 조회, 수동매도 자동 감지
 
 3. **시황체크 고도화** (선택)
-   - 뉴스 / 급등주 키워드 세트 분리 독립 관리
    - 1일 자동 삭제 (매일 자정)
 
 ## Known Issues & Lessons
@@ -298,3 +299,20 @@ curl -u "..." "https://www.nomaddoklip.xyz/api/..."
 - `/siwhang` 스킬: `last_run.txt` 기준 증분 → Oracle fetch → AI 분석 → Oracle POST 저장 → 텔레그램
 - `[SS]` 종목은 watchlist_match 있는 것만 분석 (토큰 절약)
 - 분석 결과는 `siwhang_results` 테이블 + 웹UI `#siwhang` 섹션에서 확인
+
+### 키워드 관리 (뉴스/급등주 분리)
+- 뉴스(`news`)와 급등주(`hotstock`) 키워드 파일 완전 분리
+- 급등주: `[SS⬆️]`(상한가) / `[VI]`(VI발동) 는 키워드 필터 없이 무조건 표시, `[SS]`만 키워드 필터 적용
+- API: `/api/keywords/include` POST/DELETE, `/api/keywords/exclude` POST/DELETE — body에 `{"keyword": "...", "type": "news"|"hotstock"}`
+- `/api/keywords/cleanup` POST `{"source_type": "news"|"hot_stock"}` — 오늘 이전 메시지 삭제
+
+### Mode2 Demark 자동계산
+- 일봉 차트 로드 시(`loadWatcherChart`, `handleMode2Lookup`) 전일 OHLC → 디마크 자동계산 → `resistance_1_price`/`support_1_price` 자동 채움
+- 디마크 공식: close<open → x=high+2*low+close; close>open → x=2*high+low+close; else → x=high+low+2*close; targetHigh=x/2-low, targetLow=x/2-high
+- 디마크 섹션의 "1차 저항/지지 적용" 버튼으로 수동 재계산도 가능
+
+### 모바일 UI
+- 하단 고정 탭바 (≤768px): Mode2, 시황체크, 감시리스트, Mode1, 시그널, 매매일지, Test
+- 기본 시작 페이지: Mode2
+- 가로모드 감지: `(max-height: 500px) and (orientation: landscape)`
+- 시황체크 테이블: 카드별 개별 검색 입력 (`data-search` 속성 pre-compute)
