@@ -413,17 +413,22 @@ function renderMode2SectionList(sections, allWatchers) {
     const ZONE_SORT = {3: 0, 4: 1, 5: 2, 1: 3, 2: 4, 0: 5};
     Object.keys(watchersBySection).forEach(sectionId => {
         watchersBySection[sectionId].sort((a, b) => {
-            // 1순위: 구역 (3→4→5→1→2)
+            // 1순위: auto_paused (최상단)
+            const pausedA = a.auto_paused ? 0 : 1;
+            const pausedB = b.auto_paused ? 0 : 1;
+            if (pausedA !== pausedB) return pausedA - pausedB;
+
+            // 2순위: 구역 (3→4→5→1→2)
             const za = ZONE_SORT[a.zone || 0] ?? 5;
             const zb = ZONE_SORT[b.zone || 0] ?? 5;
             if (za !== zb) return za - zb;
 
-            // 2순위: notify_only (false가 우선)
+            // 3순위: notify_only (false가 우선)
             const notifyA = a.notify_only ? 1 : 0;
             const notifyB = b.notify_only ? 1 : 0;
             if (notifyA !== notifyB) return notifyA - notifyB;
 
-            // 3순위: display_order
+            // 4순위: display_order
             return (a.display_order || 9999) - (b.display_order || 9999);
         });
     });
@@ -499,10 +504,11 @@ function renderMode2SectionWatchers(sectionId, watchers) {
 
 function renderMode2WatcherRow(w, idx) {
     const notifyOnly = w.notify_only || false;
+    const autoPaused = w.auto_paused || false;
     const editMode = false; // 초기값
 
     return `
-        <div class="mode2-watcher-row" data-code="${w.code}" data-section="${w.section}" data-edit-mode="false"
+        <div class="mode2-watcher-row ${autoPaused ? 'auto-paused' : ''}" data-code="${w.code}" data-section="${w.section}" data-edit-mode="false"
              draggable="true" ondragstart="handleWatcherDragStart(event)" ondragend="handleWatcherDragEnd(event)"
              ondragover="handleWatcherDragOver(event)" ondrop="handleWatcherDrop(event)">
             <div class="watcher-cell">
@@ -511,7 +517,7 @@ function renderMode2WatcherRow(w, idx) {
             <div class="watcher-drag-handle" style="cursor: move;">☰</div>
             <div class="watcher-cell">${w.record_id || '-'}</div>
             <div class="watcher-cell"><strong>${w.code}</strong></div>
-            <div class="watcher-cell" onclick="showNoteModal('${w.name || '-'}', '${w.code}', '${(w.note || '').replace(/'/g, "\\'")}' )" style="cursor: pointer; color: #228be6; font-weight: 600;">${w.name || '-'}</div>
+            <div class="watcher-cell" onclick="showNoteModal('${w.name || '-'}', '${w.code}', '${(w.note || '').replace(/'/g, "\\'")}' )" style="cursor: pointer; color: #228be6; font-weight: 600;">${autoPaused ? '⚠️ ' : ''}${w.name || '-'}</div>
             <div class="watcher-cell editable" data-field="buy_target_price" ondblclick="enableCellEdit(this, '${w.code}')">${formatNumber(w.buy_target_price)}</div>
             <div class="watcher-cell editable" data-field="budget" ondblclick="enableCellEdit(this, '${w.code}')">${(w.budget / 10000).toFixed(0)}만</div>
             <div class="watcher-cell">${w.quantity}주</div>
@@ -1792,11 +1798,15 @@ async function toggleMode2NotifyOnly(code, notifyOnly) {
             }
         }
 
+        // 자동매매 전환 시 auto_paused 플래그도 함께 초기화
+        const updatePayload = { notify_only: notifyOnly };
+        if (!notifyOnly) updatePayload.auto_paused = false;
+
         const updateResponse = await fetch(`/api/mode2/watchers/${code}`, {
             credentials: 'same-origin',
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ notify_only: notifyOnly })
+            body: JSON.stringify(updatePayload)
         });
 
         const updateResult = await updateResponse.json();
@@ -1805,9 +1815,9 @@ async function toggleMode2NotifyOnly(code, notifyOnly) {
             const mode = notifyOnly ? '알림 전용' : '자동매매';
             showToast(`✓ ${mode} 모드로 변경됨`, 'success');
             loadMode2List();
-            loadWatchlist(); // 감시리스트도 업데이트
+            loadWatchlist();
         } else {
-            showToast('모드 변경 실패', 'error');
+            showToast(`⚠️ ${updateResult.error || '모드 변경 실패'}`, 'error');
         }
     } catch (error) {
         console.error('모드 변경 실패:', error);

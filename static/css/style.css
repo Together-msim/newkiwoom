@@ -971,6 +971,21 @@ tbody tr.inactive {
     background: #fff3bf;
 }
 
+.mode2-watcher-row.auto-paused {
+    background: #fff5f5;
+    border-left: 4px solid #fa5252;
+    animation: auto-paused-pulse 2s ease-in-out infinite;
+}
+
+.mode2-watcher-row.auto-paused:hover {
+    background: #ffe3e3;
+}
+
+@keyframes auto-paused-pulse {
+    0%, 100% { border-left-color: #fa5252; }
+    50% { border-left-color: #ff8787; }
+}
+
 .watcher-drag-handle {
     cursor: move;
     color: #adb5bd;

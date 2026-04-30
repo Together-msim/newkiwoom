@@ -1104,6 +1104,22 @@ def update_mode2_watcher(code):
         code = normalize_stock_code(code)
         data = request.json
 
+        # 자동매매 전환 시 매수타점 > 현재가 validation
+        if data.get('notify_only') is False:
+            existing = mode2_mgr.get_watcher(code)
+            if existing and existing.get('status') == 'waiting_buy':
+                buy_target = data.get('buy_target_price', existing.get('buy_target_price', 0))
+                if buy_target > 0 and kiwoom_client:
+                    try:
+                        current_price = kiwoom_client.get_last_price(code)
+                        if current_price > buy_target:
+                            return jsonify({
+                                "success": False,
+                                "error": f"자동매매 전환 불가: 현재가({current_price:,}원)가 매수타점({buy_target:,}원)보다 높습니다. 눌림매매 원칙상 현재가가 매수타점 이하일 때만 자동매매 모드로 전환할 수 있습니다."
+                            }), 400
+                    except Exception as e:
+                        logger.warning(f"자동매매 전환 validation 중 현재가 조회 실패 ({code}): {e}")
+
         watcher = mode2_mgr.update_watcher(code, data)
 
         if not watcher:

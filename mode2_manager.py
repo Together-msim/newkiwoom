@@ -224,7 +224,7 @@ class Mode2Manager:
             'buy_target_price', 'budget', 'resistance_1_price', 'resistance_1_profit_pct',
             'resistance_2_price', 'resistance_2_profit_pct', 'support_1_price', 'support_1_mode',
             'support_1_loss_pct', 'support_1_add_budget', 'support_2_price', 'support_2_loss_pct',
-            'polling_interval', 'notify_only', 'note'
+            'polling_interval', 'notify_only', 'note', 'auto_paused'
         ]
 
         has_changes = False

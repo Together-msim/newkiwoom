@@ -36,6 +36,8 @@ class PriceMonitor:
         self.chat_id = os.getenv("TELEGRAM_CHAT_ID")
         # Mode2 종목별 마지막 체크 시간 기록 (polling 최적화)
         self.mode2_last_check = {}
+        # support_1 이탈 후 하락 감시: {code: {'price': float, 'alerted': bool}}
+        self.support1_breach_watch = {}
 
         # 비동기 클라이언트 초기화
         self.kiwoom_async = None
@@ -342,6 +344,42 @@ class PriceMonitor:
                                 f"{'📱 알림만 발송 (수동 매도 필요)' if notify_only else '🤖 자동 손절 매도 주문 실행 예정'}"
                             )
                             return {'action': 'sell', 'price': current_price, 'quantity': sell_qty, 'reason': 'support_1', 'ratio': support_1_pct}
+
+                # support_1 이미 이탈 + sold_history에 없음 = 손절 미실행 상태에서 계속 하락 중
+                # → Critical 알림 (매 조회마다 하락 확인 시)
+                if support_1 > 0 and current_price < support_1 and 'support_1' not in sold_history:
+                    watch = self.support1_breach_watch.get(code)
+                    loss_pct = ((current_price - bought_price) / bought_price) * 100
+                    kst_now = datetime.now(KST).strftime('%Y-%m-%d %H:%M KST')
+
+                    if watch is None:
+                        # 첫 감지 — 가격 기록, 알림 미발송
+                        self.support1_breach_watch[code] = {'price': current_price, 'alerted': False}
+                    elif not watch['alerted'] and current_price < watch['price']:
+                        # 이전 조회보다 더 하락 중 → Critical 알림
+                        self.support1_breach_watch[code] = {'price': current_price, 'alerted': True}
+                        logger.warning(f"Mode2 | {code} | 손절 실패 + 계속 하락 중: {current_price:,}원 ({loss_pct:.1f}%)")
+                        await self.send_notification(
+                            f"🚨 CRITICAL 🚨 Mode2 손절 실패 — 대응 필요\n"
+                            f"\n"
+                            f"종목: {watcher.get('name', code)} ({code})\n"
+                            f"매수가: {bought_price:,}원\n"
+                            f"1차지지(손절라인): {support_1:,}원\n"
+                            f"현재가: {current_price:,}원\n"
+                            f"손실률: 🔻 {loss_pct:.1f}%\n"
+                            f"\n"
+                            f"━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                            f"⚠️ 손절 미체결 상태에서 계속 하락 중\n"
+                            f"즉각적인 수동 매도 대응이 필요합니다\n"
+                            f"[{kst_now}]"
+                        )
+                    elif watch['alerted'] and current_price < watch['price']:
+                        # 알림 이후에도 계속 하락 — 가격만 업데이트 (중복 알림 방지)
+                        self.support1_breach_watch[code]['price'] = current_price
+                else:
+                    # support_1 위로 회복하거나 손절 완료 시 감시 초기화
+                    if code in self.support1_breach_watch:
+                        del self.support1_breach_watch[code]
 
             return None
 
@@ -687,9 +725,38 @@ class PriceMonitor:
 
         return next_open
 
+    async def _auto_pause_at_market_close(self):
+        """장 마감 시 자동매매 중인 waiting_buy 종목을 감시중으로 전환"""
+        if not self.mode2_mgr:
+            return
+        watchers = self.mode2_mgr.get_all_watchers(active_only=True)
+        paused_names = []
+        for w in watchers:
+            if w.get('status') == 'waiting_buy' and not w.get('notify_only', True):
+                code = w['code']
+                self.mode2_mgr.update_watcher(code, {
+                    'notify_only': True,
+                    'auto_paused': True,
+                })
+                paused_names.append(f"{w.get('name', code)}({code})")
+                logger.info(f"Mode2 | {code} | 장 마감 자동 감시중 전환 (auto_paused)")
+
+        if paused_names:
+            kst_now = datetime.now(KST).strftime('%Y-%m-%d %H:%M KST')
+            await self.send_notification(
+                f"🔒 Mode2 장 마감 자동 감시중 전환 [{kst_now}]\n"
+                f"\n"
+                f"아래 종목은 내일 수동으로 자동매매 재활성화 필요:\n"
+                + "\n".join(f"• {n}" for n in paused_names) +
+                f"\n\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"⚠️ 갭하락 시 고가 자동매수 방지를 위해 전환됨"
+            )
+
     async def monitor_loop(self):
         """모니터링 루프"""
         logger.info("모니터링 루프 시작")
+        market_close_paused_today = None  # 당일 장 마감 자동전환 실행 여부 (날짜 기록)
 
         while True:
             try:
@@ -697,15 +764,24 @@ class PriceMonitor:
                     await asyncio.sleep(1)
                     continue
 
+                now = datetime.now(KST)
+
+                # 장 마감 직후 (15:30~15:35) 자동 감시중 전환 — 하루 1회
+                market_close = now.replace(hour=15, minute=30, second=0, microsecond=0)
+                market_close_end = now.replace(hour=15, minute=35, second=0, microsecond=0)
+                today_str = now.strftime('%Y-%m-%d')
+                if market_close <= now <= market_close_end and market_close_paused_today != today_str:
+                    market_close_paused_today = today_str
+                    await self._auto_pause_at_market_close()
+
                 # 장 시간 체크
                 if not self._is_market_open():
-                    now = datetime.now(KST)
                     next_open = self._get_next_market_open()
                     sleep_seconds = (next_open - now).total_seconds()
 
                     logger.info(f"장 시간 외 - 다음 장 시작까지 대기")
-                    logger.info(f"  현재: {now.strftime('%Y-%m-%d %H:%M:%S')}")
-                    logger.info(f"  다음 장: {next_open.strftime('%Y-%m-%d %H:%M:%S')}")
+                    logger.info(f"  현재: {now.strftime('%Y-%m-%d %H:%M:%S KST')}")
+                    logger.info(f"  다음 장: {next_open.strftime('%Y-%m-%d %H:%M:%S KST')}")
                     logger.info(f"  대기 시간: {sleep_seconds/3600:.1f}시간")
 
                     await asyncio.sleep(sleep_seconds)
@@ -1100,8 +1176,8 @@ class PriceMonitor:
             1: '1구역 🚀 급등',
             2: '2구역 💰 1차저항 돌파',
             3: '3구역 ⏳ 횡보/눌림 대기',
-            4: '4구역 ⚠️ 1차지지 이탈',
-            5: '5구역 📉 하락',
+            4: '4구역 ⚠️ 매수가 이탈',
+            5: '5구역 📉 1차지지 이탈',
         }
         new_status = zone_labels.get(new_zone, '')
 
