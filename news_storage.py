@@ -98,6 +98,44 @@ class NewsStorage:
                 CREATE INDEX IF NOT EXISTS idx_saved_news_source_type ON saved_news(source_type);
                 CREATE INDEX IF NOT EXISTS idx_saved_news_saved_at ON saved_news(saved_at);
                 CREATE INDEX IF NOT EXISTS idx_siwhang_results_date ON siwhang_results(date);
+
+                CREATE TABLE IF NOT EXISTS backtest_sessions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_date TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    notes TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS backtest_picks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id INTEGER REFERENCES backtest_sessions(id),
+                    slot_time TEXT NOT NULL,
+                    stock_code TEXT,
+                    stock_name TEXT NOT NULL,
+                    tag_type TEXT,
+                    theme TEXT,
+                    price_at_slot REAL,
+                    analysis_text TEXT,
+                    confidence TEXT,
+                    source_message_id INTEGER,
+                    note_source TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS backtest_pnl (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    pick_id INTEGER UNIQUE REFERENCES backtest_picks(id),
+                    buy_price REAL,
+                    exit_price REAL,
+                    stoploss_price REAL,
+                    result TEXT,
+                    profit_pct REAL,
+                    notes TEXT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_backtest_picks_session ON backtest_picks(session_id);
+                CREATE INDEX IF NOT EXISTS idx_backtest_sessions_date ON backtest_sessions(run_date);
             """)
         logger.info(f"NewsStorage 초기화 완료: {self.db_path}")
 
@@ -141,8 +179,8 @@ class NewsStorage:
 
     # ─── 조회 ──────────────────────────────────────────────────
 
-    def get_messages(self, target_date: Optional[str] = None, source_type: Optional[str] = None) -> List[Dict]:
-        """메시지 조회. target_date 없으면 오늘."""
+    def get_messages(self, target_date: Optional[str] = None, source_type: Optional[str] = None, until_utc: Optional[str] = None) -> List[Dict]:
+        """메시지 조회. target_date 없으면 오늘. until_utc: received_at <= until_utc 필터 (ISO UTC)."""
         if target_date is None:
             target_date = date.today().isoformat()
         query = "SELECT * FROM messages WHERE date=?"
@@ -150,6 +188,9 @@ class NewsStorage:
         if source_type:
             query += " AND source_type=?"
             params.append(source_type)
+        if until_utc:
+            query += " AND received_at <= ?"
+            params.append(until_utc)
         query += " ORDER BY received_at ASC"
         with self._conn() as conn:
             rows = conn.execute(query, params).fetchall()
@@ -420,3 +461,82 @@ class NewsStorage:
                     d[field] = []
             results.append(d)
         return results
+
+    # ─── 백테스트 ─────────────────────────────────────────────
+
+    def create_backtest_session(self, run_date: str, notes: str = '') -> Optional[int]:
+        try:
+            with self._conn() as conn:
+                cur = conn.execute(
+                    "INSERT INTO backtest_sessions (run_date, notes) VALUES (?, ?)",
+                    (run_date, notes),
+                )
+                return cur.lastrowid
+        except Exception as e:
+            logger.error(f"create_backtest_session 실패: {e}")
+            return None
+
+    def get_backtest_sessions(self) -> List[Dict]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM backtest_sessions ORDER BY created_at DESC"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def save_backtest_pick(self, session_id: int, slot_time: str, stock_name: str,
+                           stock_code: Optional[str] = None, tag_type: Optional[str] = None,
+                           theme: Optional[str] = None, price_at_slot: Optional[float] = None,
+                           analysis_text: Optional[str] = None, confidence: Optional[str] = None,
+                           source_message_id: Optional[int] = None,
+                           note_source: Optional[str] = None) -> Optional[int]:
+        try:
+            with self._conn() as conn:
+                cur = conn.execute(
+                    """INSERT INTO backtest_picks
+                       (session_id, slot_time, stock_code, stock_name, tag_type, theme,
+                        price_at_slot, analysis_text, confidence, source_message_id, note_source)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (session_id, slot_time, stock_code, stock_name, tag_type, theme,
+                     price_at_slot, analysis_text, confidence, source_message_id, note_source),
+                )
+                return cur.lastrowid
+        except Exception as e:
+            logger.error(f"save_backtest_pick 실패: {e}")
+            return None
+
+    def get_backtest_picks(self, session_id: int) -> List[Dict]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """SELECT p.*, n.buy_price, n.exit_price, n.stoploss_price,
+                          n.result, n.profit_pct, n.notes as pnl_notes
+                   FROM backtest_picks p
+                   LEFT JOIN backtest_pnl n ON n.pick_id = p.id
+                   WHERE p.session_id=?
+                   ORDER BY p.slot_time ASC, p.id ASC""",
+                (session_id,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def upsert_backtest_pnl(self, pick_id: int, buy_price: Optional[float],
+                             exit_price: Optional[float], stoploss_price: Optional[float],
+                             result: Optional[str], profit_pct: Optional[float],
+                             notes: str = '') -> bool:
+        try:
+            with self._conn() as conn:
+                conn.execute(
+                    """INSERT INTO backtest_pnl (pick_id, buy_price, exit_price, stoploss_price, result, profit_pct, notes)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)
+                       ON CONFLICT(pick_id) DO UPDATE SET
+                           buy_price=excluded.buy_price,
+                           exit_price=excluded.exit_price,
+                           stoploss_price=excluded.stoploss_price,
+                           result=excluded.result,
+                           profit_pct=excluded.profit_pct,
+                           notes=excluded.notes,
+                           updated_at=CURRENT_TIMESTAMP""",
+                    (pick_id, buy_price, exit_price, stoploss_price, result, profit_pct, notes),
+                )
+            return True
+        except Exception as e:
+            logger.error(f"upsert_backtest_pnl 실패: {e}")
+            return False

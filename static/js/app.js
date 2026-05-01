@@ -42,6 +42,7 @@ function switchPage(pageName) {
     else if (pageName === 'mode2') loadMode2List();
     else if (pageName === 'tradelog') loadTradelog();
     else if (pageName === 'siwhang') loadSiwhang();
+    else if (pageName === 'backtest') loadBacktestSessions();
     else if (pageName === 'test') loadMode2PickList();
 }
 
@@ -6152,4 +6153,172 @@ async function deleteTheme(id) {
         if (r.success) { showToast('✓ 삭제', 'success'); await loadThemes(); }
         else showToast(r.error, 'error');
     } catch (e) { showToast('요청 실패', 'error'); }
+}
+
+// ─── 백테스트 ─────────────────────────────────────────────
+
+let _btAllPicks = [];
+let _btActiveSlot = 'all';
+
+async function loadBacktestSessions() {
+    try {
+        const res = await fetch('/api/backtest/sessions', { credentials: 'same-origin' });
+        const r = await res.json();
+        if (!r.success) { showToast(r.error || '세션 로드 실패', 'error'); return; }
+        const sel = document.getElementById('backtestSessionSelect');
+        const prev = sel.value;
+        sel.innerHTML = '<option value="">-- 세션 선택 --</option>';
+        (r.data || []).forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = s.id;
+            opt.textContent = `${s.run_date} ${s.notes ? '— ' + s.notes : ''}`.trim();
+            sel.appendChild(opt);
+        });
+        if (prev) sel.value = prev;
+        if (sel.value) loadBacktestSession();
+    } catch (e) { showToast('세션 로드 실패', 'error'); }
+}
+
+async function loadBacktestSession() {
+    const sel = document.getElementById('backtestSessionSelect');
+    const sessionId = sel.value;
+    const slotBar = document.getElementById('backtestSlotBar');
+    const summary = document.getElementById('backtestSummary');
+    const list = document.getElementById('backtestPicksList');
+
+    if (!sessionId) {
+        slotBar.style.display = 'none';
+        summary.style.display = 'none';
+        list.innerHTML = '<p class="empty-state">세션을 선택하면 추천 종목이 표시됩니다.</p>';
+        return;
+    }
+    try {
+        const res = await fetch(`/api/backtest/sessions/${sessionId}`, { credentials: 'same-origin' });
+        const r = await res.json();
+        if (!r.success) { showToast(r.error || '로드 실패', 'error'); return; }
+        _btAllPicks = r.data || [];
+        _btActiveSlot = 'all';
+        slotBar.style.display = '';
+        summary.style.display = '';
+        document.querySelectorAll('.slot-btn').forEach(b => b.classList.toggle('active', b.dataset.slot === 'all'));
+        renderBacktestPicks();
+    } catch (e) { showToast('로드 실패', 'error'); }
+}
+
+function filterBacktestSlot(slot) {
+    _btActiveSlot = slot;
+    document.querySelectorAll('.slot-btn').forEach(b => b.classList.toggle('active', b.dataset.slot === slot));
+    renderBacktestPicks();
+}
+
+function renderBacktestPicks() {
+    const picks = _btActiveSlot === 'all'
+        ? _btAllPicks
+        : _btAllPicks.filter(p => p.slot_time === _btActiveSlot);
+
+    // 통계
+    const total = picks.length;
+    const withPnl = picks.filter(p => p.result);
+    const wins = withPnl.filter(p => p.result === 'win').length;
+    const losses = withPnl.filter(p => p.result === 'loss' || p.result === 'stoploss').length;
+    const avgPct = withPnl.length
+        ? (withPnl.reduce((s, p) => s + (p.profit_pct || 0), 0) / withPnl.length).toFixed(2)
+        : null;
+
+    document.getElementById('btSummaryTotal').textContent = `총 ${total}종목`;
+    document.getElementById('btSummaryWin').textContent = wins ? `▲ ${wins}승` : '';
+    document.getElementById('btSummaryLoss').textContent = losses ? `▼ ${losses}패` : '';
+    document.getElementById('btSummaryAvgPct').textContent = avgPct !== null ? `평균 ${avgPct}%` : '';
+
+    const list = document.getElementById('backtestPicksList');
+    if (!picks.length) {
+        list.innerHTML = '<p class="empty-state">해당 슬롯에 추천 종목이 없습니다.</p>';
+        return;
+    }
+
+    list.innerHTML = picks.map(p => renderBacktestPickCard(p)).join('');
+}
+
+function renderBacktestPickCard(p) {
+    const confClass = p.confidence ? `bt-confidence-${p.confidence}` : '';
+    const confLabel = p.confidence ? `[${p.confidence}]` : '';
+    const tagLabel = { ss_up: '🚀 상한가', vi: '⚡ VI', ss: '📈 급등', news: '📰 뉴스' }[p.tag_type] || (p.tag_type || '');
+    const priceStr = p.price_at_slot ? `추천가 ${Number(p.price_at_slot).toLocaleString()}원` : '';
+    const themeStr = p.theme ? `테마: ${p.theme}` : '';
+
+    const pnlResult = p.result
+        ? `<span class="bt-pnl-result ${p.result}">${p.result === 'win' ? '▲ 수익' : p.result === 'stoploss' ? '✂ 손절' : '▼ 손실'} ${p.profit_pct != null ? p.profit_pct + '%' : ''}</span>`
+        : '';
+
+    const noteSourceHtml = p.note_source
+        ? `<div class="bt-note-source">📝 ${p.note_source}</div>`
+        : '';
+
+    return `
+<div class="bt-pick-card" id="btCard_${p.id}">
+    <div class="bt-pick-header">
+        <span class="bt-pick-name">${p.stock_name}${p.stock_code ? ` (${p.stock_code})` : ''}</span>
+        <span class="bt-pick-slot">${p.slot_time}</span>
+        ${tagLabel ? `<span class="tag-badge">${tagLabel}</span>` : ''}
+        ${confLabel ? `<span class="${confClass}">${confLabel}</span>` : ''}
+        ${pnlResult}
+    </div>
+    <div class="bt-pick-meta">${[priceStr, themeStr].filter(Boolean).join(' · ')}</div>
+    ${p.analysis_text ? `<div class="bt-pick-analysis">${escapeHtml(p.analysis_text)}</div>` : ''}
+    ${noteSourceHtml}
+    <div class="bt-pnl-form">
+        <div class="bt-pnl-field">
+            <label>매수가</label>
+            <input type="number" id="btBuy_${p.id}" value="${p.buy_price || ''}" placeholder="0">
+        </div>
+        <div class="bt-pnl-field">
+            <label>익절가</label>
+            <input type="number" id="btExit_${p.id}" value="${p.exit_price || ''}" placeholder="0">
+        </div>
+        <div class="bt-pnl-field">
+            <label>손절가</label>
+            <input type="number" id="btStop_${p.id}" value="${p.stoploss_price || ''}" placeholder="0">
+        </div>
+        <div class="bt-pnl-field">
+            <label>메모</label>
+            <input type="text" id="btNote_${p.id}" value="${p.pnl_notes || ''}" placeholder="">
+        </div>
+        <button class="btn btn-sm btn-primary" onclick="saveBacktestPnl(${p.id})">저장</button>
+    </div>
+</div>`;
+}
+
+async function saveBacktestPnl(pickId) {
+    const buy = parseFloat(document.getElementById(`btBuy_${pickId}`).value) || null;
+    const exit = parseFloat(document.getElementById(`btExit_${pickId}`).value) || null;
+    const stop = parseFloat(document.getElementById(`btStop_${pickId}`).value) || null;
+    const notes = document.getElementById(`btNote_${pickId}`).value.trim();
+
+    try {
+        const res = await fetch(`/api/backtest/picks/${pickId}/pnl`, {
+            method: 'PUT',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ buy_price: buy, exit_price: exit, stoploss_price: stop, notes })
+        });
+        const r = await res.json();
+        if (r.success) {
+            showToast(`저장 완료 ${r.profit_pct != null ? r.profit_pct + '%' : ''}`, 'success');
+            // 로컬 데이터 업데이트 후 카드 재렌더
+            const pick = _btAllPicks.find(p => p.id === pickId);
+            if (pick) {
+                pick.buy_price = buy; pick.exit_price = exit; pick.stoploss_price = stop;
+                pick.result = r.result; pick.profit_pct = r.profit_pct; pick.pnl_notes = notes;
+            }
+            const card = document.getElementById(`btCard_${pickId}`);
+            if (card) card.outerHTML = renderBacktestPickCard(pick || { id: pickId });
+            renderBacktestPicks();
+        } else {
+            showToast(r.error || '저장 실패', 'error');
+        }
+    } catch (e) { showToast('저장 실패', 'error'); }
+}
+
+function escapeHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }

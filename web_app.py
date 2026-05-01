@@ -1739,12 +1739,13 @@ def _parse_hotstock_message(text: str) -> dict:
 def get_hotstock_parsed():
     target_date = request.args.get('date')
     since = request.args.get('since')
+    until = request.args.get('until')
     try:
         ns = _get_news_storage()
         if since:
             messages = ns.get_messages_since(since, source_type='hot_stock')
         else:
-            messages = ns.get_messages(target_date=target_date, source_type='hot_stock')
+            messages = ns.get_messages(target_date=target_date, source_type='hot_stock', until_utc=until)
 
         # 관심종목 목록
         manual = _load_manual_watchlist()
@@ -1839,9 +1840,10 @@ def _get_keyword_storage(kw_type: str = 'news'):
 @auth.login_required
 def get_news_today():
     target_date = request.args.get('date')
+    until = request.args.get('until')
     try:
         ns = _get_news_storage()
-        messages = ns.get_messages(target_date=target_date, source_type='news')
+        messages = ns.get_messages(target_date=target_date, source_type='news', until_utc=until)
         return jsonify({"success": True, "data": messages, "count": len(messages)})
     except Exception as e:
         logger.error(f"get_news_today 실패: {e}")
@@ -2218,6 +2220,117 @@ def reset_themes():
     except Exception as e:
         logger.error(f"reset_themes 실패: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ========== Backtest API ==========
+
+@app.route('/api/backtest/sessions', methods=['GET'])
+@auth.login_required
+def get_backtest_sessions():
+    try:
+        ns = _get_news_storage()
+        sessions = ns.get_backtest_sessions()
+        return jsonify({'success': True, 'data': sessions})
+    except Exception as e:
+        logger.error(f"get_backtest_sessions 실패: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/backtest/sessions', methods=['POST'])
+@auth.login_required
+def create_backtest_session():
+    data = request.json or {}
+    run_date = (data.get('run_date') or '').strip()
+    notes = (data.get('notes') or '').strip()
+    if not run_date:
+        return jsonify({'success': False, 'error': 'run_date 필드 필요'}), 400
+    try:
+        ns = _get_news_storage()
+        session_id = ns.create_backtest_session(run_date, notes)
+        return jsonify({'success': True, 'session_id': session_id}), 201
+    except Exception as e:
+        logger.error(f"create_backtest_session 실패: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/backtest/sessions/<int:session_id>', methods=['GET'])
+@auth.login_required
+def get_backtest_session(session_id):
+    try:
+        ns = _get_news_storage()
+        picks = ns.get_backtest_picks(session_id)
+        return jsonify({'success': True, 'data': picks})
+    except Exception as e:
+        logger.error(f"get_backtest_session 실패: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/backtest/picks', methods=['POST'])
+@auth.login_required
+def save_backtest_picks():
+    """백테스트 추천 종목 배치 저장. { session_id, picks: [...] }"""
+    data = request.json or {}
+    session_id = data.get('session_id')
+    picks = data.get('picks', [])
+    if not session_id or not isinstance(picks, list):
+        return jsonify({'success': False, 'error': 'session_id, picks 필드 필요'}), 400
+    try:
+        ns = _get_news_storage()
+        saved_ids = []
+        for p in picks:
+            pid = ns.save_backtest_pick(
+                session_id=session_id,
+                slot_time=p.get('slot_time', ''),
+                stock_name=p.get('stock_name', ''),
+                stock_code=p.get('stock_code'),
+                tag_type=p.get('tag_type'),
+                theme=p.get('theme'),
+                price_at_slot=p.get('price_at_slot'),
+                analysis_text=p.get('analysis_text'),
+                confidence=p.get('confidence'),
+                source_message_id=p.get('source_message_id'),
+                note_source=p.get('note_source'),
+            )
+            if pid:
+                saved_ids.append(pid)
+        return jsonify({'success': True, 'saved': len(saved_ids), 'ids': saved_ids}), 201
+    except Exception as e:
+        logger.error(f"save_backtest_picks 실패: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/backtest/picks/<int:pick_id>/pnl', methods=['PUT'])
+@auth.login_required
+def update_backtest_pnl(pick_id):
+    """P&L 입력/수정. { buy_price, exit_price, stoploss_price, notes }"""
+    data = request.json or {}
+    buy_price = data.get('buy_price')
+    exit_price = data.get('exit_price')
+    stoploss_price = data.get('stoploss_price')
+    notes = (data.get('notes') or '').strip()
+
+    # profit_pct 계산
+    profit_pct = None
+    result = None
+    if buy_price and buy_price > 0:
+        if exit_price is not None:
+            profit_pct = round((exit_price - buy_price) / buy_price * 100, 2)
+            if stoploss_price and exit_price <= stoploss_price:
+                result = 'stoploss'
+            elif exit_price > buy_price:
+                result = 'win'
+            else:
+                result = 'loss'
+
+    try:
+        ns = _get_news_storage()
+        ok = ns.upsert_backtest_pnl(pick_id, buy_price, exit_price, stoploss_price, result, profit_pct, notes)
+        if not ok:
+            return jsonify({'success': False, 'error': '저장 실패'}), 500
+        return jsonify({'success': True, 'profit_pct': profit_pct, 'result': result})
+    except Exception as e:
+        logger.error(f"update_backtest_pnl 실패: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 def start_price_monitor():
