@@ -6541,6 +6541,13 @@ function renderBacktestPickCard(p) {
         <button class="btn btn-sm btn-success" onclick="btRegisterMode2(${p.id})">📊 Mode2 등록</button>
     </div>` : '';
 
+    // 재무정보 버튼 (종목코드 있을 때만)
+    const financeBtnHtml = p.stock_code ? `
+    <div class="bt-finance-row">
+        <button class="btn btn-sm btn-outline bt-finance-btn" onclick="btLoadFinance(${p.id}, '${p.stock_code}')">📈 재무정보</button>
+        <div id="btFinance_${p.id}" class="bt-finance-panel" style="display:none;"></div>
+    </div>` : '';
+
     return `
 <div class="bt-pick-card${p.result === 'win' ? ' bt-card-win' : p.result === 'stoploss' || p.result === 'loss' ? ' bt-card-loss' : ''}" id="btCard_${p.id}">
     <div class="bt-pick-header">
@@ -6586,6 +6593,7 @@ function renderBacktestPickCard(p) {
         <button class="btn btn-sm btn-primary" onclick="saveBacktestPnl(${p.id})">저장</button>
     </div>
     ${watchlistBtnHtml}
+    ${financeBtnHtml}
 </div>`;
 }
 
@@ -6598,6 +6606,93 @@ function btCalcExitFromPct(pickId) {
     const pct = parseFloat(pctInput.value);
     if (buy > 0 && pct > 0) {
         exitInput.value = Math.round(buy * (1 + pct / 100));
+    }
+}
+
+async function btLoadFinance(pickId, stockCode) {
+    const panel = document.getElementById(`btFinance_${pickId}`);
+    const btn = panel?.previousElementSibling;
+    if (!panel) return;
+
+    // 토글
+    if (panel.style.display !== 'none') {
+        panel.style.display = 'none';
+        if (btn) btn.textContent = '📈 재무정보';
+        return;
+    }
+
+    // 이미 로드된 데이터 있으면 그냥 표시
+    if (panel.dataset.loaded === '1') {
+        panel.style.display = '';
+        if (btn) btn.textContent = '📈 닫기';
+        return;
+    }
+
+    panel.style.display = '';
+    panel.innerHTML = '<span class="bt-finance-loading">조회 중...</span>';
+    if (btn) btn.textContent = '📈 닫기';
+
+    try {
+        const res = await fetch(`/api/financial-info?stock_code=${stockCode}`, { credentials: 'same-origin' });
+        const r = await res.json();
+        if (!r.success) { panel.innerHTML = `<span class="bt-finance-error">조회 실패</span>`; return; }
+
+        const d = r.data;
+        const fmt = (v, unit='') => v != null ? `${Number(v).toLocaleString()}${unit}` : '-';
+        const fmtPct = (v) => v != null ? `${v}%` : '-';
+
+        // 부채비율 경고색
+        const debtClass = d.debt_ratio != null
+            ? (d.debt_ratio > 200 ? 'bt-fi-warn' : d.debt_ratio > 100 ? 'bt-fi-caution' : 'bt-fi-good')
+            : '';
+
+        panel.innerHTML = `
+<div class="bt-finance-grid">
+    <div class="bt-fi-item">
+        <span class="bt-fi-label">시가총액</span>
+        <span class="bt-fi-value">${fmt(d.market_cap_bil, '억')}</span>
+    </div>
+    <div class="bt-fi-item">
+        <span class="bt-fi-label">영업이익</span>
+        <span class="bt-fi-value">${fmt(d.op_income_bil, '억')}</span>
+    </div>
+    <div class="bt-fi-item">
+        <span class="bt-fi-label">매출액</span>
+        <span class="bt-fi-value">${fmt(d.sales_bil, '억')}</span>
+    </div>
+    <div class="bt-fi-item">
+        <span class="bt-fi-label">당기순이익</span>
+        <span class="bt-fi-value">${fmt(d.net_income_bil, '억')}</span>
+    </div>
+    <div class="bt-fi-item">
+        <span class="bt-fi-label">PER</span>
+        <span class="bt-fi-value">${fmt(d.per, '배')}</span>
+    </div>
+    <div class="bt-fi-item">
+        <span class="bt-fi-label">PBR</span>
+        <span class="bt-fi-value">${fmt(d.pbr, '배')}</span>
+    </div>
+    <div class="bt-fi-item">
+        <span class="bt-fi-label">ROE</span>
+        <span class="bt-fi-value">${fmtPct(d.roe)}</span>
+    </div>
+    <div class="bt-fi-item">
+        <span class="bt-fi-label">유통비율</span>
+        <span class="bt-fi-value">${fmtPct(d.flo_rt)}</span>
+    </div>
+    ${d.debt_ratio != null ? `<div class="bt-fi-item">
+        <span class="bt-fi-label">부채비율</span>
+        <span class="bt-fi-value ${debtClass}">${fmtPct(d.debt_ratio)}</span>
+    </div>` : ''}
+    ${d.current_ratio != null ? `<div class="bt-fi-item">
+        <span class="bt-fi-label">유동비율</span>
+        <span class="bt-fi-value">${fmtPct(d.current_ratio)}</span>
+    </div>` : ''}
+</div>
+${d.bsns_year ? `<div class="bt-fi-source">DART ${d.bsns_year} 사업보고서 + Kiwoom 실시간</div>` : '<div class="bt-fi-source">Kiwoom 실시간</div>'}`;
+        panel.dataset.loaded = '1';
+    } catch (e) {
+        panel.innerHTML = `<span class="bt-finance-error">조회 오류: ${e.message}</span>`;
     }
 }
 

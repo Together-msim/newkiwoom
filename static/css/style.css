@@ -2291,3 +2291,58 @@ tbody tr.inactive {
 .btn-xs.btn-danger { background: #c62828; color: #fff; }
 .btn-xs.btn-primary:hover { background: #0d47a1; }
 .btn-xs.btn-danger:hover { background: #b71c1c; }
+
+/* ─── 백테스트 재무정보 패널 ─────────────────────────────── */
+.bt-finance-row {
+    border-top: 1px dashed var(--border-color);
+    padding-top: 10px;
+    margin-top: 6px;
+}
+.bt-finance-btn {
+    font-size: 12px;
+    margin-bottom: 8px;
+}
+.bt-finance-panel {
+    margin-top: 6px;
+}
+.bt-finance-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 6px 10px;
+    padding: 10px 12px;
+    background: var(--bg-secondary);
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+}
+.bt-fi-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.bt-fi-label {
+    font-size: 10px;
+    color: var(--text-secondary);
+}
+.bt-fi-value {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+.bt-fi-good  { color: #2e7d32; }
+.bt-fi-caution { color: #e65100; }
+.bt-fi-warn  { color: #c62828; }
+.bt-fi-source {
+    font-size: 10px;
+    color: var(--text-secondary);
+    text-align: right;
+    margin-top: 4px;
+    padding-right: 4px;
+}
+.bt-finance-loading {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+.bt-finance-error {
+    font-size: 12px;
+    color: #c62828;
+}

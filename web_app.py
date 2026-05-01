@@ -2408,6 +2408,173 @@ def update_interval_context():
     return jsonify({'success': ok})
 
 
+# ─── 재무정보 (Financial Info) ────────────────────────────────────────────
+
+import json as _json
+import zipfile as _zipfile
+import io as _io
+import urllib.request as _urlreq
+import xml.etree.ElementTree as _ET
+
+_DART_KEY = 'c77a3bdb4d1b8bdf50792863473f716db261d989'
+_CORP_CODE_MAP_PATH = Path('.data/corp_code_map.json')
+_corp_code_map_cache: dict = {}
+
+def _load_corp_code_map() -> dict:
+    """stock_code → corp_code 매핑. 파일 캐시 우선, 없으면 DART에서 다운로드."""
+    global _corp_code_map_cache
+    if _corp_code_map_cache:
+        return _corp_code_map_cache
+    if _CORP_CODE_MAP_PATH.exists():
+        try:
+            with open(_CORP_CODE_MAP_PATH, 'r', encoding='utf-8') as f:
+                _corp_code_map_cache = _json.load(f)
+            return _corp_code_map_cache
+        except Exception:
+            pass
+    # DART에서 새로 다운로드
+    try:
+        url = f'https://opendart.fss.or.kr/api/corpCode.xml?crtfc_key={_DART_KEY}'
+        data = _urlreq.urlopen(url, timeout=30).read()
+        zf = _zipfile.ZipFile(_io.BytesIO(data))
+        xml_data = zf.read(zf.namelist()[0])
+        root = _ET.fromstring(xml_data)
+        result = {}
+        for item in root.findall('list'):
+            code = item.findtext('stock_code', '').strip()
+            corp_code = item.findtext('corp_code', '').strip()
+            corp_name = item.findtext('corp_name', '').strip()
+            if code:
+                result[code] = {'corp_code': corp_code, 'corp_name': corp_name}
+        _CORP_CODE_MAP_PATH.parent.mkdir(exist_ok=True)
+        with open(_CORP_CODE_MAP_PATH, 'w', encoding='utf-8') as f:
+            _json.dump(result, f, ensure_ascii=False)
+        _corp_code_map_cache = result
+        logger.info(f"corp_code_map 저장 완료: {len(result)}개")
+        return result
+    except Exception as e:
+        logger.error(f"corp_code_map 로드 실패: {e}")
+        return {}
+
+
+def _dart_financial(corp_code: str) -> dict:
+    """DART fnlttSinglAcntAll: 부채비율, 유동비율 계산용 재무제표 조회."""
+    from datetime import date as _date
+    year = _date.today().year - 1  # 작년 사업보고서
+    url = (f'https://opendart.fss.or.kr/api/fnlttSinglAcntAll.json'
+           f'?crtfc_key={_DART_KEY}&corp_code={corp_code}'
+           f'&bsns_year={year}&reprt_code=11011&fs_div=CFS')
+    try:
+        r = _urlreq.urlopen(url, timeout=15).read()
+        data = _json.loads(r)
+        if data.get('status') != '000':
+            return {}
+        items = data.get('list', [])
+        accts: dict = {}
+        priority = {'자산총계': 0, '부채총계': 0, '자본총계': 0, '유동자산': 0, '유동부채': 0}
+        for item in items:
+            nm = item.get('account_nm', '')
+            if nm in priority and priority[nm] == 0:
+                try:
+                    v = int(str(item.get('thstrm_amount', '0')).replace(',', ''))
+                    accts[nm] = v
+                    priority[nm] = 1  # 첫 번째 값만 사용
+                except Exception:
+                    pass
+        result = {'bsns_year': year}
+        total_assets = accts.get('자산총계', 0)
+        total_liab   = accts.get('부채총계', 0)
+        total_equity = accts.get('자본총계', 0)
+        cur_assets   = accts.get('유동자산', 0)
+        cur_liab     = accts.get('유동부채', 0)
+        if total_equity > 0:
+            result['debt_ratio'] = round(total_liab / total_equity * 100, 1)
+        if cur_liab > 0:
+            result['current_ratio'] = round(cur_assets / cur_liab * 100, 1)
+        if total_assets > 0:
+            result['total_assets_bil'] = round(total_assets / 1e8)
+        return result
+    except Exception as e:
+        logger.warning(f"DART 재무조회 실패 ({corp_code}): {e}")
+        return {}
+
+
+def _kiwoom_basic_info(stock_code: str) -> dict:
+    """Kiwoom ka10001 주식기본정보조회: 시가총액, PER, ROE, 영업이익 등."""
+    if not kiwoom_client:
+        return {}
+    try:
+        import requests as _req
+        token = get_token()
+        headers = {
+            'Content-Type': 'application/json;charset=UTF-8',
+            'authorization': f'Bearer {token}',
+            'api-id': 'ka10001',
+        }
+        r = _req.post(
+            f"{kiwoom_client.host}/api/dostk/stkinfo",
+            headers=headers, json={'stk_cd': stock_code}, timeout=10
+        )
+        if r.status_code != 200:
+            return {}
+        d = r.json()
+        if d.get('return_code') != 0:
+            return {}
+
+        def _clean(v):
+            try:
+                return float(str(v).lstrip('+-').replace(',', ''))
+            except Exception:
+                return None
+
+        return {
+            'market_cap_bil': _clean(d.get('mac')),      # 시가총액 (억원)
+            'per': _clean(d.get('per')),
+            'pbr': _clean(d.get('pbr')),
+            'roe': _clean(d.get('roe')),
+            'eps': _clean(d.get('eps')),
+            'bps': _clean(d.get('bps')),
+            'sales_bil': _clean(d.get('sale_amt')),        # 매출액 (억원)
+            'op_income_bil': _clean(d.get('bus_pro')),     # 영업이익 (억원)
+            'net_income_bil': _clean(d.get('cup_nga')),    # 당기순이익 (억원)
+            'flo_stk': _clean(d.get('flo_stk')),           # 유동주식수 (천주)
+            'flo_rt': _clean(d.get('dstr_rt')),            # 유통비율 %
+        }
+    except Exception as e:
+        logger.warning(f"Kiwoom ka10001 조회 실패 ({stock_code}): {e}")
+        return {}
+
+
+@app.route('/api/financial-info', methods=['GET'])
+@auth.login_required
+def get_financial_info():
+    """종목 재무정보 조회. ?stock_code=XXXXXX
+    Kiwoom ka10001(시가총액/PER/ROE/영업이익) + DART(부채비율/유동비율) 결합.
+    """
+    stock_code = (request.args.get('stock_code') or '').strip().zfill(6)
+    if not stock_code:
+        return jsonify({'success': False, 'error': 'stock_code 필요'}), 400
+
+    result = {'stock_code': stock_code}
+
+    # 1) Kiwoom 기본정보
+    kw = _kiwoom_basic_info(stock_code)
+    result.update(kw)
+
+    # 2) DART 재무제표 (부채비율, 유동비율)
+    corp_map = _load_corp_code_map()
+    corp_info = corp_map.get(stock_code)
+    if corp_info:
+        corp_code = corp_info['corp_code']
+        dart = _dart_financial(corp_code)
+        result.update(dart)
+        result['corp_name_dart'] = corp_info.get('corp_name', '')
+    else:
+        result['dart_error'] = 'corp_code 매핑 없음'
+
+    return jsonify({'success': True, 'data': result})
+
+
 # ─── 格言(Trading Mottos) ──────────────────────────────────────────────────
 
 @app.route('/api/mottos', methods=['GET'])
