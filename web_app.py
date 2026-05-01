@@ -2418,10 +2418,13 @@ import xml.etree.ElementTree as _ET
 
 _DART_KEY = 'c77a3bdb4d1b8bdf50792863473f716db261d989'
 _CORP_CODE_MAP_PATH = Path('.data/corp_code_map.json')
+_STOCK_NAME_MAP_PATH = Path('.data/stock_name_map.json')
 _corp_code_map_cache: dict = {}
+_stock_name_map_cache: dict = {}   # 종목명 → stock_code
+
 
 def _load_corp_code_map() -> dict:
-    """stock_code → corp_code 매핑. 파일 캐시 우선, 없으면 DART에서 다운로드."""
+    """stock_code → {corp_code, corp_name} 매핑. 파일 캐시 우선."""
     global _corp_code_map_cache
     if _corp_code_map_cache:
         return _corp_code_map_cache
@@ -2432,7 +2435,7 @@ def _load_corp_code_map() -> dict:
             return _corp_code_map_cache
         except Exception:
             pass
-    # DART에서 새로 다운로드
+    # 파일 없으면 DART에서 다운로드 (최초 1회)
     try:
         url = f'https://opendart.fss.or.kr/api/corpCode.xml?crtfc_key={_DART_KEY}'
         data = _urlreq.urlopen(url, timeout=30).read()
@@ -2440,21 +2443,86 @@ def _load_corp_code_map() -> dict:
         xml_data = zf.read(zf.namelist()[0])
         root = _ET.fromstring(xml_data)
         result = {}
+        name_map = {}
         for item in root.findall('list'):
             code = item.findtext('stock_code', '').strip()
             corp_code = item.findtext('corp_code', '').strip()
             corp_name = item.findtext('corp_name', '').strip()
             if code:
                 result[code] = {'corp_code': corp_code, 'corp_name': corp_name}
+                name_map[corp_name] = code
         _CORP_CODE_MAP_PATH.parent.mkdir(exist_ok=True)
         with open(_CORP_CODE_MAP_PATH, 'w', encoding='utf-8') as f:
-            _json.dump(result, f, ensure_ascii=False)
+            _json.dump(result, f, ensure_ascii=False, separators=(',', ':'))
+        with open(_STOCK_NAME_MAP_PATH, 'w', encoding='utf-8') as f:
+            _json.dump(name_map, f, ensure_ascii=False, separators=(',', ':'))
         _corp_code_map_cache = result
         logger.info(f"corp_code_map 저장 완료: {len(result)}개")
         return result
     except Exception as e:
         logger.error(f"corp_code_map 로드 실패: {e}")
         return {}
+
+
+def _load_stock_name_map() -> dict:
+    """종목명 → stock_code 역방향 매핑."""
+    global _stock_name_map_cache
+    if _stock_name_map_cache:
+        return _stock_name_map_cache
+    if _STOCK_NAME_MAP_PATH.exists():
+        try:
+            with open(_STOCK_NAME_MAP_PATH, 'r', encoding='utf-8') as f:
+                _stock_name_map_cache = _json.load(f)
+            return _stock_name_map_cache
+        except Exception:
+            pass
+    # stock_name_map 없으면 corp_code_map에서 역방향 생성
+    corp_map = _load_corp_code_map()
+    _stock_name_map_cache = {v['corp_name']: k for k, v in corp_map.items()}
+    return _stock_name_map_cache
+
+
+@app.route('/api/stock/search', methods=['GET'])
+@auth.login_required
+def stock_search():
+    """종목명 키워드 검색. ?q=삼성  → 매칭되는 종목 목록 반환 (최대 20개)."""
+    q = (request.args.get('q') or '').strip()
+    if len(q) < 1:
+        return jsonify({'success': True, 'results': []})
+    name_map = _load_stock_name_map()
+    results = [
+        {'stock_code': code, 'stock_name': name}
+        for name, code in name_map.items()
+        if q in name
+    ]
+    results.sort(key=lambda x: (not x['stock_name'].startswith(q), x['stock_name']))
+    return jsonify({'success': True, 'results': results[:20]})
+
+
+@app.route('/api/backtest/fix-stock-codes', methods=['POST'])
+@auth.login_required
+def fix_backtest_stock_codes():
+    """backtest_picks 중 stock_code가 NULL인 종목을 stock_name_map으로 자동 채움."""
+    ns = _get_news_storage()
+    name_map = _load_stock_name_map()
+    updated = 0
+    try:
+        with ns._conn() as conn:
+            rows = conn.execute(
+                "SELECT id, stock_name FROM backtest_picks WHERE stock_code IS NULL OR stock_code = ''"
+            ).fetchall()
+            for row in rows:
+                code = name_map.get(row['stock_name'])
+                if code:
+                    conn.execute(
+                        "UPDATE backtest_picks SET stock_code=? WHERE id=?",
+                        (code, row['id'])
+                    )
+                    updated += 1
+        return jsonify({'success': True, 'updated': updated, 'total_null': len(rows)})
+    except Exception as e:
+        logger.error(f"fix_backtest_stock_codes 실패: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 def _dart_financial(corp_code: str) -> dict:

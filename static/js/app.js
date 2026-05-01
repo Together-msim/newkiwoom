@@ -101,6 +101,14 @@ function setupEventListeners() {
         mode2LookupBtn.addEventListener('click', handleMode2Lookup);
     }
 
+    // 검색 드롭다운 외부 클릭 시 닫기
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.stock-search-wrap')) {
+            const dd = document.getElementById('stockSearchDropdown');
+            if (dd) dd.style.display = 'none';
+        }
+    });
+
     // Mode2 notify_only 체크박스 변경 시 polling 자동 조정
     const mode2NotifyOnly = document.getElementById('mode2NotifyOnly');
     const mode2PollingInterval = document.getElementById('mode2PollingInterval');
@@ -1584,6 +1592,92 @@ async function autoFetchMode2StockName() {
     } catch (error) {
         console.error('종목명 조회 실패:', error);
         nameInput.value = '조회 실패';
+    }
+}
+
+// ─── 종목명 검색 자동완성 ──────────────────────────────────────────────────
+
+let _stockSearchTimer = null;
+let _stockSearchActiveIdx = -1;
+
+function stockSearchDebounce(q) {
+    clearTimeout(_stockSearchTimer);
+    if (!q.trim()) {
+        const dd = document.getElementById('stockSearchDropdown');
+        if (dd) dd.style.display = 'none';
+        return;
+    }
+    _stockSearchTimer = setTimeout(() => doStockSearch(q), 200);
+}
+
+async function doStockSearch(q) {
+    const dd = document.getElementById('stockSearchDropdown');
+    if (!dd) return;
+    try {
+        const res = await fetch(`/api/stock/search?q=${encodeURIComponent(q)}`, { credentials: 'same-origin' });
+        const r = await res.json();
+        const results = r.results || [];
+        if (!results.length) { dd.style.display = 'none'; return; }
+        _stockSearchActiveIdx = -1;
+        dd.innerHTML = results.map((item, i) =>
+            `<div class="stock-search-item" data-idx="${i}" data-code="${item.stock_code}" data-name="${item.stock_name}"
+                  onmousedown="selectStockSearchItem('${item.stock_code}','${item.stock_name}')"
+                  onmouseenter="highlightSearchItem(${i})">
+                <span class="ssi-name">${item.stock_name}</span>
+                <span class="ssi-code">${item.stock_code}</span>
+            </div>`
+        ).join('');
+        dd.style.display = 'block';
+    } catch (e) { /* 검색 실패 무시 */ }
+}
+
+function selectStockSearchItem(code, name) {
+    const codeInput = document.getElementById('mode2Code');
+    const nameInput = document.getElementById('mode2Name');
+    const searchInput = document.getElementById('mode2SearchInput');
+    if (codeInput) codeInput.value = code;
+    if (nameInput) nameInput.value = name;
+    if (searchInput) searchInput.value = name;
+    const dd = document.getElementById('stockSearchDropdown');
+    if (dd) dd.style.display = 'none';
+    // 차트 자동 조회
+    handleMode2Lookup();
+}
+
+function onMode2CodeInput(val) {
+    // 코드 직접 입력 시 검색 인풋 초기화
+    const searchInput = document.getElementById('mode2SearchInput');
+    if (searchInput && val) searchInput.value = '';
+}
+
+function highlightSearchItem(idx) {
+    _stockSearchActiveIdx = idx;
+    document.querySelectorAll('.stock-search-item').forEach((el, i) => {
+        el.classList.toggle('active', i === idx);
+    });
+}
+
+function stockSearchKeyNav(e) {
+    const dd = document.getElementById('stockSearchDropdown');
+    if (!dd || dd.style.display === 'none') return;
+    const items = dd.querySelectorAll('.stock-search-item');
+    if (!items.length) return;
+    if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        _stockSearchActiveIdx = Math.min(_stockSearchActiveIdx + 1, items.length - 1);
+        highlightSearchItem(_stockSearchActiveIdx);
+    } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        _stockSearchActiveIdx = Math.max(_stockSearchActiveIdx - 1, 0);
+        highlightSearchItem(_stockSearchActiveIdx);
+    } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (_stockSearchActiveIdx >= 0 && items[_stockSearchActiveIdx]) {
+            const el = items[_stockSearchActiveIdx];
+            selectStockSearchItem(el.dataset.code, el.dataset.name);
+        }
+    } else if (e.key === 'Escape') {
+        dd.style.display = 'none';
     }
 }
 

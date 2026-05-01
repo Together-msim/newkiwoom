@@ -301,7 +301,15 @@
                 <section class="input-section">
                     <form id="mode2Form">
                         <div class="code-input-row">
-                            <input type="text" id="mode2Code" name="code" placeholder="종목코드 (예: 003280)" required>
+                            <div class="stock-search-wrap" style="position:relative;">
+                                <input type="text" id="mode2SearchInput" placeholder="종목명 검색" autocomplete="off"
+                                    oninput="stockSearchDebounce(this.value)"
+                                    onkeydown="stockSearchKeyNav(event)"
+                                    style="width:130px;">
+                                <div id="stockSearchDropdown" class="stock-search-dropdown" style="display:none;"></div>
+                            </div>
+                            <input type="text" id="mode2Code" name="code" placeholder="종목코드" required style="width:110px;"
+                                oninput="onMode2CodeInput(this.value)">
                             <button type="button" id="mode2LookupBtn" class="btn btn-secondary" style="padding: 8px 16px;">🔍 조회</button>
                             <input type="text" id="mode2Name" name="name" placeholder="종목명 (자동 조회)" readonly style="width: 150px; background: #f1f3f5;">
                             <div style="display: flex; align-items: center; gap: 5px;">

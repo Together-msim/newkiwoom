@@ -2346,3 +2346,41 @@ tbody tr.inactive {
     font-size: 12px;
     color: #c62828;
 }
+
+/* ─── 종목명 검색 자동완성 ───────────────────────────────── */
+.stock-search-wrap {
+    position: relative;
+    display: inline-block;
+}
+.stock-search-dropdown {
+    position: absolute;
+    top: calc(100% + 3px);
+    left: 0;
+    min-width: 220px;
+    max-height: 260px;
+    overflow-y: auto;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    z-index: 1000;
+}
+.stock-search-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    cursor: pointer;
+    gap: 12px;
+    font-size: 13px;
+    border-bottom: 1px solid var(--border-color);
+}
+.stock-search-item:last-child { border-bottom: none; }
+.stock-search-item:hover,
+.stock-search-item.active {
+    background: var(--primary-color);
+    color: #fff;
+}
+.stock-search-item.active .ssi-code { color: rgba(255,255,255,0.75); }
+.ssi-name { font-weight: 600; }
+.ssi-code { font-size: 11px; color: var(--text-secondary); }
