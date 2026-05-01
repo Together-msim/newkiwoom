@@ -1156,6 +1156,22 @@
                 <div id="backtestPicksList" class="backtest-picks-list">
                     <p class="empty-state">세션을 선택하면 추천 종목이 표시됩니다.</p>
                 </div>
+
+                <!-- 格言 섹션 -->
+                <div class="bt-motto-section">
+                    <div class="bt-motto-header">
+                        <span class="bt-motto-title">📌 매매 지침</span>
+                        <button class="btn btn-sm btn-outline" onclick="toggleMottoEdit()">✏️ 편집</button>
+                    </div>
+                    <div id="mottoDisplayList" class="bt-motto-display-list"></div>
+                    <div id="mottoEditPanel" class="bt-motto-edit-panel" style="display:none;">
+                        <div class="bt-motto-add-row">
+                            <textarea id="mottoNewInput" rows="2" placeholder="새 지침 입력 (예: 12시 넘으면 보이는 매수 타점보다 하나 아래를 노려라)" style="flex:1; resize:vertical;"></textarea>
+                            <button class="btn btn-sm btn-primary" onclick="addMotto()">추가</button>
+                        </div>
+                        <div id="mottoEditList" class="bt-motto-edit-list"></div>
+                    </div>
+                </div>
             </div>
 
             <!-- Test 페이지 -->

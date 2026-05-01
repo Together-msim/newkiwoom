@@ -2128,3 +2128,166 @@ tbody tr.inactive {
     max-height: 200px;
     overflow-y: auto;
 }
+
+/* ─── 백테스트 상승률 배지 ─────────────────────────────── */
+.bt-change-pct {
+    font-size: 12px;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 10px;
+}
+.bt-change-normal {
+    background: #e8f5e9;
+    color: #2e7d32;
+}
+.bt-change-high {
+    background: #fff3e0;
+    color: #e65100;
+    border: 1px solid #ffcc80;
+}
+
+/* ─── 대장주 표시 ─────────────────────────────────────── */
+.bt-leader-stock {
+    font-size: 12px;
+    color: #7c3aed;
+    background: #f5f3ff;
+    border-radius: 4px;
+    padding: 3px 8px;
+    margin-bottom: 6px;
+    display: inline-block;
+}
+
+/* ─── 익절 % 입력 ─────────────────────────────────────── */
+.bt-pnl-field-pct {
+    min-width: 90px;
+}
+.bt-pct-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.bt-pct-row input {
+    width: 56px !important;
+}
+.bt-pct-hint {
+    font-size: 10px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+/* ─── 카드 결과 색상 테두리 ───────────────────────────── */
+.bt-card-win {
+    border-left: 3px solid #e53935;
+}
+.bt-card-loss {
+    border-left: 3px solid #1565c0;
+}
+
+/* ─── 格言 섹션 ───────────────────────────────────────── */
+.bt-motto-section {
+    margin-top: 32px;
+    border-top: 2px dashed var(--border-color);
+    padding-top: 18px;
+}
+.bt-motto-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+}
+.bt-motto-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+.bt-motto-display-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.bt-motto-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 10px 12px;
+    background: var(--bg-secondary);
+    border-radius: 8px;
+    border-left: 3px solid #7c3aed;
+}
+.bt-motto-bullet { font-size: 14px; flex-shrink: 0; }
+.bt-motto-text {
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text-primary);
+    white-space: pre-wrap;
+}
+.bt-motto-empty {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-style: italic;
+    padding: 8px 0;
+}
+.bt-motto-edit-panel {
+    margin-top: 14px;
+    border: 1px dashed var(--border-color);
+    border-radius: 8px;
+    padding: 14px;
+    background: var(--bg-secondary);
+}
+.bt-motto-add-row {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    margin-bottom: 14px;
+}
+.bt-motto-add-row textarea {
+    padding: 7px 9px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 5px;
+    font-size: 13px;
+    color: var(--text-primary);
+    resize: vertical;
+}
+.bt-motto-edit-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.bt-motto-edit-item {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    padding: 8px;
+    background: var(--bg-primary);
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+}
+.bt-motto-edit-input {
+    flex: 1;
+    padding: 6px 8px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    font-size: 12px;
+    color: var(--text-primary);
+    resize: vertical;
+    min-width: 0;
+}
+.bt-motto-edit-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex-shrink: 0;
+}
+.btn-xs {
+    padding: 3px 8px;
+    font-size: 11px;
+    border-radius: 4px;
+    cursor: pointer;
+    border: none;
+}
+.btn-xs.btn-primary { background: #1565c0; color: #fff; }
+.btn-xs.btn-danger { background: #c62828; color: #fff; }
+.btn-xs.btn-primary:hover { background: #0d47a1; }
+.btn-xs.btn-danger:hover { background: #b71c1c; }

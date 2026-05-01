@@ -2408,6 +2408,61 @@ def update_interval_context():
     return jsonify({'success': ok})
 
 
+# ─── 格言(Trading Mottos) ──────────────────────────────────────────────────
+
+@app.route('/api/mottos', methods=['GET'])
+@auth.login_required
+def get_mottos():
+    ns = _get_news_storage()
+    return jsonify({'success': True, 'mottos': ns.get_mottos()})
+
+
+@app.route('/api/mottos', methods=['POST'])
+@auth.login_required
+def add_motto():
+    data = request.json or {}
+    content = (data.get('content') or '').strip()
+    if not content:
+        return jsonify({'success': False, 'error': 'content 필요'}), 400
+    ns = _get_news_storage()
+    mid = ns.add_motto(content)
+    if mid is None:
+        return jsonify({'success': False, 'error': '저장 실패'}), 500
+    return jsonify({'success': True, 'id': mid})
+
+
+@app.route('/api/mottos/<int:motto_id>', methods=['PUT'])
+@auth.login_required
+def update_motto(motto_id):
+    data = request.json or {}
+    content = (data.get('content') or '').strip()
+    if not content:
+        return jsonify({'success': False, 'error': 'content 필요'}), 400
+    ns = _get_news_storage()
+    ok = ns.update_motto(motto_id, content)
+    return jsonify({'success': ok})
+
+
+@app.route('/api/mottos/<int:motto_id>', methods=['DELETE'])
+@auth.login_required
+def delete_motto(motto_id):
+    ns = _get_news_storage()
+    ok = ns.delete_motto(motto_id)
+    return jsonify({'success': ok})
+
+
+@app.route('/api/mottos/reorder', methods=['POST'])
+@auth.login_required
+def reorder_mottos():
+    data = request.json or {}
+    ordered_ids = data.get('ids', [])
+    if not ordered_ids:
+        return jsonify({'success': False, 'error': 'ids 필요'}), 400
+    ns = _get_news_storage()
+    ok = ns.reorder_mottos(ordered_ids)
+    return jsonify({'success': ok})
+
+
 def start_price_monitor():
     """PriceMonitor를 별도 스레드에서 실행"""
     if not price_monitor:

@@ -42,7 +42,7 @@ function switchPage(pageName) {
     else if (pageName === 'mode2') loadMode2List();
     else if (pageName === 'tradelog') loadTradelog();
     else if (pageName === 'siwhang') loadSiwhang();
-    else if (pageName === 'backtest') loadBacktestSessions();
+    else if (pageName === 'backtest') { loadBacktestSessions(); loadMottos(); }
     else if (pageName === 'test') loadMode2PickList();
 }
 
@@ -6484,6 +6484,33 @@ function renderBacktestPickCard(p) {
     const priceStr = p.price_at_slot ? `추천가 ${Number(p.price_at_slot).toLocaleString()}원` : '';
     const themeStr = p.theme ? `테마: ${p.theme}` : '';
 
+    // 추천 시점 상승률 배지 (hotstock 소스에서 파싱)
+    let changePctHtml = '';
+    const sources = p.sources || [];
+    const hsSource = sources.find(s => s.type === 'hotstock');
+    if (hsSource && hsSource.text) {
+        const m = hsSource.text.match(/([+-]?\d+\.?\d*)\s*%/);
+        if (m) {
+            const pct = parseFloat(m[1]);
+            const isHigh = pct >= 10;
+            changePctHtml = `<span class="bt-change-pct ${isHigh ? 'bt-change-high' : 'bt-change-normal'}">+${pct}%${isHigh ? ' ⚠️' : ''}</span>`;
+        }
+    }
+
+    // 관련 상한가 종목 (catalyst나 analysis_text에서 '상한가' 언급 종목, 또는 소스 텍스트의 SS⬆️/상한가 정보)
+    let leaderStockHtml = '';
+    const allText = [p.catalyst || '', p.analysis_text || '', ...sources.map(s => s.text || '')].join(' ');
+    const leaderMatch = allText.match(/(?:상한가|SS⬆️)[^가-힣]*([가-힣A-Za-z0-9]+(?:\s+[가-힣A-Za-z0-9]+)?)\s*(?:\(|상한가)/);
+    // hotstock 소스 중 SS⬆️ 포함된 별도 종목 텍스트 탐색
+    const leaderSources = sources.filter(s => s.type === 'hotstock' && s.text && s.text.includes('SS⬆️') && s.text.replace(/SS⬆️/g,'').trim() && !s.text.includes(p.stock_name));
+    if (leaderSources.length) {
+        const leaderTexts = leaderSources.map(s => {
+            const nm = s.text.match(/\]\s*([가-힣A-Za-z0-9]+)/);
+            return nm ? escapeHtml(nm[1]) : escapeHtml(s.text.slice(0, 30));
+        });
+        leaderStockHtml = `<div class="bt-leader-stock">🚀 대장주: ${leaderTexts.join(', ')}</div>`;
+    }
+
     const pnlResult = p.result
         ? `<span class="bt-pnl-result ${p.result}">${p.result === 'win' ? '▲ 수익' : p.result === 'stoploss' ? '✂ 손절' : '▼ 손실'} ${p.profit_pct != null ? p.profit_pct + '%' : ''}</span>`
         : '';
@@ -6493,7 +6520,6 @@ function renderBacktestPickCard(p) {
         : '';
 
     // 소스 타임스탬프 목록
-    const sources = p.sources || [];
     const typeLabel = { hotstock: '🚀급등주', news: '📰뉴스DB', google: '🔍실검', dart: '📋공시' };
     const sourcesHtml = sources.length ? `
     <div class="bt-sources">
@@ -6516,14 +6542,16 @@ function renderBacktestPickCard(p) {
     </div>` : '';
 
     return `
-<div class="bt-pick-card" id="btCard_${p.id}">
+<div class="bt-pick-card${p.result === 'win' ? ' bt-card-win' : p.result === 'stoploss' || p.result === 'loss' ? ' bt-card-loss' : ''}" id="btCard_${p.id}">
     <div class="bt-pick-header">
         <span class="bt-pick-name">${p.stock_name}${p.stock_code ? ` (${p.stock_code})` : ''}</span>
+        ${changePctHtml}
         <span class="bt-pick-slot">${p.slot_time}</span>
         ${tagLabel ? `<span class="tag-badge">${tagLabel}</span>` : ''}
         ${confLabel ? `<span class="${confClass}">${confLabel}</span>` : ''}
         ${pnlResult}
     </div>
+    ${leaderStockHtml}
     <div class="bt-pick-meta">${[priceStr, themeStr].filter(Boolean).join(' · ')}</div>
     ${p.catalyst ? `<div class="bt-catalyst"><div class="bt-catalyst-label">촉매/시황</div>${escapeHtml(p.catalyst)}</div>` : ''}
     ${sourcesHtml}
@@ -6532,11 +6560,20 @@ function renderBacktestPickCard(p) {
     <div class="bt-pnl-form">
         <div class="bt-pnl-field">
             <label>매수가</label>
-            <input type="number" id="btBuy_${p.id}" value="${p.buy_price || ''}" placeholder="0">
+            <input type="number" id="btBuy_${p.id}" value="${p.buy_price || ''}" placeholder="0"
+                oninput="btCalcExitFromPct(${p.id})">
         </div>
         <div class="bt-pnl-field">
             <label>익절가</label>
             <input type="number" id="btExit_${p.id}" value="${p.exit_price || ''}" placeholder="0">
+        </div>
+        <div class="bt-pnl-field bt-pnl-field-pct">
+            <label>익절 %</label>
+            <div class="bt-pct-row">
+                <input type="number" id="btExitPct_${p.id}" placeholder="%" step="0.5" min="0"
+                    oninput="btCalcExitFromPct(${p.id})">
+                <span class="bt-pct-hint">→ 자동 계산</span>
+            </div>
         </div>
         <div class="bt-pnl-field">
             <label>손절가</label>
@@ -6550,6 +6587,18 @@ function renderBacktestPickCard(p) {
     </div>
     ${watchlistBtnHtml}
 </div>`;
+}
+
+function btCalcExitFromPct(pickId) {
+    const buyInput = document.getElementById(`btBuy_${pickId}`);
+    const pctInput = document.getElementById(`btExitPct_${pickId}`);
+    const exitInput = document.getElementById(`btExit_${pickId}`);
+    if (!buyInput || !pctInput || !exitInput) return;
+    const buy = parseFloat(buyInput.value);
+    const pct = parseFloat(pctInput.value);
+    if (buy > 0 && pct > 0) {
+        exitInput.value = Math.round(buy * (1 + pct / 100));
+    }
 }
 
 async function saveBacktestPnl(pickId) {
@@ -6623,4 +6672,112 @@ async function btRegisterMode2(pickId) {
 
 function escapeHtml(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ─── 格言(Trading Mottos) ──────────────────────────────────────────────────
+
+let _mottos = [];
+let _mottoEditVisible = false;
+
+function toggleMottoEdit() {
+    _mottoEditVisible = !_mottoEditVisible;
+    document.getElementById('mottoEditPanel').style.display = _mottoEditVisible ? 'block' : 'none';
+    if (_mottoEditVisible) renderMottoEditList();
+}
+
+async function loadMottos() {
+    try {
+        const res = await fetch('/api/mottos', { credentials: 'same-origin' });
+        const r = await res.json();
+        if (!r.success) return;
+        _mottos = r.mottos || [];
+        renderMottoDisplayList();
+        if (_mottoEditVisible) renderMottoEditList();
+    } catch (e) { /* 格言 로드 실패는 무시 */ }
+}
+
+function renderMottoDisplayList() {
+    const el = document.getElementById('mottoDisplayList');
+    if (!el) return;
+    if (!_mottos.length) {
+        el.innerHTML = '<p class="bt-motto-empty">매매 지침을 추가해보세요 (✏️ 편집 버튼)</p>';
+        return;
+    }
+    el.innerHTML = _mottos.map(m => `
+        <div class="bt-motto-item">
+            <span class="bt-motto-bullet">📌</span>
+            <span class="bt-motto-text">${escapeHtml(m.content)}</span>
+        </div>`).join('');
+}
+
+function renderMottoEditList() {
+    const el = document.getElementById('mottoEditList');
+    if (!el) return;
+    if (!_mottos.length) { el.innerHTML = ''; return; }
+    el.innerHTML = _mottos.map(m => `
+        <div class="bt-motto-edit-item" id="mottoEdit_${m.id}">
+            <textarea class="bt-motto-edit-input" id="mottoEditText_${m.id}" rows="2">${escapeHtml(m.content)}</textarea>
+            <div class="bt-motto-edit-actions">
+                <button class="btn btn-xs btn-primary" onclick="saveMotto(${m.id})">저장</button>
+                <button class="btn btn-xs btn-danger" onclick="deleteMotto(${m.id})">삭제</button>
+            </div>
+        </div>`).join('');
+}
+
+async function addMotto() {
+    const input = document.getElementById('mottoNewInput');
+    const content = (input.value || '').trim();
+    if (!content) { showToast('내용을 입력하세요', 'error'); return; }
+    try {
+        const res = await fetch('/api/mottos', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content })
+        });
+        const r = await res.json();
+        if (r.success) {
+            input.value = '';
+            showToast('지침 추가됨', 'success');
+            await loadMottos();
+        } else {
+            showToast(r.error || '추가 실패', 'error');
+        }
+    } catch (e) { showToast('추가 실패', 'error'); }
+}
+
+async function saveMotto(mottoId) {
+    const el = document.getElementById(`mottoEditText_${mottoId}`);
+    const content = (el?.value || '').trim();
+    if (!content) { showToast('내용을 입력하세요', 'error'); return; }
+    try {
+        const res = await fetch(`/api/mottos/${mottoId}`, {
+            method: 'PUT',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content })
+        });
+        const r = await res.json();
+        if (r.success) {
+            showToast('저장됨', 'success');
+            await loadMottos();
+        } else {
+            showToast(r.error || '저장 실패', 'error');
+        }
+    } catch (e) { showToast('저장 실패', 'error'); }
+}
+
+async function deleteMotto(mottoId) {
+    if (!confirm('이 지침을 삭제하시겠습니까?')) return;
+    try {
+        const res = await fetch(`/api/mottos/${mottoId}`, {
+            method: 'DELETE',
+            credentials: 'same-origin'
+        });
+        const r = await res.json();
+        if (r.success) {
+            showToast('삭제됨', 'success');
+            await loadMottos();
+        }
+    } catch (e) { showToast('삭제 실패', 'error'); }
 }

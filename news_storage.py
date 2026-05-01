@@ -149,6 +149,13 @@ class NewsStorage:
                     instruction_used INTEGER NOT NULL DEFAULT 0,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
+
+                CREATE TABLE IF NOT EXISTS trading_mottos (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    content TEXT NOT NULL,
+                    display_order INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
             """)
             # 기존 DB 마이그레이션 (컬럼 없으면 추가)
             for col, definition in [
@@ -691,3 +698,60 @@ class NewsStorage:
         except Exception as e:
             logger.error(f"consume_next_instruction 실패: {e}")
             return None
+
+    # ─── 격언(Trading Mottos) ──────────────────────────────────
+
+    def get_mottos(self) -> List[Dict]:
+        try:
+            with self._conn() as conn:
+                rows = conn.execute(
+                    "SELECT id, content, display_order, created_at FROM trading_mottos ORDER BY display_order ASC, id ASC"
+                ).fetchall()
+                return [dict(r) for r in rows]
+        except Exception as e:
+            logger.error(f"get_mottos 실패: {e}")
+            return []
+
+    def add_motto(self, content: str) -> Optional[int]:
+        try:
+            with self._conn() as conn:
+                max_order = conn.execute("SELECT COALESCE(MAX(display_order), -1) FROM trading_mottos").fetchone()[0]
+                cur = conn.execute(
+                    "INSERT INTO trading_mottos (content, display_order) VALUES (?, ?)",
+                    (content.strip(), max_order + 1),
+                )
+                return cur.lastrowid
+        except Exception as e:
+            logger.error(f"add_motto 실패: {e}")
+            return None
+
+    def update_motto(self, motto_id: int, content: str) -> bool:
+        try:
+            with self._conn() as conn:
+                conn.execute(
+                    "UPDATE trading_mottos SET content=? WHERE id=?",
+                    (content.strip(), motto_id),
+                )
+                return True
+        except Exception as e:
+            logger.error(f"update_motto 실패: {e}")
+            return False
+
+    def delete_motto(self, motto_id: int) -> bool:
+        try:
+            with self._conn() as conn:
+                conn.execute("DELETE FROM trading_mottos WHERE id=?", (motto_id,))
+                return True
+        except Exception as e:
+            logger.error(f"delete_motto 실패: {e}")
+            return False
+
+    def reorder_mottos(self, ordered_ids: List[int]) -> bool:
+        try:
+            with self._conn() as conn:
+                for idx, mid in enumerate(ordered_ids):
+                    conn.execute("UPDATE trading_mottos SET display_order=? WHERE id=?", (idx, mid))
+                return True
+        except Exception as e:
+            logger.error(f"reorder_mottos 실패: {e}")
+            return False
