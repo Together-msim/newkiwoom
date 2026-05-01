@@ -6159,24 +6159,61 @@ async function deleteTheme(id) {
 
 let _btAllPicks = [];
 let _btActiveSlot = 'all';
+let _btAllSessions = [];
+let _btCompareMode = false;
 
 async function loadBacktestSessions() {
     try {
         const res = await fetch('/api/backtest/sessions', { credentials: 'same-origin' });
         const r = await res.json();
         if (!r.success) { showToast(r.error || '세션 로드 실패', 'error'); return; }
+        _btAllSessions = r.data || [];
+
+        const makeOption = s => {
+            const ver = s.version ? `[${s.version}] ` : '';
+            const label = `${ver}${s.run_date}${s.notes ? ' — ' + s.notes : ''}`;
+            return `<option value="${s.id}">${label}</option>`;
+        };
+        const blankOpt = '<option value="">-- 선택 --</option>';
+
+        // 메인 select
         const sel = document.getElementById('backtestSessionSelect');
         const prev = sel.value;
-        sel.innerHTML = '<option value="">-- 세션 선택 --</option>';
-        (r.data || []).forEach(s => {
-            const opt = document.createElement('option');
-            opt.value = s.id;
-            opt.textContent = `${s.run_date} ${s.notes ? '— ' + s.notes : ''}`.trim();
-            sel.appendChild(opt);
-        });
+        sel.innerHTML = blankOpt + _btAllSessions.map(makeOption).join('');
         if (prev) sel.value = prev;
         if (sel.value) loadBacktestSession();
+
+        // 비교 selects
+        ['btSessionA', 'btSessionB'].forEach(id => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            const pv = el.value;
+            el.innerHTML = blankOpt + _btAllSessions.map(makeOption).join('');
+            if (pv) el.value = pv;
+        });
     } catch (e) { showToast('세션 로드 실패', 'error'); }
+}
+
+function toggleBtCompareMode() {
+    _btCompareMode = !_btCompareMode;
+    const panel = document.getElementById('btComparePanel');
+    const single = document.getElementById('backtestPicksList');
+    const slotBar = document.getElementById('backtestSlotBar');
+    const summary = document.getElementById('backtestSummary');
+    const btn = document.getElementById('btCompareToggleBtn');
+    if (_btCompareMode) {
+        panel.style.display = '';
+        single.style.display = 'none';
+        slotBar.style.display = 'none';
+        summary.style.display = 'none';
+        btn.textContent = '✕ 비교 닫기';
+        loadBacktestSessions();
+    } else {
+        panel.style.display = 'none';
+        single.style.display = '';
+        btn.textContent = '⚖️ 버전 비교';
+        if (_btAllPicks.length) { slotBar.style.display = ''; summary.style.display = ''; }
+    }
 }
 
 async function loadBacktestSession() {
@@ -6185,10 +6222,12 @@ async function loadBacktestSession() {
     const slotBar = document.getElementById('backtestSlotBar');
     const summary = document.getElementById('backtestSummary');
     const list = document.getElementById('backtestPicksList');
+    const banner = document.getElementById('btVersionBanner');
 
     if (!sessionId) {
         slotBar.style.display = 'none';
         summary.style.display = 'none';
+        banner.style.display = 'none';
         list.innerHTML = '<p class="empty-state">세션을 선택하면 추천 종목이 표시됩니다.</p>';
         return;
     }
@@ -6201,8 +6240,88 @@ async function loadBacktestSession() {
         slotBar.style.display = '';
         summary.style.display = '';
         document.querySelectorAll('.slot-btn').forEach(b => b.classList.toggle('active', b.dataset.slot === 'all'));
+
+        // 버전 배너
+        const meta = _btAllSessions.find(s => String(s.id) === String(sessionId));
+        if (meta) {
+            const ver = meta.version || 'v1';
+            const desc = meta.strategy_desc || '';
+            banner.textContent = `${ver}  ${meta.run_date}${desc ? '  ·  ' + desc : ''}`;
+            banner.style.display = '';
+        }
+
         renderBacktestPicks();
     } catch (e) { showToast('로드 실패', 'error'); }
+}
+
+async function loadBtCompare() {
+    const sidA = document.getElementById('btSessionA').value;
+    const sidB = document.getElementById('btSessionB').value;
+    const descA = document.getElementById('btVersionDescA');
+    const descB = document.getElementById('btVersionDescB');
+    const result = document.getElementById('btCompareResult');
+
+    const getDesc = sid => {
+        const s = _btAllSessions.find(x => String(x.id) === String(sid));
+        return s ? (s.strategy_desc || s.notes || '') : '';
+    };
+    descA.textContent = getDesc(sidA);
+    descB.textContent = getDesc(sidB);
+
+    if (!sidA || !sidB) return;
+    try {
+        const res = await fetch(`/api/backtest/compare?session_a=${sidA}&session_b=${sidB}`, { credentials: 'same-origin' });
+        const r = await res.json();
+        if (!r.success) { result.innerHTML = `<p class="empty-state">${r.error}</p>`; return; }
+        result.innerHTML = renderBtCompareTable(r.session_a, r.session_b);
+    } catch (e) { result.innerHTML = '<p class="empty-state">로드 실패</p>'; }
+}
+
+function renderBtCompareTable(sA, sB) {
+    const metaA = sA.meta || {}; const metaB = sB.meta || {};
+    const picksA = sA.picks || []; const picksB = sB.picks || [];
+
+    const statsA = btStats(picksA); const statsB = btStats(picksB);
+    const verA = metaA.version || 'A'; const verB = metaB.version || 'B';
+
+    // 통계 요약
+    let html = `<div class="bt-compare-stats">
+      <table class="bt-compare-table">
+        <tr><th></th><th>${verA} · ${metaA.run_date||''}</th><th>${verB} · ${metaB.run_date||''}</th></tr>
+        <tr><td>추천 종목</td><td>${statsA.total}</td><td>${statsB.total}</td></tr>
+        <tr><td>H급</td><td>${statsA.h}</td><td>${statsB.h}</td></tr>
+        <tr><td>승/패 (P&L 입력)</td><td>${statsA.wins}승 ${statsA.losses}패</td><td>${statsB.wins}승 ${statsB.losses}패</td></tr>
+        <tr><td>평균 수익률</td><td>${statsA.avg !== null ? statsA.avg + '%' : '-'}</td><td>${statsB.avg !== null ? statsB.avg + '%' : '-'}</td></tr>
+      </table>
+    </div>`;
+
+    // 종목 교차 비교
+    const namesA = new Set(picksA.map(p => p.stock_name));
+    const namesB = new Set(picksB.map(p => p.stock_name));
+    const allNames = [...new Set([...namesA, ...namesB])].sort();
+
+    html += `<div style="margin-top:12px;font-size:12px;font-weight:600;margin-bottom:6px;">종목별 비교</div>
+    <table class="bt-compare-table">
+      <tr><th>종목</th><th>${verA}</th><th>${verB}</th></tr>`;
+
+    allNames.forEach(name => {
+        const pA = picksA.find(p => p.stock_name === name);
+        const pB = picksB.find(p => p.stock_name === name);
+        const rowClass = pA && pB ? 'in-both' : pA ? 'only-a' : 'only-b';
+        const cellA = pA ? `[${pA.confidence||'?'}] ${pA.slot_time} ${pA.tag_type||''}${pA.result ? ' → '+pA.result+(pA.profit_pct!=null?'('+pA.profit_pct+'%)':'') : ''}` : '—';
+        const cellB = pB ? `[${pB.confidence||'?'}] ${pB.slot_time} ${pB.tag_type||''}${pB.result ? ' → '+pB.result+(pB.profit_pct!=null?'('+pB.profit_pct+'%)':'') : ''}` : '—';
+        html += `<tr class="${rowClass}"><td>${name}</td><td>${cellA}</td><td>${cellB}</td></tr>`;
+    });
+    html += '</table>';
+    return html;
+}
+
+function btStats(picks) {
+    const withPnl = picks.filter(p => p.result);
+    const wins = withPnl.filter(p => p.result === 'win').length;
+    const losses = withPnl.filter(p => p.result === 'loss' || p.result === 'stoploss').length;
+    const avg = withPnl.length ? +(withPnl.reduce((s,p) => s+(p.profit_pct||0), 0) / withPnl.length).toFixed(2) : null;
+    return { total: picks.length, h: picks.filter(p => p.confidence==='H').length, wins, losses, avg };
 }
 
 function filterBacktestSlot(slot) {
@@ -6264,6 +6383,7 @@ function renderBacktestPickCard(p) {
         ${pnlResult}
     </div>
     <div class="bt-pick-meta">${[priceStr, themeStr].filter(Boolean).join(' · ')}</div>
+    ${p.catalyst ? `<div class="bt-catalyst"><div class="bt-catalyst-label">촉매/시황</div>${escapeHtml(p.catalyst)}</div>` : ''}
     ${p.analysis_text ? `<div class="bt-pick-analysis">${escapeHtml(p.analysis_text)}</div>` : ''}
     ${noteSourceHtml}
     <div class="bt-pnl-form">

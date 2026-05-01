@@ -102,6 +102,8 @@ class NewsStorage:
                 CREATE TABLE IF NOT EXISTS backtest_sessions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     run_date TEXT NOT NULL,
+                    version TEXT NOT NULL DEFAULT 'v1',
+                    strategy_desc TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     notes TEXT
                 );
@@ -117,6 +119,7 @@ class NewsStorage:
                     price_at_slot REAL,
                     analysis_text TEXT,
                     confidence TEXT,
+                    catalyst TEXT,
                     source_message_id INTEGER,
                     note_source TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -137,6 +140,22 @@ class NewsStorage:
                 CREATE INDEX IF NOT EXISTS idx_backtest_picks_session ON backtest_picks(session_id);
                 CREATE INDEX IF NOT EXISTS idx_backtest_sessions_date ON backtest_sessions(run_date);
             """)
+            # 기존 DB 마이그레이션 (컬럼 없으면 추가)
+            for col, definition in [
+                ("version", "TEXT NOT NULL DEFAULT 'v1'"),
+                ("strategy_desc", "TEXT"),
+            ]:
+                try:
+                    conn.execute(f"ALTER TABLE backtest_sessions ADD COLUMN {col} {definition}")
+                except Exception:
+                    pass
+            for col, definition in [
+                ("catalyst", "TEXT"),
+            ]:
+                try:
+                    conn.execute(f"ALTER TABLE backtest_picks ADD COLUMN {col} {definition}")
+                except Exception:
+                    pass
         logger.info(f"NewsStorage 초기화 완료: {self.db_path}")
 
     # ─── 메시지 저장 ───────────────────────────────────────────
@@ -464,12 +483,13 @@ class NewsStorage:
 
     # ─── 백테스트 ─────────────────────────────────────────────
 
-    def create_backtest_session(self, run_date: str, notes: str = '') -> Optional[int]:
+    def create_backtest_session(self, run_date: str, notes: str = '',
+                                version: str = 'v1', strategy_desc: str = '') -> Optional[int]:
         try:
             with self._conn() as conn:
                 cur = conn.execute(
-                    "INSERT INTO backtest_sessions (run_date, notes) VALUES (?, ?)",
-                    (run_date, notes),
+                    "INSERT INTO backtest_sessions (run_date, notes, version, strategy_desc) VALUES (?, ?, ?, ?)",
+                    (run_date, notes, version, strategy_desc),
                 )
                 return cur.lastrowid
         except Exception as e:
@@ -487,6 +507,7 @@ class NewsStorage:
                            stock_code: Optional[str] = None, tag_type: Optional[str] = None,
                            theme: Optional[str] = None, price_at_slot: Optional[float] = None,
                            analysis_text: Optional[str] = None, confidence: Optional[str] = None,
+                           catalyst: Optional[str] = None,
                            source_message_id: Optional[int] = None,
                            note_source: Optional[str] = None) -> Optional[int]:
         try:
@@ -494,10 +515,10 @@ class NewsStorage:
                 cur = conn.execute(
                     """INSERT INTO backtest_picks
                        (session_id, slot_time, stock_code, stock_name, tag_type, theme,
-                        price_at_slot, analysis_text, confidence, source_message_id, note_source)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        price_at_slot, analysis_text, confidence, catalyst, source_message_id, note_source)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (session_id, slot_time, stock_code, stock_name, tag_type, theme,
-                     price_at_slot, analysis_text, confidence, source_message_id, note_source),
+                     price_at_slot, analysis_text, confidence, catalyst, source_message_id, note_source),
                 )
                 return cur.lastrowid
         except Exception as e:

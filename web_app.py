@@ -2242,11 +2242,13 @@ def create_backtest_session():
     data = request.json or {}
     run_date = (data.get('run_date') or '').strip()
     notes = (data.get('notes') or '').strip()
+    version = (data.get('version') or 'v1').strip()
+    strategy_desc = (data.get('strategy_desc') or '').strip()
     if not run_date:
         return jsonify({'success': False, 'error': 'run_date 필드 필요'}), 400
     try:
         ns = _get_news_storage()
-        session_id = ns.create_backtest_session(run_date, notes)
+        session_id = ns.create_backtest_session(run_date, notes, version, strategy_desc)
         return jsonify({'success': True, 'session_id': session_id}), 201
     except Exception as e:
         logger.error(f"create_backtest_session 실패: {e}")
@@ -2288,6 +2290,7 @@ def save_backtest_picks():
                 price_at_slot=p.get('price_at_slot'),
                 analysis_text=p.get('analysis_text'),
                 confidence=p.get('confidence'),
+                catalyst=p.get('catalyst'),
                 source_message_id=p.get('source_message_id'),
                 note_source=p.get('note_source'),
             )
@@ -2296,6 +2299,28 @@ def save_backtest_picks():
         return jsonify({'success': True, 'saved': len(saved_ids), 'ids': saved_ids}), 201
     except Exception as e:
         logger.error(f"save_backtest_picks 실패: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/backtest/compare', methods=['GET'])
+@auth.login_required
+def compare_backtest_sessions():
+    """같은 날짜의 두 세션 picks 비교. ?session_a=1&session_b=2"""
+    sid_a = request.args.get('session_a', type=int)
+    sid_b = request.args.get('session_b', type=int)
+    if not sid_a or not sid_b:
+        return jsonify({'success': False, 'error': 'session_a, session_b 필요'}), 400
+    try:
+        ns = _get_news_storage()
+        picks_a = ns.get_backtest_picks(sid_a)
+        picks_b = ns.get_backtest_picks(sid_b)
+        sessions = ns.get_backtest_sessions()
+        meta = {str(s['id']): s for s in sessions}
+        return jsonify({'success': True,
+                        'session_a': {'meta': meta.get(str(sid_a), {}), 'picks': picks_a},
+                        'session_b': {'meta': meta.get(str(sid_b), {}), 'picks': picks_b}})
+    except Exception as e:
+        logger.error(f"compare_backtest_sessions 실패: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 

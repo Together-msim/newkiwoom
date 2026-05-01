@@ -1035,8 +1035,33 @@
                         <select id="backtestSessionSelect" onchange="loadBacktestSession()">
                             <option value="">-- 세션 선택 --</option>
                         </select>
-                        <button class="btn btn-secondary" onclick="loadBacktestSessions()">🔄 새로고침</button>
+                        <button class="btn btn-secondary btn-sm" onclick="loadBacktestSessions()">🔄</button>
+                        <button class="btn btn-outline btn-sm" id="btCompareToggleBtn" onclick="toggleBtCompareMode()">⚖️ 버전 비교</button>
                     </div>
+                </div>
+
+                <!-- 버전 정보 배너 -->
+                <div id="btVersionBanner" class="bt-version-banner" style="display:none;"></div>
+
+                <!-- 버전 비교 패널 -->
+                <div id="btComparePanel" class="bt-compare-panel" style="display:none;">
+                    <div class="bt-compare-row">
+                        <div class="bt-compare-col">
+                            <label>버전 A</label>
+                            <select id="btSessionA" onchange="loadBtCompare()">
+                                <option value="">-- 선택 --</option>
+                            </select>
+                            <div id="btVersionDescA" class="bt-version-desc"></div>
+                        </div>
+                        <div class="bt-compare-col">
+                            <label>버전 B</label>
+                            <select id="btSessionB" onchange="loadBtCompare()">
+                                <option value="">-- 선택 --</option>
+                            </select>
+                            <div id="btVersionDescB" class="bt-version-desc"></div>
+                        </div>
+                    </div>
+                    <div id="btCompareResult" class="bt-compare-result"></div>
                 </div>
 
                 <!-- 슬롯 선택 탭 -->
