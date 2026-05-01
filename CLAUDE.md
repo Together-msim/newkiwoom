@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Overview
 
 Korean stock auto-trading system with two interfaces:
-1. **Web UI** (`web_app.py`) - Multi-page SPA: Watchlist, Mode1, Mode2, Tradelog, 시황체크(Siwhang), Test
+1. **Web UI** (`web_app.py`) - Multi-page SPA: Watchlist, Mode1, Mode2, Tradelog, 시황체크(Siwhang), 백테스트, Test
 2. **Signal Listener** (`signal_listener.py`) - Telegram channel archiver + keyword filter
 
 **Active strategies:**
@@ -177,7 +177,7 @@ Mode1/Mode2: waiting_buy → waiting_sell → auto_sold | manual_sold
 ### Watcher Data Files
 - `.data/mode1_watchers.json` — Mode1 감시종목
 - `.data/mode2_watchers.json` — Mode2 감시종목 (구조: `{sections:[...], watchers:{code: {...}}}`)
-- `.data/news.db` — 뉴스/급등주 SQLite DB (tables: messages, filtered_messages, themes, saved_news, siwhang_results)
+- `.data/news.db` — 뉴스/급등주 SQLite DB (tables: messages, filtered_messages, themes, saved_news, siwhang_results, backtest_sessions, backtest_picks, backtest_pnl)
 - `.data/news_keywords.json` — 뉴스 키워드 필터 (include/exclude 분리)
 - `.data/hotstock_keywords.json` — 급등주 키워드 필터 (include만)
 - `.data/keywords.json` — 구형 단일 키워드 파일 (하위호환용)
@@ -226,6 +226,7 @@ IGNORE_MARKET_HOURS=1     # 시간 검증 스킵
 | `news-insight-selected` | `/news-insight-selected` | 선택한 뉴스만 심층 분석 |
 | `news-grouping` | `/news-grouping` | 테마별 그룹핑 + 강도(H/M/L) |
 | `siwhang` | `/siwhang [1h\|2h]` | 급등주 시황 부합 여부 + 관심종목 매칭 AI 분석 → Oracle 저장 + 텔레그램 알림 |
+| `backtest` | `/backtest [YYYY-MM-DD]` | 지정 날짜 급등주/뉴스 → 13 타임슬롯 AI 분석 → 종목 추천 → Oracle 저장 |
 
 프롬프트 커스터마이징: `.claude/skills/<skill>/prompts/`
 
@@ -247,6 +248,10 @@ scp -i /Users/msim/Downloads/ssh-key-2026-04-26.key \
 
 3. **시황체크 고도화** (선택)
    - 1일 자동 삭제 (매일 자정)
+
+4. **백테스트 고도화** (선택)
+   - 종목노트 소스 추가 (`note_source` 컬럼 준비 완료)
+   - 종목별 일봉 차트 + 추천 시점 마커 (현재 카드 형태만)
 
 ## Known Issues & Lessons
 
@@ -312,7 +317,35 @@ curl -u "..." "https://www.nomaddoklip.xyz/api/..."
 - 디마크 섹션의 "1차 저항/지지 적용" 버튼으로 수동 재계산도 가능
 
 ### 모바일 UI
-- 하단 고정 탭바 (≤768px): Mode2, 시황체크, 감시리스트, Mode1, 시그널, 매매일지, Test
+- 하단 고정 탭바 (≤768px): Mode2, 시황체크, 감시리스트, Mode1, 시그널, 매매일지, 백테스트, Test
 - 기본 시작 페이지: Mode2
 - 가로모드 감지: `(max-height: 500px) and (orientation: landscape)`
 - 시황체크 테이블: 카드별 개별 검색 입력 (`data-search` 속성 pre-compute)
+
+### 백테스트 시스템 아키텍처
+- DB: `backtest_sessions` (날짜별 세션) → `backtest_picks` (슬롯별 추천) → `backtest_pnl` (P&L 입력)
+- `backtest_picks.note_source` 컬럼 — 향후 종목노트 소스 연결 예약 필드
+- API: `GET/POST /api/backtest/sessions`, `GET /api/backtest/sessions/<id>`, `POST /api/backtest/picks`, `PUT /api/backtest/picks/<id>/pnl`
+- `get_messages()` — `until_utc` 파라미터로 시각 기준 필터 (백필 데이터는 received_at 동일해서 무효)
+- `/api/hotstock/parsed`, `/api/news/today` — `until` 쿼리파라미터 추가됨
+
+### 백테스트 백필 데이터 타임슬롯 문제
+signal_listener가 다운되었다가 Pyrogram history API로 백필한 데이터는 **모든 received_at이 백필 시각으로 동일**하게 찍힘.  
+→ `until` UTC 파라미터로 시간대별 필터가 불가.  
+→ 해결책: `message_id`(텔레그램 채널 순번) 기준으로 총 건수를 13슬롯에 균등 분배해 시간 근사.  
+→ 실시간 수집 데이터는 `until` 파라미터 정상 동작.
+
+### 백테스트 종목 추천 기준 (슬롯당 최대 3종목)
+```
+Confidence H: SS⬆️(상한가) + 뉴스 교차확인 + 복합 테마(3개 이상)
+Confidence M: VI발동 or 명확한 촉매 1개
+Confidence L: SS만 있거나 단독 뉴스 (보통 미추천)
+
+우선순위: SS⬆️ > VI(복합테마) > SS(watchlist_match만) > 뉴스 교차
+SS 종목은 watchlist_match 있는 것만 분석 대상 (토큰 절약)
+```
+
+### Oracle 서버 SSH에서 Python f-string 중첩 따옴표 오류
+SSH heredoc 안에서 Python f-string 사용 시 `f"...{m.get("key")}..."` 형태는 파이썬 3.11 이하에서 SyntaxError.  
+→ 해결책 1: f-string 대신 문자열 연결 (`"prefix" + var + "suffix"`) 사용  
+→ 해결책 2: `python3 << 'PYEOF' ... PYEOF` heredoc 패턴으로 스크립트 전달
