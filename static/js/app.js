@@ -6161,6 +6161,125 @@ let _btAllPicks = [];
 let _btActiveSlot = 'all';
 let _btAllSessions = [];
 let _btCompareMode = false;
+let _acpVisible = false;
+
+function toggleAnalysisContextPanel() {
+    _acpVisible = !_acpVisible;
+    document.getElementById('analysisContextPanel').style.display = _acpVisible ? 'block' : 'none';
+    if (_acpVisible) loadAnalysisContext();
+}
+
+async function loadAnalysisContext() {
+    try {
+        const today = new Date().toISOString().slice(0, 10);
+        document.getElementById('acpDate').textContent = today;
+        const res = await fetch(`/api/analysis/context?date=${today}`, { credentials: 'same-origin' });
+        const r = await res.json();
+        if (!r.success) return;
+        const ctx = r.context;
+
+        // Morning Report 복원
+        if (ctx.morning_report) {
+            const mr = ctx.morning_report;
+            document.getElementById('acpUsMarket').value = mr.us_market || '';
+            document.getElementById('acpPredictedThemes').value = (mr.predicted_themes || []).join(', ');
+            document.getElementById('acpMorningText').value = mr.text || '';
+            document.getElementById('acpMorningStatus').textContent = '✅ 저장됨';
+            document.getElementById('acpMorningStatus').className = 'acp-status saved';
+        } else {
+            document.getElementById('acpMorningStatus').textContent = '미입력';
+            document.getElementById('acpMorningStatus').className = 'acp-status empty';
+        }
+
+        // Next Instruction
+        const instrEl = document.getElementById('acpInstruction');
+        const instrMeta = document.getElementById('acpInstrMeta');
+        const instrStatus = document.getElementById('acpInstrStatus');
+        if (ctx.next_instruction) {
+            instrEl.value = ctx.next_instruction;
+            if (ctx.instruction_used) {
+                instrStatus.textContent = '✅ 사용됨';
+                instrStatus.className = 'acp-status used';
+                instrMeta.textContent = '다음 슬롯 분석에 반영되었습니다.';
+            } else {
+                instrStatus.textContent = '⏳ 대기중';
+                instrStatus.className = 'acp-status pending';
+                instrMeta.textContent = '다음 분석 실행 시 1회 반영됩니다.';
+            }
+        } else {
+            instrEl.value = '';
+            instrStatus.textContent = '없음';
+            instrStatus.className = 'acp-status empty';
+            instrMeta.textContent = '';
+        }
+
+        // Interval Context
+        const icEl = document.getElementById('acpIntervalContext');
+        if (ctx.interval_context) {
+            icEl.textContent = JSON.stringify(ctx.interval_context, null, 2);
+        } else {
+            icEl.textContent = '(아직 분석 없음)';
+        }
+    } catch (e) {
+        console.error('loadAnalysisContext 실패', e);
+    }
+}
+
+async function saveMorningReport() {
+    const us_market = document.getElementById('acpUsMarket').value.trim();
+    const themes_raw = document.getElementById('acpPredictedThemes').value.trim();
+    const text = document.getElementById('acpMorningText').value.trim();
+    const predicted_themes = themes_raw ? themes_raw.split(',').map(s => s.trim()).filter(Boolean) : [];
+    const morning_report = { us_market, predicted_themes, text };
+    try {
+        const res = await fetch('/api/analysis/morning-report', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ morning_report })
+        });
+        const r = await res.json();
+        if (r.success) {
+            document.getElementById('acpMorningStatus').textContent = '✅ 저장됨';
+            document.getElementById('acpMorningStatus').className = 'acp-status saved';
+            showToast('Morning Report 저장됨', 'success');
+        } else {
+            showToast('저장 실패', 'error');
+        }
+    } catch (e) { showToast('저장 실패', 'error'); }
+}
+
+async function saveNextInstruction() {
+    const instruction = document.getElementById('acpInstruction').value.trim();
+    try {
+        const res = await fetch('/api/analysis/instruction', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ instruction: instruction || null })
+        });
+        const r = await res.json();
+        if (r.success) {
+            const status = document.getElementById('acpInstrStatus');
+            const meta = document.getElementById('acpInstrMeta');
+            if (instruction) {
+                status.textContent = '⏳ 대기중';
+                status.className = 'acp-status pending';
+                meta.textContent = '다음 분석 실행 시 1회 반영됩니다.';
+            } else {
+                status.textContent = '없음';
+                status.className = 'acp-status empty';
+                meta.textContent = '';
+            }
+            showToast('인스트럭션 저장됨', 'success');
+        } else {
+            showToast('저장 실패', 'error');
+        }
+    } catch (e) { showToast('저장 실패', 'error'); }
+}
+
+async function clearNextInstruction() {
+    document.getElementById('acpInstruction').value = '';
+    await saveNextInstruction();
+}
 
 async function loadBacktestSessions() {
     try {

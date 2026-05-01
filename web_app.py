@@ -2359,6 +2359,55 @@ def update_backtest_pnl(pick_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/analysis/context', methods=['GET'])
+@auth.login_required
+def get_analysis_context():
+    """당일 분석 컨텍스트 조회."""
+    ctx_date = request.args.get('date')
+    ns = _get_news_storage()
+    return jsonify({'success': True, 'context': ns.get_analysis_context(ctx_date)})
+
+
+@app.route('/api/analysis/morning-report', methods=['POST'])
+@auth.login_required
+def save_morning_report():
+    """아침 시황 리포트 저장. { morning_report: {...}, date: 'YYYY-MM-DD' }"""
+    data = request.json or {}
+    report = data.get('morning_report')
+    ctx_date = data.get('date')
+    if not report:
+        return jsonify({'success': False, 'error': 'morning_report 필요'}), 400
+    ns = _get_news_storage()
+    ok = ns.save_morning_report(report, ctx_date)
+    return jsonify({'success': ok})
+
+
+@app.route('/api/analysis/instruction', methods=['POST'])
+@auth.login_required
+def save_next_instruction():
+    """다음 슬롯 분석용 추가 인스트럭션 저장. { instruction: "...", date: "YYYY-MM-DD" }"""
+    data = request.json or {}
+    instruction = (data.get('instruction') or '').strip() or None
+    ctx_date = data.get('date')
+    ns = _get_news_storage()
+    ok = ns.save_next_instruction(instruction, ctx_date)
+    return jsonify({'success': ok})
+
+
+@app.route('/api/analysis/interval-context', methods=['POST'])
+@auth.login_required
+def update_interval_context():
+    """슬롯 분석 완료 후 interval_context 업데이트 (스킬에서 호출). { interval_context: {...} }"""
+    data = request.json or {}
+    ctx = data.get('interval_context')
+    ctx_date = data.get('date')
+    if not ctx:
+        return jsonify({'success': False, 'error': 'interval_context 필요'}), 400
+    ns = _get_news_storage()
+    ok = ns.update_interval_context(ctx, ctx_date)
+    return jsonify({'success': ok})
+
+
 def start_price_monitor():
     """PriceMonitor를 별도 스레드에서 실행"""
     if not price_monitor:

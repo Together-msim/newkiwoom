@@ -1037,6 +1037,68 @@
                         </select>
                         <button class="btn btn-secondary btn-sm" onclick="loadBacktestSessions()">🔄</button>
                         <button class="btn btn-outline btn-sm" id="btCompareToggleBtn" onclick="toggleBtCompareMode()">⚖️ 버전 비교</button>
+                        <button class="btn btn-outline btn-sm" onclick="toggleAnalysisContextPanel()">📋 시황 설정</button>
+                    </div>
+                </div>
+
+                <!-- 분석 컨텍스트 패널 -->
+                <div id="analysisContextPanel" class="analysis-context-panel" style="display:none;">
+                    <div class="acp-header">
+                        <span class="acp-title">📋 오늘 분석 설정</span>
+                        <span id="acpDate" class="acp-date"></span>
+                        <button class="btn btn-sm btn-secondary" onclick="loadAnalysisContext()">🔄</button>
+                    </div>
+
+                    <!-- Morning Report -->
+                    <div class="acp-section">
+                        <div class="acp-section-header">
+                            <span>🌅 Morning Report</span>
+                            <span id="acpMorningStatus" class="acp-status"></span>
+                        </div>
+                        <div class="acp-row">
+                            <div class="acp-field">
+                                <label>해외증시 요약</label>
+                                <input type="text" id="acpUsMarket" placeholder="나스닥 +0.04%, 빅테크 AI 어닝서프..." style="width:100%;">
+                            </div>
+                        </div>
+                        <div class="acp-row">
+                            <div class="acp-field">
+                                <label>예측 테마 (콤마 구분)</label>
+                                <input type="text" id="acpPredictedThemes" placeholder="AI/로봇, 전선/해저케이블, 낸드" style="width:100%;">
+                            </div>
+                        </div>
+                        <div class="acp-row">
+                            <div class="acp-field" style="flex:1;">
+                                <label>주요 내용 (자유 입력)</label>
+                                <textarea id="acpMorningText" rows="4" placeholder="알파벳 1Q 매출 22%↑, MS 애저 40%↑ 등 빅테크 AI 어닝서프&#10;LG전자-엔비디아 피지컬AI 협업 발표&#10;관련주: 나우로보틱스, 로보티즈..." style="width:100%;"></textarea>
+                            </div>
+                        </div>
+                        <button class="btn btn-sm btn-primary" onclick="saveMorningReport()">저장</button>
+                    </div>
+
+                    <!-- Next Instruction -->
+                    <div class="acp-section">
+                        <div class="acp-section-header">
+                            <span>💬 다음 분석 추가 인스트럭션</span>
+                            <span id="acpInstrStatus" class="acp-status"></span>
+                        </div>
+                        <div class="acp-row">
+                            <div class="acp-field" style="flex:1;">
+                                <textarea id="acpInstruction" rows="2" placeholder="(선택사항) 예: 방산 테마 특히 주목해줘 / 12:15 이후는 보수적으로 판단해줘" style="width:100%;"></textarea>
+                            </div>
+                        </div>
+                        <div class="acp-instr-meta" id="acpInstrMeta"></div>
+                        <button class="btn btn-sm btn-primary" onclick="saveNextInstruction()">저장</button>
+                        <button class="btn btn-sm btn-secondary" onclick="clearNextInstruction()">지우기</button>
+                    </div>
+
+                    <!-- Interval Context (읽기 전용) -->
+                    <div class="acp-section">
+                        <div class="acp-section-header">
+                            <span>📊 당일 누적 시황 (interval_context)</span>
+                            <span class="acp-hint">스킬 실행 시 자동 업데이트</span>
+                        </div>
+                        <pre id="acpIntervalContext" class="acp-json-view">-</pre>
                     </div>
                 </div>
 

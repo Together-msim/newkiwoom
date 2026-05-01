@@ -2067,3 +2067,64 @@ tbody tr.inactive {
     border: none;
 }
 .btn-success:hover { background: #1b5e20; }
+
+/* ── 분석 컨텍스트 패널 ─────────────────────────── */
+.analysis-context-panel {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 16px;
+}
+.acp-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+}
+.acp-title { font-size: 14px; font-weight: 600; }
+.acp-date { font-size: 12px; color: var(--text-secondary); }
+.acp-section {
+    border-top: 1px solid var(--border-color);
+    padding-top: 12px;
+    margin-top: 12px;
+}
+.acp-section-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+    font-size: 13px;
+    font-weight: 600;
+}
+.acp-hint { font-size: 11px; color: var(--text-secondary); font-weight: 400; }
+.acp-row { display: flex; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+.acp-field { display: flex; flex-direction: column; gap: 4px; flex: 1; }
+.acp-field label { font-size: 11px; color: var(--text-secondary); }
+.acp-field input, .acp-field textarea {
+    padding: 6px 8px;
+    background: var(--input-bg, var(--bg-secondary));
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-primary);
+    font-size: 12px;
+    resize: vertical;
+}
+.acp-instr-meta { font-size: 11px; color: var(--text-secondary); margin: 4px 0 8px; min-height: 14px; }
+.acp-status { font-size: 11px; padding: 2px 6px; border-radius: 10px; }
+.acp-status.saved { background: #1b5e2022; color: #2e7d32; }
+.acp-status.pending { background: #e65100aa; color: #ff8f00; }
+.acp-status.used { background: #1565c022; color: #1565c0; }
+.acp-status.empty { color: var(--text-secondary); }
+.acp-json-view {
+    font-size: 11px;
+    color: var(--text-secondary);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 8px;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    max-height: 200px;
+    overflow-y: auto;
+}

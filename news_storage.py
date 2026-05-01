@@ -139,6 +139,16 @@ class NewsStorage:
 
                 CREATE INDEX IF NOT EXISTS idx_backtest_picks_session ON backtest_picks(session_id);
                 CREATE INDEX IF NOT EXISTS idx_backtest_sessions_date ON backtest_sessions(run_date);
+
+                CREATE TABLE IF NOT EXISTS analysis_context (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    context_date TEXT NOT NULL UNIQUE,
+                    morning_report TEXT,
+                    interval_context TEXT,
+                    next_instruction TEXT,
+                    instruction_used INTEGER NOT NULL DEFAULT 0,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
             """)
             # 기존 DB 마이그레이션 (컬럼 없으면 추가)
             for col, definition in [
@@ -577,3 +587,107 @@ class NewsStorage:
         except Exception as e:
             logger.error(f"upsert_backtest_pnl 실패: {e}")
             return False
+
+    # ─── 분석 컨텍스트 ─────────────────────────────────────────
+
+    def get_analysis_context(self, context_date: Optional[str] = None) -> Dict:
+        """당일 분석 컨텍스트 조회. 없으면 빈 구조 반환."""
+        if context_date is None:
+            context_date = date.today().isoformat()
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM analysis_context WHERE context_date=?", (context_date,)
+            ).fetchone()
+        if not row:
+            return {
+                "context_date": context_date,
+                "morning_report": None,
+                "interval_context": None,
+                "next_instruction": None,
+                "instruction_used": 0,
+            }
+        d = dict(row)
+        for field in ("morning_report", "interval_context"):
+            if d.get(field):
+                try:
+                    d[field] = json.loads(d[field])
+                except Exception:
+                    pass
+        return d
+
+    def save_morning_report(self, morning_report: dict, context_date: Optional[str] = None) -> bool:
+        if context_date is None:
+            context_date = date.today().isoformat()
+        try:
+            with self._conn() as conn:
+                conn.execute(
+                    """INSERT INTO analysis_context (context_date, morning_report, updated_at)
+                       VALUES (?, ?, CURRENT_TIMESTAMP)
+                       ON CONFLICT(context_date) DO UPDATE SET
+                           morning_report=excluded.morning_report,
+                           updated_at=CURRENT_TIMESTAMP""",
+                    (context_date, json.dumps(morning_report, ensure_ascii=False)),
+                )
+            return True
+        except Exception as e:
+            logger.error(f"save_morning_report 실패: {e}")
+            return False
+
+    def save_next_instruction(self, instruction: Optional[str], context_date: Optional[str] = None) -> bool:
+        if context_date is None:
+            context_date = date.today().isoformat()
+        try:
+            with self._conn() as conn:
+                conn.execute(
+                    """INSERT INTO analysis_context (context_date, next_instruction, instruction_used, updated_at)
+                       VALUES (?, ?, 0, CURRENT_TIMESTAMP)
+                       ON CONFLICT(context_date) DO UPDATE SET
+                           next_instruction=excluded.next_instruction,
+                           instruction_used=0,
+                           updated_at=CURRENT_TIMESTAMP""",
+                    (context_date, instruction),
+                )
+            return True
+        except Exception as e:
+            logger.error(f"save_next_instruction 실패: {e}")
+            return False
+
+    def update_interval_context(self, interval_context: dict, context_date: Optional[str] = None) -> bool:
+        """슬롯 분석 완료 후 누적 테마 컨텍스트 업데이트."""
+        if context_date is None:
+            context_date = date.today().isoformat()
+        try:
+            with self._conn() as conn:
+                conn.execute(
+                    """INSERT INTO analysis_context (context_date, interval_context, updated_at)
+                       VALUES (?, ?, CURRENT_TIMESTAMP)
+                       ON CONFLICT(context_date) DO UPDATE SET
+                           interval_context=excluded.interval_context,
+                           updated_at=CURRENT_TIMESTAMP""",
+                    (context_date, json.dumps(interval_context, ensure_ascii=False)),
+                )
+            return True
+        except Exception as e:
+            logger.error(f"update_interval_context 실패: {e}")
+            return False
+
+    def consume_next_instruction(self, context_date: Optional[str] = None) -> Optional[str]:
+        """next_instruction 읽고 used 처리. 스킬 실행 시 1회 호출."""
+        if context_date is None:
+            context_date = date.today().isoformat()
+        try:
+            with self._conn() as conn:
+                row = conn.execute(
+                    "SELECT next_instruction, instruction_used FROM analysis_context WHERE context_date=?",
+                    (context_date,),
+                ).fetchone()
+                if not row or row["instruction_used"] == 1 or not row["next_instruction"]:
+                    return None
+                conn.execute(
+                    "UPDATE analysis_context SET instruction_used=1, updated_at=CURRENT_TIMESTAMP WHERE context_date=?",
+                    (context_date,),
+                )
+                return row["next_instruction"]
+        except Exception as e:
+            logger.error(f"consume_next_instruction 실패: {e}")
+            return None
