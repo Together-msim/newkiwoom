@@ -2291,6 +2291,7 @@ def save_backtest_picks():
                 analysis_text=p.get('analysis_text'),
                 confidence=p.get('confidence'),
                 catalyst=p.get('catalyst'),
+                sources=p.get('sources'),
                 source_message_id=p.get('source_message_id'),
                 note_source=p.get('note_source'),
             )

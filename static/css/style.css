@@ -2003,3 +2003,67 @@ tbody tr.inactive {
     color: var(--text-primary);
 }
 .btn-outline:hover { background: var(--bg-secondary); }
+
+/* ─── 백테스트 소스 타임스탬프 ──────────────────────────── */
+
+.bt-sources {
+    margin-bottom: 8px;
+    background: #f9f9f9;
+    border-radius: 6px;
+    padding: 7px 10px;
+    border: 1px solid var(--border-color);
+}
+
+.bt-sources-label {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 5px;
+}
+
+.bt-source-item {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    font-size: 11px;
+    line-height: 1.6;
+    flex-wrap: wrap;
+}
+
+.bt-source-type {
+    font-weight: 600;
+    min-width: 52px;
+    color: #555;
+}
+
+.bt-source-time {
+    color: var(--text-secondary);
+    min-width: 68px;
+    font-size: 10px;
+}
+
+.bt-source-text {
+    color: var(--text-primary);
+    flex: 1;
+}
+
+/* ─── 감시리스트 등록 행 ─────────────────────────────────── */
+
+.bt-watchlist-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 10px;
+    border-top: 1px dashed var(--border-color);
+    padding-top: 10px;
+    margin-top: 6px;
+    flex-wrap: wrap;
+}
+
+.btn-success {
+    background: #2e7d32;
+    color: #fff;
+    border: none;
+}
+.btn-success:hover { background: #1b5e20; }

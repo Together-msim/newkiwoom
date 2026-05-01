@@ -151,6 +151,7 @@ class NewsStorage:
                     pass
             for col, definition in [
                 ("catalyst", "TEXT"),
+                ("sources_json", "TEXT"),
             ]:
                 try:
                     conn.execute(f"ALTER TABLE backtest_picks ADD COLUMN {col} {definition}")
@@ -508,17 +509,24 @@ class NewsStorage:
                            theme: Optional[str] = None, price_at_slot: Optional[float] = None,
                            analysis_text: Optional[str] = None, confidence: Optional[str] = None,
                            catalyst: Optional[str] = None,
+                           sources: Optional[List[Dict]] = None,
                            source_message_id: Optional[int] = None,
                            note_source: Optional[str] = None) -> Optional[int]:
+        """
+        sources: [{"type":"hotstock"|"news"|"google"|"dart", "time":"HH:MM KST", "text":"..."}]
+        """
+        sources_json = json.dumps(sources, ensure_ascii=False) if sources else None
         try:
             with self._conn() as conn:
                 cur = conn.execute(
                     """INSERT INTO backtest_picks
                        (session_id, slot_time, stock_code, stock_name, tag_type, theme,
-                        price_at_slot, analysis_text, confidence, catalyst, source_message_id, note_source)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        price_at_slot, analysis_text, confidence, catalyst, sources_json,
+                        source_message_id, note_source)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (session_id, slot_time, stock_code, stock_name, tag_type, theme,
-                     price_at_slot, analysis_text, confidence, catalyst, source_message_id, note_source),
+                     price_at_slot, analysis_text, confidence, catalyst, sources_json,
+                     source_message_id, note_source),
                 )
                 return cur.lastrowid
         except Exception as e:
@@ -536,7 +544,15 @@ class NewsStorage:
                    ORDER BY p.slot_time ASC, p.id ASC""",
                 (session_id,)
             ).fetchall()
-        return [dict(r) for r in rows]
+        result = []
+        for r in rows:
+            d = dict(r)
+            try:
+                d['sources'] = json.loads(d['sources_json']) if d.get('sources_json') else []
+            except Exception:
+                d['sources'] = []
+            result.append(d)
+        return result
 
     def upsert_backtest_pnl(self, pick_id: int, buy_price: Optional[float],
                              exit_price: Optional[float], stoploss_price: Optional[float],

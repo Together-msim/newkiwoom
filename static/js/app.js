@@ -6373,6 +6373,29 @@ function renderBacktestPickCard(p) {
         ? `<div class="bt-note-source">📝 ${p.note_source}</div>`
         : '';
 
+    // 소스 타임스탬프 목록
+    const sources = p.sources || [];
+    const typeLabel = { hotstock: '🚀급등주', news: '📰뉴스DB', google: '🔍실검', dart: '📋공시' };
+    const sourcesHtml = sources.length ? `
+    <div class="bt-sources">
+        <div class="bt-sources-label">확인 소스</div>
+        ${sources.map(s => `<div class="bt-source-item">
+            <span class="bt-source-type">${typeLabel[s.type] || s.type}</span>
+            <span class="bt-source-time">${s.time || ''}</span>
+            <span class="bt-source-text">${escapeHtml(s.text || '')}</span>
+        </div>`).join('')}
+    </div>` : '';
+
+    // 감시리스트 등록 버튼 (종목코드 있을 때만)
+    const watchlistBtnHtml = p.stock_code ? `
+    <div class="bt-watchlist-row">
+        <div class="bt-pnl-field">
+            <label>버짓(만원)</label>
+            <input type="number" id="btBudget_${p.id}" placeholder="100">
+        </div>
+        <button class="btn btn-sm btn-success" onclick="btRegisterMode2(${p.id})">📊 Mode2 등록</button>
+    </div>` : '';
+
     return `
 <div class="bt-pick-card" id="btCard_${p.id}">
     <div class="bt-pick-header">
@@ -6384,6 +6407,7 @@ function renderBacktestPickCard(p) {
     </div>
     <div class="bt-pick-meta">${[priceStr, themeStr].filter(Boolean).join(' · ')}</div>
     ${p.catalyst ? `<div class="bt-catalyst"><div class="bt-catalyst-label">촉매/시황</div>${escapeHtml(p.catalyst)}</div>` : ''}
+    ${sourcesHtml}
     ${p.analysis_text ? `<div class="bt-pick-analysis">${escapeHtml(p.analysis_text)}</div>` : ''}
     ${noteSourceHtml}
     <div class="bt-pnl-form">
@@ -6405,6 +6429,7 @@ function renderBacktestPickCard(p) {
         </div>
         <button class="btn btn-sm btn-primary" onclick="saveBacktestPnl(${p.id})">저장</button>
     </div>
+    ${watchlistBtnHtml}
 </div>`;
 }
 
@@ -6437,6 +6462,44 @@ async function saveBacktestPnl(pickId) {
             showToast(r.error || '저장 실패', 'error');
         }
     } catch (e) { showToast('저장 실패', 'error'); }
+}
+
+async function btRegisterMode2(pickId) {
+    const pick = _btAllPicks.find(p => p.id === pickId);
+    if (!pick || !pick.stock_code) { showToast('종목코드 없음', 'error'); return; }
+
+    const buy = parseFloat(document.getElementById(`btBuy_${pickId}`)?.value) || null;
+    const exit = parseFloat(document.getElementById(`btExit_${pickId}`)?.value) || null;
+    const stop = parseFloat(document.getElementById(`btStop_${pickId}`)?.value) || null;
+    const budgetMan = parseFloat(document.getElementById(`btBudget_${pickId}`)?.value) || null;
+
+    if (!buy) { showToast('매수가 입력 필요', 'error'); return; }
+    if (!budgetMan) { showToast('버짓(만원) 입력 필요', 'error'); return; }
+
+    const payload = {
+        code: pick.stock_code,
+        name: pick.stock_name,
+        buy_target_price: buy,
+        resistance_1_price: exit || null,
+        support_1_price: stop || null,
+        budget: budgetMan * 10000,
+        notify_only: true,
+    };
+
+    try {
+        const res = await fetch('/api/mode2/watchers', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const r = await res.json();
+        if (r.success) {
+            showToast(`📊 Mode2 등록 완료: ${pick.stock_name}`, 'success');
+        } else {
+            showToast(r.error || '등록 실패', 'error');
+        }
+    } catch (e) { showToast('등록 실패', 'error'); }
 }
 
 function escapeHtml(s) {
