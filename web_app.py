@@ -2408,6 +2408,40 @@ def update_interval_context():
     return jsonify({'success': ok})
 
 
+@app.route('/api/analysis/request', methods=['POST'])
+@auth.login_required
+def request_analysis():
+    """웹 UI '▶ 지금 분석' 버튼 → 분석 트리거 플래그 세팅. poll_trigger.py가 감지해 실행."""
+    ns = _get_news_storage()
+    ok = ns.set_analysis_request()
+    return jsonify({'success': ok})
+
+
+@app.route('/api/analysis/pending', methods=['GET'])
+@auth.login_required
+def get_analysis_pending():
+    """poll_trigger.py가 30초마다 polling. pending이면 값 반환 + 자동 클리어."""
+    ns = _get_news_storage()
+    val = ns.get_and_clear_analysis_request()
+    return jsonify({'pending': val is not None, 'requested_at': val})
+
+
+@app.route('/api/live/picks', methods=['GET'])
+@auth.login_required
+def get_live_picks():
+    """오늘 날짜 기준 가장 최신 backtest session의 picks 반환 (실전 페이지용)."""
+    from datetime import date as _date
+    today = _date.today().isoformat()
+    ns = _get_news_storage()
+    sessions = ns.get_backtest_sessions()
+    today_sessions = [s for s in sessions if s['run_date'] == today]
+    if not today_sessions:
+        return jsonify({'success': True, 'data': [], 'session': None})
+    latest = today_sessions[0]  # created_at DESC 정렬이므로 첫 번째가 최신
+    picks = ns.get_backtest_picks(latest['id'])
+    return jsonify({'success': True, 'data': picks, 'session': latest})
+
+
 # ─── 재무정보 (Financial Info) ────────────────────────────────────────────
 
 import json as _json

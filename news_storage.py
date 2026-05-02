@@ -206,6 +206,13 @@ class NewsStorage:
                     conn.execute(f"ALTER TABLE backtest_picks ADD COLUMN {col} {definition}")
                 except Exception:
                     pass
+            for col, definition in [
+                ("analysis_request", "TEXT"),  # ISO datetime, null이면 pending 없음
+            ]:
+                try:
+                    conn.execute(f"ALTER TABLE analysis_context ADD COLUMN {col} {definition}")
+                except Exception:
+                    pass
         logger.info(f"NewsStorage 초기화 완료: {self.db_path}")
 
     # ─── 메시지 저장 ───────────────────────────────────────────
@@ -729,6 +736,50 @@ class NewsStorage:
                 return row["next_instruction"]
         except Exception as e:
             logger.error(f"consume_next_instruction 실패: {e}")
+            return None
+
+    # ─── 분석 요청 트리거 ────────────────────────────────────────
+
+    def set_analysis_request(self, context_date: Optional[str] = None) -> bool:
+        """분석 요청 플래그 세팅. poll_trigger.py가 감지해 /siwhang 실행."""
+        if context_date is None:
+            context_date = date.today().isoformat()
+        requested_at = datetime.utcnow().isoformat()
+        try:
+            with self._conn() as conn:
+                conn.execute(
+                    """INSERT INTO analysis_context (context_date, analysis_request, updated_at)
+                       VALUES (?, ?, CURRENT_TIMESTAMP)
+                       ON CONFLICT(context_date) DO UPDATE SET
+                           analysis_request=excluded.analysis_request,
+                           updated_at=CURRENT_TIMESTAMP""",
+                    (context_date, requested_at),
+                )
+            return True
+        except Exception as e:
+            logger.error(f"set_analysis_request 실패: {e}")
+            return False
+
+    def get_and_clear_analysis_request(self, context_date: Optional[str] = None) -> Optional[str]:
+        """pending 요청 읽고 즉시 null로 클리어. poll_trigger.py 전용."""
+        if context_date is None:
+            context_date = date.today().isoformat()
+        try:
+            with self._conn() as conn:
+                row = conn.execute(
+                    "SELECT analysis_request FROM analysis_context WHERE context_date=?",
+                    (context_date,)
+                ).fetchone()
+                if not row or not row["analysis_request"]:
+                    return None
+                val = row["analysis_request"]
+                conn.execute(
+                    "UPDATE analysis_context SET analysis_request=NULL, updated_at=CURRENT_TIMESTAMP WHERE context_date=?",
+                    (context_date,)
+                )
+                return val
+        except Exception as e:
+            logger.error(f"get_and_clear_analysis_request 실패: {e}")
             return None
 
     # ─── 격언(Trading Mottos) ──────────────────────────────────

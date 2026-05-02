@@ -42,6 +42,7 @@ function switchPage(pageName) {
     else if (pageName === 'mode2') loadMode2List();
     else if (pageName === 'tradelog') loadTradelog();
     else if (pageName === 'siwhang') loadSiwhang();
+    else if (pageName === 'live') loadLive();
     else if (pageName === 'backtest') { loadBacktestSessions(); loadMottos(); }
     else if (pageName === 'test') loadMode2PickList();
 }
@@ -7179,3 +7180,318 @@ async function deleteMotto(mottoId) {
         }
     } catch (e) { showToast('삭제 실패', 'error'); }
 }
+
+// ========== 실전 트레이딩 (Live) ==========
+let _liveAllPicks = [];
+let _liveSlotPicks = [];
+let _liveActiveSlot = 'current';
+let _liveCarouselIdx = 0;
+const _liveChartLoaded = {};  // pickId → true (차트 로드 완료 여부)
+
+const _LIVE_SLOTS = ['09:15','09:45','10:15','10:45','11:15','11:45',
+                     '12:15','12:45','13:15','13:45','14:15','14:45','15:15'];
+
+function _getCurrentLiveSlot() {
+    const now = new Date();
+    const hhmm = String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
+    const past = _LIVE_SLOTS.filter(s => s <= hhmm);
+    if (past.length) return past[past.length - 1];
+    return hhmm < '09:15' ? _LIVE_SLOTS[0] : _LIVE_SLOTS[_LIVE_SLOTS.length - 1];
+}
+
+async function loadLive() {
+    try {
+        const res = await fetch('/api/live/picks', { credentials: 'same-origin' });
+        const r = await res.json();
+        if (!r.success) { showToast(r.error || '로드 실패', 'error'); return; }
+
+        _liveAllPicks = r.data || [];
+        const session = r.session;
+
+        const emptyState = document.getElementById('liveEmptyState');
+        const slotBar = document.getElementById('liveSlotBar');
+        const banner = document.getElementById('liveSessionBanner');
+
+        if (!_liveAllPicks.length) {
+            emptyState.style.display = '';
+            slotBar.style.display = 'none';
+            banner.style.display = 'none';
+            document.getElementById('liveCarouselTrack').innerHTML = '';
+            document.getElementById('liveDesktopList').innerHTML = '';
+            return;
+        }
+
+        emptyState.style.display = 'none';
+        slotBar.style.display = '';
+
+        if (session) {
+            banner.textContent = (session.version || 'v1') + '  ' + session.run_date +
+                (session.strategy_desc ? '  ·  ' + session.strategy_desc : '');
+            banner.style.display = '';
+        }
+
+        _liveActiveSlot = _getCurrentLiveSlot();
+        _highlightLiveSlotBtn(_liveActiveSlot);
+        _liveCarouselIdx = 0;
+        Object.keys(_liveChartLoaded).forEach(k => delete _liveChartLoaded[k]);
+        _renderLive();
+    } catch (e) {
+        showToast('로드 실패', 'error');
+        console.error(e);
+    }
+}
+
+function filterLiveSlot(slot) {
+    _liveActiveSlot = slot;
+    _highlightLiveSlotBtn(slot);
+    _liveCarouselIdx = 0;
+    Object.keys(_liveChartLoaded).forEach(k => delete _liveChartLoaded[k]);
+    _renderLive();
+}
+
+function _highlightLiveSlotBtn(slot) {
+    document.querySelectorAll('#liveSlotBar .slot-btn').forEach(b =>
+        b.classList.toggle('active', b.dataset.slot === slot));
+}
+
+function _renderLive() {
+    _liveSlotPicks = _liveActiveSlot === 'all'
+        ? _liveAllPicks
+        : _liveAllPicks.filter(p => p.slot_time === _liveActiveSlot);
+
+    const isMobile = window.innerWidth <= 768;
+    const carouselWrapper = document.getElementById('liveCarouselWrapper');
+    const desktopList = document.getElementById('liveDesktopList');
+
+    if (isMobile) {
+        carouselWrapper.style.display = '';
+        desktopList.style.display = 'none';
+        renderLiveCarousel();
+    } else {
+        carouselWrapper.style.display = 'none';
+        desktopList.style.display = '';
+        renderLiveDesktop();
+    }
+}
+
+function renderLiveCarousel() {
+    const track = document.getElementById('liveCarouselTrack');
+    const dots = document.getElementById('liveCarouselDots');
+
+    if (!_liveSlotPicks.length) {
+        track.innerHTML = '<div class="live-carousel-slide"><p class="empty-state" style="padding:32px 16px;">해당 슬롯에 추천 종목이 없습니다.</p></div>';
+        dots.innerHTML = '';
+        return;
+    }
+
+    track.innerHTML = _liveSlotPicks.map(p =>
+        `<div class="live-carousel-slide">${renderLivePickCard(p)}</div>`
+    ).join('');
+
+    dots.innerHTML = _liveSlotPicks.map((_, i) =>
+        `<span class="live-carousel-dot${i === _liveCarouselIdx ? ' active' : ''}" onclick="liveCarouselGoTo(${i})"></span>`
+    ).join('');
+
+    _updateCarouselPosition();
+    // 첫 번째 카드 차트 지연 로드
+    setTimeout(() => _loadLiveCardChart(_liveCarouselIdx), 100);
+}
+
+function renderLiveDesktop() {
+    const list = document.getElementById('liveDesktopList');
+    if (!_liveSlotPicks.length) {
+        list.innerHTML = '<p class="empty-state">해당 슬롯에 추천 종목이 없습니다.</p>';
+        return;
+    }
+    list.innerHTML = _liveSlotPicks.map(p => renderLivePickCard(p)).join('');
+    // 데스크탑은 모든 카드 차트 순차 로드
+    _liveSlotPicks.forEach((p, i) => {
+        setTimeout(() => _loadLiveCardChart(i), i * 300);
+    });
+}
+
+function renderLivePickCard(p) {
+    const confClass = p.confidence === 'H' ? 'bt-conf-h' : p.confidence === 'M' ? 'bt-conf-m' : 'bt-conf-l';
+    const tagLabel = { ss_up: '🚀 상한가', vi: '⚡ VI', ss: '📈 급등', news: '📰 뉴스' }[p.tag_type] || (p.tag_type || '');
+    const priceStr = p.price_at_slot ? Number(p.price_at_slot).toLocaleString() + '원' : '-';
+
+    const sourcesHtml = (() => {
+        if (!p.sources_json) return '';
+        try {
+            const srcs = JSON.parse(p.sources_json);
+            if (!srcs || !srcs.length) return '';
+            return `<div class="bt-sources">${srcs.slice(0,3).map(s =>
+                `<div class="bt-source-item"><span class="bt-src-type">${s.type||''}</span><span class="bt-src-text">${escapeHtml((s.text||'').substring(0,60))}${(s.text||'').length>60?'…':''}</span></div>`
+            ).join('')}</div>`;
+        } catch(e) { return ''; }
+    })();
+
+    return `
+<div class="bt-pick-card live-pick-card" id="liveCard_${p.id}">
+    <div class="bt-pick-header">
+        <span class="bt-pick-name">${escapeHtml(p.stock_name)}${p.stock_code ? ` <small style="color:#868e96">${p.stock_code}</small>` : ''}</span>
+        <span class="bt-pick-slot">${p.slot_time}</span>
+        ${tagLabel ? `<span class="tag-badge tag-${p.tag_type||'ss'}">${tagLabel}</span>` : ''}
+        ${p.confidence ? `<span class="${confClass}" style="font-weight:700;font-size:13px;">[${p.confidence}]</span>` : ''}
+    </div>
+    <div class="bt-pick-meta">
+        ${p.theme ? `<span>📌 ${escapeHtml(p.theme)}</span>` : ''}
+        <span>추천가 <strong>${priceStr}</strong></span>
+    </div>
+    ${p.catalyst ? `<div class="bt-catalyst"><span class="bt-catalyst-label">촉매</span>${escapeHtml(p.catalyst)}</div>` : ''}
+    ${p.analysis_text ? `<div class="bt-pick-analysis">${escapeHtml(p.analysis_text)}</div>` : ''}
+    ${sourcesHtml}
+    ${p.stock_code ? `
+    <div id="liveChartContainer_${p.id}" class="live-chart-container" style="display:none;">
+        <div class="live-chart-loading">차트 로딩 중...</div>
+        <canvas id="liveChart_${p.id}"></canvas>
+    </div>
+    <div class="live-register-row">
+        <div class="live-register-field">
+            <label>매수가</label>
+            <input type="number" id="liveBuyPrice_${p.id}" placeholder="${p.price_at_slot ? Math.round(p.price_at_slot) : ''}">
+        </div>
+        <div class="live-register-field">
+            <label>예산(만원)</label>
+            <input type="number" id="liveBudget_${p.id}" placeholder="100">
+        </div>
+        <button class="btn btn-sm btn-success" onclick="liveRegisterMode2(${p.id})">📊 Mode2 등록</button>
+    </div>` : '<div class="live-register-row"><span style="color:#868e96;font-size:12px">종목코드 없음 — Mode2 등록 불가</span></div>'}
+</div>`;
+}
+
+function liveCarouselMove(dir) {
+    const max = _liveSlotPicks.length - 1;
+    _liveCarouselIdx = Math.max(0, Math.min(max, _liveCarouselIdx + dir));
+    _updateCarouselPosition();
+    _updateCarouselDots();
+    setTimeout(() => _loadLiveCardChart(_liveCarouselIdx), 50);
+}
+
+function liveCarouselGoTo(idx) {
+    _liveCarouselIdx = idx;
+    _updateCarouselPosition();
+    _updateCarouselDots();
+    setTimeout(() => _loadLiveCardChart(idx), 50);
+}
+
+function _updateCarouselPosition() {
+    const track = document.getElementById('liveCarouselTrack');
+    if (track) track.style.transform = `translateX(-${_liveCarouselIdx * 100}%)`;
+}
+
+function _updateCarouselDots() {
+    document.querySelectorAll('.live-carousel-dot').forEach((d, i) =>
+        d.classList.toggle('active', i === _liveCarouselIdx));
+}
+
+async function _loadLiveCardChart(idx) {
+    if (idx >= _liveSlotPicks.length) return;
+    const p = _liveSlotPicks[idx];
+    if (!p.stock_code) return;
+    if (_liveChartLoaded[p.id]) return;
+
+    const containerId = `liveChartContainer_${p.id}`;
+    const canvasId = `liveChart_${p.id}`;
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    container.style.display = '';
+    try {
+        const res = await fetch('/api/test/daily-chart', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ symbol: p.stock_code })
+        });
+        const result = await res.json();
+        if (result.success) {
+            const loadingEl = container.querySelector('.live-chart-loading');
+            if (loadingEl) loadingEl.style.display = 'none';
+            _liveChartLoaded[p.id] = true;
+            drawCandlestickChart(result.data, canvasId, containerId);
+        } else {
+            container.querySelector('.live-chart-loading').textContent = '차트 조회 실패';
+        }
+    } catch (e) {
+        const el = container.querySelector('.live-chart-loading');
+        if (el) el.textContent = '차트 조회 실패';
+    }
+}
+
+async function liveRegisterMode2(pickId) {
+    const pick = _liveAllPicks.find(p => p.id === pickId);
+    if (!pick || !pick.stock_code) { showToast('종목코드 없음', 'error'); return; }
+
+    const buyPriceInput = document.getElementById(`liveBuyPrice_${pickId}`);
+    const budgetInput = document.getElementById(`liveBudget_${pickId}`);
+    const buyPrice = parseFloat(buyPriceInput?.value) || pick.price_at_slot || null;
+    const budgetMan = parseFloat(budgetInput?.value) || null;
+
+    if (!budgetMan) { showToast('예산(만원) 입력 필요', 'error'); return; }
+
+    const payload = {
+        code: pick.stock_code,
+        name: pick.stock_name,
+        buy_target_price: buyPrice ? Math.round(buyPrice) : 0,
+        budget: budgetMan * 10000,
+        notify_only: true,
+        support_1_price: 0,
+        support_2_price: 0,
+        resistance_1_price: 0,
+        resistance_2_price: 0,
+        polling_interval: 60,
+    };
+    try {
+        const res = await fetch('/api/mode2/watchers', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const r = await res.json();
+        if (r.success) {
+            showToast(`📊 Mode2 등록: ${pick.stock_name}`, 'success');
+            const btn = document.querySelector(`#liveCard_${pickId} .btn-success`);
+            if (btn) { btn.textContent = '✅ 등록됨'; btn.disabled = true; }
+        } else {
+            showToast(r.error || '등록 실패', 'error');
+        }
+    } catch (e) { showToast('등록 실패', 'error'); }
+}
+
+async function requestLiveAnalysis() {
+    const btn = document.getElementById('liveAnalysisBtn');
+    btn.disabled = true;
+    btn.textContent = '⏳ 요청 중...';
+    try {
+        const res = await fetch('/api/analysis/request', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+        });
+        const r = await res.json();
+        if (r.success) {
+            showToast('분석 요청 전송 — poll_trigger.py가 실행합니다', 'success');
+            btn.textContent = '✓ 요청됨';
+            setTimeout(() => { btn.disabled = false; btn.textContent = '▶ 지금 분석'; }, 60000);
+        } else {
+            showToast('요청 실패', 'error');
+            btn.disabled = false; btn.textContent = '▶ 지금 분석';
+        }
+    } catch (e) {
+        showToast('요청 실패', 'error');
+        btn.disabled = false; btn.textContent = '▶ 지금 분석';
+    }
+}
+
+// 캐로셀 터치 스와이프
+(function() {
+    let _touchStartX = 0;
+    document.addEventListener('touchstart', e => {
+        if (!e.target.closest('#liveCarouselWrapper')) return;
+        _touchStartX = e.touches[0].clientX;
+    }, { passive: true });
+    document.addEventListener('touchend', e => {
+        if (!e.target.closest('#liveCarouselWrapper')) return;
+        const dx = e.changedTouches[0].clientX - _touchStartX;
+        if (Math.abs(dx) > 40) liveCarouselMove(dx < 0 ? 1 : -1);
+    }, { passive: true });
+})();
