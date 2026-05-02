@@ -3023,7 +3023,10 @@ def seeking_signal_reentry_check():
             'api-id': 'ka10081',
             'authorization': f'Bearer {token}',
         }
-        payload = {'stk_cd': stock_code, 'upd_stkpc_tp': '1'}
+        from datetime import datetime as _dt
+        from zoneinfo import ZoneInfo as _ZI
+        _today = _dt.now(_ZI('Asia/Seoul')).strftime('%Y%m%d')
+        payload = {'stk_cd': stock_code, 'base_dt': _today, 'upd_stkpc_tp': '1'}
         resp = rq.post(HOST.rstrip('/') + '/api/dostk/chart', headers=headers, json=payload, timeout=15)
         chart_resp = resp.json() if resp.ok else {}
         daily_bars = chart_resp.get('stk_dt_pole_chart_qry', [])
