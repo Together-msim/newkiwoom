@@ -3051,8 +3051,60 @@ def seeking_signal_reentry_check():
         exit_date_compact = exit_date.replace('-', '') if exit_date else ''
         analysis_bars = [b for b in all_bars if b['date'] > exit_date_compact] if exit_date_compact else all_bars
 
-        def _scan_signals(bars, window_end_idx):
-            """bars[0..window_end_idx] 구간에서 시그널 탐색. 마지막 봉이 오늘."""
+        def _detect_overheat(bars):
+            """최근 봉 중 폭등일(거래량 5배+, 등락률 10%+) 탐지.
+            반환: {'date': '20260420', 'days_ago': 2} or None
+            """
+            if len(bars) < 2:
+                return None
+            vol_avg = sum(b['volume'] for b in bars) / len(bars)
+            for i in range(len(bars) - 1, -1, -1):
+                b = bars[i]
+                if b['open'] == 0:
+                    continue
+                change_pct = (b['close'] - b['open']) / b['open'] * 100
+                if b['volume'] >= vol_avg * 5 and change_pct >= 10:
+                    days_ago = len(bars) - 1 - i  # 마지막 봉 기준 몇 봉 전인지
+                    return {'date': b['date'], 'days_ago': days_ago}
+            return None
+
+        def _count_weak_bars(bars_slice):
+            """거감봉(거래량 감소 약세봉) 연속 카운트.
+            - 음봉 (close < open)
+            - OR 양봉이어도 거래량이 직전 평균 50% 미만인 힘없는 봉
+            """
+            if not bars_slice:
+                return 0
+            vol_avg = sum(b['volume'] for b in bars_slice) / len(bars_slice)
+            count = 0
+            for b in reversed(bars_slice):
+                is_bearish = b['close'] < b['open']
+                is_weak_vol = b['volume'] < vol_avg * 0.55
+                if is_bearish and is_weak_vol:
+                    count += 1
+                else:
+                    break
+            return count
+
+        def _find_double_bottom(bars_slice, tolerance=0.04):
+            """쌍바닥 탐지: 저점 2개가 tolerance(4%) 이내.
+            반환: (저점가격, 첫번째저점날짜, 두번째저점날짜) or None
+            """
+            lows = [(b['low'], b['date']) for b in bars_slice if b['low'] > 0]
+            if len(lows) < 2:
+                return None
+            min_low = min(lows, key=lambda x: x[0])
+            base = min_low[0]
+            bottoms = [(v, d) for v, d in lows if v <= base * (1 + tolerance)]
+            if len(bottoms) >= 2:
+                bottoms_sorted = sorted(bottoms, key=lambda x: x[1])
+                return (base, bottoms_sorted[0][1], bottoms_sorted[-1][1])
+            return None
+
+        def _scan_signals(bars, window_end_idx, overheat_suppressed=False):
+            """bars[0..window_end_idx] 구간에서 시그널 탐색.
+            overheat_suppressed=True 면 백테스트 과열기간 — 시그널 생성 안 함.
+            """
             if window_end_idx < 2:
                 return []
             window = bars[:window_end_idx + 1]
@@ -3060,39 +3112,86 @@ def seeking_signal_reentry_check():
             prev = window[:-1]
             vol_avg = sum(b['volume'] for b in prev) / max(len(prev), 1)
 
+            # 실전: 과열 감지 (시그널은 생성하되 overheat_warning 플래그)
+            overheat_info = None
+            if not overheat_suppressed:
+                overheat_info = _detect_overheat(window)
+                # 폭등일이 마지막 봉이면 과열 아직 미진입 — 제외
+                if overheat_info and overheat_info['days_ago'] == 0:
+                    overheat_info = None
+
             found = []
 
-            # Type A — 마지막 봉 종가 ≤ 매수가 × 1.03
+            # ── Type A: 원가 복귀 ──────────────────────────────────────────
             if last['close'] and last['close'] <= buy_price * 1.03:
-                found.append({
+                sig = {
                     'type': 'A',
                     'date': last['date'],
-                    'desc': f"종가({last['close']:,}원) ≤ 매수가({int(buy_price):,}원) 근처",
+                    'desc': f"종가({last['close']:,}원) ≤ 매수가({int(buy_price):,}원) 존",
                     'entry_price': last['close'],
                     'confidence': 'M',
-                })
+                }
+                if overheat_info and overheat_info['days_ago'] <= 3:
+                    sig['overheat_warning'] = True
+                    sig['overheat_msg'] = f"⚠️ {overheat_info['date']} 폭등 후 {overheat_info['days_ago']}거래일째 — 단기과열 주의"
+                found.append(sig)
 
-            # Type C — 연속 거감음봉 → 거량급증 양봉
-            consecutive_down = 0
-            for b in reversed(prev[-6:]):
-                if b['close'] < b['open'] and b['volume'] < vol_avg * 0.6:
-                    consecutive_down += 1
-                else:
-                    break
-            is_vol_spike = last['volume'] > vol_avg * 1.8
-            is_bullish = last['close'] >= last['open']
-            near_buy = last['low'] <= buy_price * 1.08
-            if consecutive_down >= 2 and is_vol_spike and is_bullish:
-                confidence = 'H' if consecutive_down >= 3 and near_buy else 'M'
-                found.append({
-                    'type': 'C',
+            # ── Type C: 거감봉 + 저점 형성 단계 알림 ─────────────────────
+            weak_bars = _count_weak_bars(prev[-6:])
+            double_bottom = _find_double_bottom(prev[-8:])
+            near_buy_zone = any(b['low'] <= buy_price * 1.08 for b in prev[-6:])
+
+            # C1: 거감봉 1봉 이상 + 1차 저점 형성 중 (진행 중 알림)
+            if weak_bars >= 1 and near_buy_zone:
+                lows_recent = [b['low'] for b in prev[-4:] if b['low'] > 0]
+                bottom1 = min(lows_recent) if lows_recent else 0
+                sig = {
+                    'type': 'C1',
                     'date': last['date'],
-                    'desc': f"거감음봉 {consecutive_down}일 후 거래량 급증 양봉 (거래량 {last['volume']:,} vs 평균 {int(vol_avg):,})",
+                    'desc': f"거감봉 {weak_bars}일 진행 중 — 1차 저점 {bottom1:,}원 형성 (매수가 존 근처). 추가 확인 대기",
+                    'entry_price': bottom1,
+                    'confidence': 'L',
+                    'note': '아직 진입 아님 — 바닥 확인 중',
+                }
+                if overheat_info and overheat_info['days_ago'] <= 3:
+                    sig['overheat_warning'] = True
+                    sig['overheat_msg'] = f"⚠️ {overheat_info['date']} 폭등 후 {overheat_info['days_ago']}거래일째 — 단기과열 주의"
+                found.append(sig)
+
+            # C2: 쌍바닥 형성 확인 (매수 고려 타점)
+            if weak_bars >= 1 and double_bottom:
+                bottom_price, d1, d2 = double_bottom
+                sig = {
+                    'type': 'C2',
+                    'date': last['date'],
+                    'desc': f"쌍바닥 형성 — {d1}·{d2} 저점 {bottom_price:,}원 ±4% 이내. 매수 고려 타점",
+                    'entry_price': int(bottom_price * 1.005),
+                    'confidence': 'M',
+                    'note': f"저점 {bottom_price:,}원 지지 확인 후 진입",
+                }
+                if overheat_info and overheat_info['days_ago'] <= 3:
+                    sig['overheat_warning'] = True
+                    sig['overheat_msg'] = f"⚠️ {overheat_info['date']} 폭등 후 {overheat_info['days_ago']}거래일째 — 단기과열 주의"
+                found.append(sig)
+
+            # C3: 거감봉 이후 거래량 증가 양봉 (재상승 시작)
+            is_vol_up = last['volume'] > vol_avg * 1.5
+            is_bullish = last['close'] >= last['open']
+            if weak_bars >= 1 and is_vol_up and is_bullish:
+                confidence = 'H' if weak_bars >= 2 and double_bottom else 'M'
+                sig = {
+                    'type': 'C3',
+                    'date': last['date'],
+                    'desc': f"거감봉 {weak_bars}일 후 거래량 증가 양봉 (거래량 {last['volume']:,} / 평균 {int(vol_avg):,}, {last['volume']/vol_avg:.1f}배). 재상승 시작",
                     'entry_price': last['open'],
                     'confidence': confidence,
-                })
+                }
+                if overheat_info and overheat_info['days_ago'] <= 3:
+                    sig['overheat_warning'] = True
+                    sig['overheat_msg'] = f"⚠️ {overheat_info['date']} 폭등 후 {overheat_info['days_ago']}거래일째 — 단기과열 주의"
+                found.append(sig)
 
-            # Type B — 익절가 상향 돌파 (마지막 봉 기준)
+            # ── Type B: 익절가 상향 돌파 (기록용) ────────────────────────
             if exit_price and last['high'] > exit_price and last['close'] > exit_price:
                 found.append({
                     'type': 'B',
@@ -3105,12 +3204,50 @@ def seeking_signal_reentry_check():
 
             return found
 
+        # 단기과열 기준일 산정 (all_bars 전체에서 폭등일 탐색)
+        def _find_overheat_date(bars):
+            if len(bars) < 3:
+                return None
+            vol_avg = sum(b['volume'] for b in bars) / len(bars)
+            for b in bars:
+                if b['open'] == 0:
+                    continue
+                change_pct = (b['close'] - b['open']) / b['open'] * 100
+                if b['volume'] >= vol_avg * 5 and change_pct >= 10:
+                    return b['date']
+            return None
+
+        overheat_date = _find_overheat_date(all_bars)
+
         if backtest_mode:
-            # 날짜별 롤링 시뮬레이션 — 매일 "그 시점까지의 데이터"로 판단
+            # 날짜별 롤링 시뮬레이션
             all_signals = []
             seen_dates = set()
             for i in range(2, len(analysis_bars)):
-                day_signals = _scan_signals(analysis_bars, i)
+                current_date = analysis_bars[i]['date']
+                # 과열기간(폭등 후 3거래일) 계산
+                suppressed = False
+                if overheat_date:
+                    overheat_idx = next((j for j, b in enumerate(analysis_bars) if b['date'] == overheat_date), None)
+                    if overheat_idx is not None:
+                        days_since = i - overheat_idx
+                        if 1 <= days_since <= 3:
+                            suppressed = True
+
+                if suppressed:
+                    # 과열기간 봉은 시그널 스킵 — 대신 경고 기록
+                    key = ('OVERHEAT', current_date)
+                    if key not in seen_dates:
+                        seen_dates.add(key)
+                        all_signals.append({
+                            'type': 'OVERHEAT',
+                            'date': current_date,
+                            'desc': f"단기과열 기간 ({overheat_date} 폭등 후 {i - overheat_idx}거래일째) — 시그널 억제",
+                            'confidence': '-',
+                        })
+                    continue
+
+                day_signals = _scan_signals(analysis_bars, i, overheat_suppressed=False)
                 for s in day_signals:
                     key = (s['type'], s['date'])
                     if key not in seen_dates:
@@ -3126,11 +3263,12 @@ def seeking_signal_reentry_check():
                     'exit_price': exit_price,
                     'exit_date': exit_date,
                     'bars_analyzed': len(analysis_bars),
+                    'overheat_date': overheat_date,
                     'signals': all_signals,
                 }
             })
         else:
-            # 실시간 모드 — 최근 10봉 기준
+            # 실시간 모드 — 최근 10봉 기준, 시그널+과열경고 병행
             recent = analysis_bars[-10:] if len(analysis_bars) >= 10 else analysis_bars
             signals = _scan_signals(recent, len(recent) - 1) if len(recent) >= 3 else []
             return jsonify({
@@ -3143,6 +3281,7 @@ def seeking_signal_reentry_check():
                     'signals': signals,
                     'bars_analyzed': len(recent),
                     'last_close': recent[-1]['close'] if recent else 0,
+                    'overheat_date': overheat_date,
                 }
             })
     except Exception as e:

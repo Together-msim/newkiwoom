@@ -7560,31 +7560,51 @@ async function checkReentry() {
             resultEl.innerHTML = `<p style="color:#868e96; padding: 12px 0;">${backtestMode ? '백테스트 기간 내 시그널 없음' : '현재 시그널 없음 — 계속 모니터링'}</p>`;
             return;
         }
-        const typeColor = { A: '#3498db', B: '#f39c12', C: '#27ae60' };
+        const typeColor = {
+            A: '#3498db', B: '#f39c12',
+            C1: '#2ecc71', C2: '#27ae60', C3: '#1a8a4a',
+            OVERHEAT: '#e74c3c',
+        };
+        const typeLabel = {
+            A: 'Type A', B: 'Type B',
+            C1: 'Type C1', C2: 'Type C2', C3: 'Type C3',
+            OVERHEAT: '🚫 과열',
+        };
+
+        function renderSignalCard(s, compact) {
+            if (s.type === 'OVERHEAT') {
+                return `<div style="padding:6px 10px;background:#2d1a1a;border-left:3px solid #e74c3c;margin-bottom:6px;border-radius:4px;font-size:12px;color:#e74c3c;">
+                    🚫 ${s.date} — ${s.desc}
+                </div>`;
+            }
+            const overheatBadge = s.overheat_warning
+                ? `<span style="background:#c0392b;color:#fff;font-size:11px;padding:1px 6px;border-radius:3px;font-weight:600;">⚠️ 단기과열</span>` : '';
+            const entryLine = s.entry_price
+                ? `<div class="reentry-entry" style="font-size:13px;">추천 진입가: <strong>${s.entry_price.toLocaleString()}원</strong></div>` : '';
+            const noteLine = s.note ? `<div style="font-size:12px;color:#868e96;margin-top:2px;">${s.note}</div>` : '';
+            const overheatLine = s.overheat_msg ? `<div style="font-size:12px;color:#e74c3c;margin-top:4px;">${s.overheat_msg}</div>` : '';
+            return `<div class="reentry-signal-card" style="margin-bottom:8px;">
+                <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;flex-wrap:wrap;">
+                    <span class="reentry-type-badge" style="background:${typeColor[s.type]||'#95a5a6'}">${typeLabel[s.type]||s.type}</span>
+                    <span class="reentry-confidence">${s.confidence||'M'}</span>
+                    ${compact ? `<span style="font-size:12px;color:#adb5bd;">${s.date||''}</span>` : ''}
+                    ${overheatBadge}
+                </div>
+                <div class="reentry-desc" style="font-size:13px;">${s.desc}</div>
+                ${entryLine}${noteLine}${overheatLine}
+            </div>`;
+        }
+
         if (backtestMode) {
-            const summary = `<div style="font-size:13px;color:#868e96;margin-bottom:12px;">📊 백테스트 결과: 총 <strong style="color:#fff">${signals.length}개</strong> 시그널 (${d.bars_analyzed||'-'}봉 분석)</div>`;
-            resultEl.innerHTML = summary + signals.map(s => `
-                <div class="reentry-signal-card" style="margin-bottom:8px;">
-                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
-                        <span class="reentry-type-badge" style="background:${typeColor[s.type]||'#95a5a6'}">Type ${s.type}</span>
-                        <span class="reentry-confidence">${s.confidence || 'M'}</span>
-                        <span style="font-size:13px;color:#adb5bd;">${s.date || ''}</span>
-                    </div>
-                    <div class="reentry-desc" style="font-size:13px;">${s.desc}</div>
-                    <div class="reentry-entry" style="font-size:13px;">추천 진입가: <strong>${(s.entry_price||0).toLocaleString()}원</strong></div>
-                    ${s.note ? `<div style="font-size:12px;color:#868e96">${s.note}</div>` : ''}
-                </div>
-            `).join('');
+            const realSignals = signals.filter(s => s.type !== 'OVERHEAT');
+            const overheatDayStr = d.overheat_date ? ` | 폭등일: ${d.overheat_date}` : '';
+            const summary = `<div style="font-size:13px;color:#868e96;margin-bottom:12px;">
+                📊 백테스트 결과: 실시그널 <strong style="color:#fff">${realSignals.length}개</strong> (${d.bars_analyzed||'-'}봉 분석${overheatDayStr})
+            </div>`;
+            resultEl.innerHTML = summary + signals.map(s => renderSignalCard(s, true)).join('');
         } else {
-            resultEl.innerHTML = signals.map(s => `
-                <div class="reentry-signal-card">
-                    <span class="reentry-type-badge" style="background:${typeColor[s.type]||'#95a5a6'}">Type ${s.type}</span>
-                    <span class="reentry-confidence">${s.confidence || 'M'}</span>
-                    <div class="reentry-desc">${s.desc}</div>
-                    <div class="reentry-entry">추천 진입가: <strong>${(s.entry_price||0).toLocaleString()}원</strong></div>
-                    ${s.note ? `<div style="font-size:12px;color:#868e96">${s.note}</div>` : ''}
-                </div>
-            `).join('');
+            const overheatDayStr = d.overheat_date ? `<div style="font-size:12px;color:#868e96;margin-bottom:8px;">감지된 폭등일: ${d.overheat_date}</div>` : '';
+            resultEl.innerHTML = overheatDayStr + signals.map(s => renderSignalCard(s, false)).join('');
         }
     } catch (e) {
         resultEl.innerHTML = `<p style="color:#e74c3c">오류: ${e.message}</p>`;
