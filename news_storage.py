@@ -213,6 +213,17 @@ class NewsStorage:
                     conn.execute(f"ALTER TABLE analysis_context ADD COLUMN {col} {definition}")
                 except Exception:
                     pass
+            for col, definition in [
+                ("confidence", "TEXT"),       # H/M/L
+                ("catalyst", "TEXT"),         # 촉매/시황 요약
+                ("slot_time", "TEXT"),        # run_at 기반 슬롯 (09:15 등)
+                ("price_at_slot", "REAL"),    # 추천 시점 현재가
+                ("sources_json", "TEXT"),     # [{type, text}] 근거 목록
+            ]:
+                try:
+                    conn.execute(f"ALTER TABLE siwhang_results ADD COLUMN {col} {definition}")
+                except Exception:
+                    pass
         logger.info(f"NewsStorage 초기화 완료: {self.db_path}")
 
     # ─── 메시지 저장 ───────────────────────────────────────────

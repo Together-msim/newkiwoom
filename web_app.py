@@ -2429,17 +2429,16 @@ def get_analysis_pending():
 @app.route('/api/live/picks', methods=['GET'])
 @auth.login_required
 def get_live_picks():
-    """오늘 날짜 기준 가장 최신 backtest session의 picks 반환 (실전 페이지용)."""
+    """오늘 날짜 시황체크(siwhang_results) 기반 실전 추천 종목 반환.
+    ?date=YYYY-MM-DD 로 날짜 지정 가능. 기본값: 오늘.
+    """
     from datetime import date as _date
-    today = _date.today().isoformat()
+    target_date = request.args.get('date') or _date.today().isoformat()
     ns = _get_news_storage()
-    sessions = ns.get_backtest_sessions()
-    today_sessions = [s for s in sessions if s['run_date'] == today]
-    if not today_sessions:
-        return jsonify({'success': True, 'data': [], 'session': None})
-    latest = today_sessions[0]  # created_at DESC 정렬이므로 첫 번째가 최신
-    picks = ns.get_backtest_picks(latest['id'])
-    return jsonify({'success': True, 'data': picks, 'session': latest})
+    rows = ns.get_siwhang_results(target_date)
+    # stock_name이 없는 시황 요약 행 제외, confidence=None이면 표시 허용
+    picks = [r for r in rows if r.get('stock_name')]
+    return jsonify({'success': True, 'data': picks, 'date': target_date})
 
 
 # ─── 재무정보 (Financial Info) ────────────────────────────────────────────

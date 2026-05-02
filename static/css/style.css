@@ -2616,3 +2616,37 @@ tbody tr.inactive {
     #liveDesktopList { display: none !important; }
     .live-register-field input { width: 80px; }
 }
+
+/* 실전 페이지 — 관심종목 매칭 / 연관주 */
+.live-wl-match {
+    font-size: 12px;
+    margin: 4px 0;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+.live-wl-tag {
+    background: #fff3bf;
+    color: #e67700;
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 11px;
+    font-weight: 600;
+}
+.live-related {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin: 3px 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    align-items: center;
+}
+.live-related-tag {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: 11px;
+}

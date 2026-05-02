@@ -7199,14 +7199,40 @@ function _getCurrentLiveSlot() {
     return hhmm < '09:15' ? _LIVE_SLOTS[0] : _LIVE_SLOTS[_LIVE_SLOTS.length - 1];
 }
 
+// run_at (UTC stored as "YYYY-MM-DD HH:MM:SS") → KST slot_time "HH:MM"
+function _runAtToSlot(run_at) {
+    if (!run_at) return null;
+    try {
+        // SQLite UTC timestamp → JS Date (add Z for UTC parsing)
+        const utcStr = run_at.replace(' ', 'T') + 'Z';
+        const d = new Date(utcStr);
+        const kstH = d.getUTCHours() + 9;  // KST = UTC+9
+        const h = String(kstH % 24).padStart(2, '0');
+        const m = String(d.getUTCMinutes()).padStart(2, '0');
+        return h + ':' + m;
+    } catch(e) { return null; }
+}
+
+// run_at KST 시간 → 가장 가까운 이전 슬롯 반환
+function _runAtToNearestSlot(run_at) {
+    const hhmm = _runAtToSlot(run_at);
+    if (!hhmm) return null;
+    const past = _LIVE_SLOTS.filter(s => s <= hhmm);
+    return past.length ? past[past.length - 1] : _LIVE_SLOTS[0];
+}
+
 async function loadLive() {
     try {
         const res = await fetch('/api/live/picks', { credentials: 'same-origin' });
         const r = await res.json();
         if (!r.success) { showToast(r.error || '로드 실패', 'error'); return; }
 
-        _liveAllPicks = r.data || [];
-        const session = r.session;
+        // siwhang_results 기반 — slot_time이 없으면 run_at에서 추정
+        _liveAllPicks = (r.data || []).map(p => ({
+            ...p,
+            _slotKey: p.slot_time || _runAtToNearestSlot(p.run_at) || '기타',
+            _runKst: _runAtToSlot(p.run_at),
+        }));
 
         const emptyState = document.getElementById('liveEmptyState');
         const slotBar = document.getElementById('liveSlotBar');
@@ -7223,12 +7249,8 @@ async function loadLive() {
 
         emptyState.style.display = 'none';
         slotBar.style.display = '';
-
-        if (session) {
-            banner.textContent = (session.version || 'v1') + '  ' + session.run_date +
-                (session.strategy_desc ? '  ·  ' + session.strategy_desc : '');
-            banner.style.display = '';
-        }
+        banner.textContent = r.date + '  실전 시황체크 결과  ' + _liveAllPicks.length + '건';
+        banner.style.display = '';
 
         _liveActiveSlot = _getCurrentLiveSlot();
         _highlightLiveSlotBtn(_liveActiveSlot);
@@ -7257,7 +7279,7 @@ function _highlightLiveSlotBtn(slot) {
 function _renderLive() {
     _liveSlotPicks = _liveActiveSlot === 'all'
         ? _liveAllPicks
-        : _liveAllPicks.filter(p => p.slot_time === _liveActiveSlot);
+        : _liveAllPicks.filter(p => p._slotKey === _liveActiveSlot);
 
     const isMobile = window.innerWidth <= 768;
     const carouselWrapper = document.getElementById('liveCarouselWrapper');
@@ -7313,7 +7335,20 @@ function renderLiveDesktop() {
 function renderLivePickCard(p) {
     const confClass = p.confidence === 'H' ? 'bt-conf-h' : p.confidence === 'M' ? 'bt-conf-m' : 'bt-conf-l';
     const tagLabel = { ss_up: '🚀 상한가', vi: '⚡ VI', ss: '📈 급등', news: '📰 뉴스' }[p.tag_type] || (p.tag_type || '');
-    const priceStr = p.price_at_slot ? Number(p.price_at_slot).toLocaleString() + '원' : '-';
+    const priceStr = p.price_at_slot ? Number(p.price_at_slot).toLocaleString() + '원' : '';
+    const slotDisplay = p._slotKey || p.slot_time || p._runKst || '';
+
+    // siwhang_results: news_summary + watchlist_match 활용
+    const wlMatch = (() => {
+        if (!p.watchlist_match) return [];
+        try { return typeof p.watchlist_match === 'string' ? JSON.parse(p.watchlist_match) : p.watchlist_match; }
+        catch(e) { return []; }
+    })();
+    const relatedStocks = (() => {
+        if (!p.related_stocks) return [];
+        try { return typeof p.related_stocks === 'string' ? JSON.parse(p.related_stocks) : p.related_stocks; }
+        catch(e) { return []; }
+    })();
 
     const sourcesHtml = (() => {
         if (!p.sources_json) return '';
@@ -7326,20 +7361,30 @@ function renderLivePickCard(p) {
         } catch(e) { return ''; }
     })();
 
+    const wlHtml = wlMatch.length
+        ? `<div class="live-wl-match">📌 관심종목 매칭: ${wlMatch.map(w => `<span class="live-wl-tag">${escapeHtml(typeof w === 'string' ? w : w.name || '')}</span>`).join('')}</div>`
+        : '';
+    const relatedHtml = relatedStocks.length
+        ? `<div class="live-related">연관주: ${relatedStocks.slice(0,5).map(s => `<span class="live-related-tag">${escapeHtml(s)}</span>`).join('')}</div>`
+        : '';
+
     return `
 <div class="bt-pick-card live-pick-card" id="liveCard_${p.id}">
     <div class="bt-pick-header">
         <span class="bt-pick-name">${escapeHtml(p.stock_name)}${p.stock_code ? ` <small style="color:#868e96">${p.stock_code}</small>` : ''}</span>
-        <span class="bt-pick-slot">${p.slot_time}</span>
+        ${slotDisplay ? `<span class="bt-pick-slot">${slotDisplay}</span>` : ''}
         ${tagLabel ? `<span class="tag-badge tag-${p.tag_type||'ss'}">${tagLabel}</span>` : ''}
         ${p.confidence ? `<span class="${confClass}" style="font-weight:700;font-size:13px;">[${p.confidence}]</span>` : ''}
     </div>
     <div class="bt-pick-meta">
         ${p.theme ? `<span>📌 ${escapeHtml(p.theme)}</span>` : ''}
-        <span>추천가 <strong>${priceStr}</strong></span>
+        ${priceStr ? `<span>추천가 <strong>${priceStr}</strong></span>` : ''}
     </div>
+    ${wlHtml}
     ${p.catalyst ? `<div class="bt-catalyst"><span class="bt-catalyst-label">촉매</span>${escapeHtml(p.catalyst)}</div>` : ''}
+    ${p.news_summary ? `<div class="bt-catalyst"><span class="bt-catalyst-label">뉴스</span>${escapeHtml(p.news_summary)}</div>` : ''}
     ${p.analysis_text ? `<div class="bt-pick-analysis">${escapeHtml(p.analysis_text)}</div>` : ''}
+    ${relatedHtml}
     ${sourcesHtml}
     ${p.stock_code ? `
     <div id="liveChartContainer_${p.id}" class="live-chart-container" style="display:none;">
