@@ -7537,6 +7537,7 @@ async function checkReentry() {
     const buyPrice = parseFloat(document.getElementById('reBuyPrice').value);
     const exitPrice = parseFloat(document.getElementById('reExitPrice').value);
     const exitDate = document.getElementById('reExitDate').value.trim();
+    const backtestMode = document.getElementById('reBacktestMode')?.checked || false;
     const resultEl = document.getElementById('reentryResult');
 
     if (!stockCode || !buyPrice || !exitPrice) {
@@ -7544,31 +7545,47 @@ async function checkReentry() {
         return;
     }
 
-    resultEl.innerHTML = '<p style="color:#868e96">분석 중...</p>';
+    resultEl.innerHTML = `<p style="color:#868e96">${backtestMode ? '히스토리컬 백테스트 분석 중...' : '분석 중...'}</p>`;
     try {
         const res = await fetch('/api/seeking-signal/reentry-check', {
             method: 'POST', credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ stock_code: stockCode, buy_price: buyPrice, exit_price: exitPrice, exit_date: exitDate }),
+            body: JSON.stringify({ stock_code: stockCode, buy_price: buyPrice, exit_price: exitPrice, exit_date: exitDate, backtest_mode: backtestMode }),
         });
         const r = await res.json();
         if (!r.success) { resultEl.innerHTML = `<p style="color:#e74c3c">${r.error}</p>`; return; }
         const d = r.data;
         const signals = d.signals || [];
         if (!signals.length) {
-            resultEl.innerHTML = '<p style="color:#868e96; padding: 12px 0;">현재 시그널 없음 — 계속 모니터링</p>';
+            resultEl.innerHTML = `<p style="color:#868e96; padding: 12px 0;">${backtestMode ? '백테스트 기간 내 시그널 없음' : '현재 시그널 없음 — 계속 모니터링'}</p>`;
             return;
         }
         const typeColor = { A: '#3498db', B: '#f39c12', C: '#27ae60' };
-        resultEl.innerHTML = signals.map(s => `
-            <div class="reentry-signal-card">
-                <span class="reentry-type-badge" style="background:${typeColor[s.type]||'#95a5a6'}">Type ${s.type}</span>
-                <span class="reentry-confidence">${s.confidence || 'M'}</span>
-                <div class="reentry-desc">${s.desc}</div>
-                <div class="reentry-entry">추천 진입가: <strong>${(s.entry_price||0).toLocaleString()}원</strong></div>
-                ${s.note ? `<div style="font-size:12px;color:#868e96">${s.note}</div>` : ''}
-            </div>
-        `).join('');
+        if (backtestMode) {
+            const summary = `<div style="font-size:13px;color:#868e96;margin-bottom:12px;">📊 백테스트 결과: 총 <strong style="color:#fff">${signals.length}개</strong> 시그널 (${d.bars_analyzed||'-'}봉 분석)</div>`;
+            resultEl.innerHTML = summary + signals.map(s => `
+                <div class="reentry-signal-card" style="margin-bottom:8px;">
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+                        <span class="reentry-type-badge" style="background:${typeColor[s.type]||'#95a5a6'}">Type ${s.type}</span>
+                        <span class="reentry-confidence">${s.confidence || 'M'}</span>
+                        <span style="font-size:13px;color:#adb5bd;">${s.date || ''}</span>
+                    </div>
+                    <div class="reentry-desc" style="font-size:13px;">${s.desc}</div>
+                    <div class="reentry-entry" style="font-size:13px;">추천 진입가: <strong>${(s.entry_price||0).toLocaleString()}원</strong></div>
+                    ${s.note ? `<div style="font-size:12px;color:#868e96">${s.note}</div>` : ''}
+                </div>
+            `).join('');
+        } else {
+            resultEl.innerHTML = signals.map(s => `
+                <div class="reentry-signal-card">
+                    <span class="reentry-type-badge" style="background:${typeColor[s.type]||'#95a5a6'}">Type ${s.type}</span>
+                    <span class="reentry-confidence">${s.confidence || 'M'}</span>
+                    <div class="reentry-desc">${s.desc}</div>
+                    <div class="reentry-entry">추천 진입가: <strong>${(s.entry_price||0).toLocaleString()}원</strong></div>
+                    ${s.note ? `<div style="font-size:12px;color:#868e96">${s.note}</div>` : ''}
+                </div>
+            `).join('');
+        }
     } catch (e) {
         resultEl.innerHTML = `<p style="color:#e74c3c">오류: ${e.message}</p>`;
     }

@@ -702,8 +702,11 @@
                             <input type="text" id="reExitDate" placeholder="2026-04-20">
                         </div>
                     </div>
-                    <div style="display: flex; gap: 8px;">
+                    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
                         <button class="btn btn-primary" onclick="checkReentry()">🔍 재진입 시그널 체크</button>
+                        <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#868e96;cursor:pointer;">
+                            <input type="checkbox" id="reBacktestMode"> 히스토리컬 백테스트 (익절일 이후 전체)
+                        </label>
                         <button class="btn btn-secondary" onclick="saveTradeWatchlist()">💾 감시 목록 등록</button>
                     </div>
                     <div id="reentryResult" style="margin-top: 16px;"></div>
