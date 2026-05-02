@@ -88,7 +88,12 @@ if kiwoom_client:
         mode1_manager=mode1_mgr,
         mode2_manager=mode2_mgr
     )
-    price_monitor.news_storage = _get_news_storage()
+    try:
+        from news_storage import NewsStorage as _NS
+        _ns_db = os.getenv("NEWS_DB_PATH", ".data/news.db")
+        price_monitor.news_storage = _NS(_ns_db)
+    except Exception as _e:
+        logger.warning(f"PriceMonitor news_storage 연결 실패: {_e}")
     logger.info("PriceMonitor 초기화 완료")
 else:
     logger.warning("Kiwoom API 미연결 - PriceMonitor 비활성화")
