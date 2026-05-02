@@ -2384,3 +2384,106 @@ tbody tr.inactive {
 .stock-search-item.active .ssi-code { color: rgba(255,255,255,0.75); }
 .ssi-name { font-weight: 600; }
 .ssi-code { font-size: 11px; color: var(--text-secondary); }
+
+/* ─── 종목 마스터 Hover Tooltip ─────────────────────────────────── */
+.sm-tooltip {
+    position: fixed;
+    z-index: 9999;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.18);
+    padding: 12px 14px;
+    min-width: 280px;
+    max-width: 360px;
+    font-size: 12px;
+    color: var(--text-primary);
+    pointer-events: auto;
+}
+.sm-tooltip-loading {
+    color: var(--text-secondary);
+    padding: 8px 0;
+    text-align: center;
+}
+.sm-tooltip-header {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+}
+.sm-refresh-btn {
+    margin-left: auto;
+    font-size: 10px;
+    padding: 2px 7px;
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    cursor: pointer;
+    color: var(--text-secondary);
+}
+.sm-refresh-btn:hover { border-color: var(--primary-color); color: var(--primary-color); }
+.sm-themes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 8px;
+}
+.sm-theme-tag {
+    background: #e7f5ff;
+    color: #1971c2;
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 11px;
+    font-weight: 600;
+}
+.sm-finance-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 4px 8px;
+    margin-bottom: 10px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border-color);
+}
+.sm-fi-item {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+.sm-fi-label { font-size: 10px; color: var(--text-secondary); }
+.sm-fi-value { font-size: 12px; font-weight: 600; }
+.sm-fi-good { color: #2f9e44; }
+.sm-fi-caution { color: #f08c00; }
+.sm-fi-warn { color: #e03131; }
+.sm-fi-up { color: #e03131; font-size: 10px; }
+.sm-fi-down { color: #2f9e44; font-size: 10px; }
+.sm-hist-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+    letter-spacing: 0.3px;
+}
+.sm-hist-list {
+    max-height: 180px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.sm-hist-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    background: var(--bg-secondary);
+    border-radius: 5px;
+    padding: 5px 7px;
+}
+.sm-hist-date { font-size: 10px; color: var(--text-secondary); min-width: 68px; }
+.sm-hist-theme { font-size: 10px; color: #845ef7; }
+.sm-hist-text { width: 100%; font-size: 11px; color: var(--text-primary); line-height: 1.4; margin-top: 2px; }
+.sm-tag { font-size: 10px; font-weight: 700; border-radius: 3px; padding: 1px 4px; }
+.sm-tag-up { background: #fff5f5; color: #e03131; border: 1px solid #ffc9c9; }
+.sm-tag-vi { background: #fff9db; color: #f08c00; border: 1px solid #ffec99; }
+.sm-tag-ss { background: #f3f0ff; color: #7048e8; border: 1px solid #d0bfff; }

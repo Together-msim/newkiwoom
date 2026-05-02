@@ -2643,6 +2643,184 @@ def get_financial_info():
     return jsonify({'success': True, 'data': result})
 
 
+# ─── 종목 마스터 (stock_master) ─────────────────────────────────────────────
+
+@app.route('/api/stock-master/<stock_code>', methods=['GET'])
+@auth.login_required
+def get_stock_master(stock_code):
+    """종목 마스터 조회. 재무정보가 없거나 오래됐으면 refresh=true 포함."""
+    stock_code = stock_code.strip().zfill(6)
+    ns = _get_news_storage()
+    data = ns.get_stock_master(stock_code) or {'stock_code': stock_code}
+
+    # 재무 fresh 여부 (24시간 이내)
+    finance_stale = True
+    fu = data.get('finance_updated_at')
+    if fu:
+        try:
+            from datetime import datetime as _dt
+            updated = _dt.fromisoformat(fu)
+            finance_stale = (_dt.utcnow() - updated).total_seconds() > 86400
+        except Exception:
+            pass
+
+    # 시황 히스토리
+    history = ns.get_stock_siwhang_history(stock_code, limit=10)
+
+    return jsonify({
+        'success': True,
+        'data': data,
+        'finance_stale': finance_stale,
+        'history': history,
+    })
+
+
+@app.route('/api/stock-master/<stock_code>', methods=['POST'])
+@auth.login_required
+def update_stock_master(stock_code):
+    """종목 마스터 수동 업데이트 (테마, 노트 등)."""
+    stock_code = stock_code.strip().zfill(6)
+    body = request.json or {}
+    ns = _get_news_storage()
+    ok = ns.upsert_stock_master(stock_code, **{
+        k: v for k, v in body.items()
+        if k in ('stock_name', 'themes', 'note')
+    })
+    return jsonify({'success': ok})
+
+
+@app.route('/api/stock-master/<stock_code>/refresh-finance', methods=['POST'])
+@auth.login_required
+def refresh_stock_finance(stock_code):
+    """재무정보 강제 갱신: Kiwoom ka10001 + DART 분기(2년) 조회 후 stock_master 저장."""
+    stock_code = stock_code.strip().zfill(6)
+    ns = _get_news_storage()
+
+    # 1) Kiwoom 기본정보
+    kw = _kiwoom_basic_info(stock_code)
+
+    # 2) DART 재무제표
+    corp_map = _load_corp_code_map()
+    corp_info = corp_map.get(stock_code)
+    dart_annual = {}
+    dart_q_this = {}
+    dart_q_prev = {}
+    if corp_info:
+        corp_code = corp_info['corp_code']
+        dart_annual = _dart_financial(corp_code)
+        dart_q_this, dart_q_prev = _dart_financial_quarterly(corp_code)
+
+    from datetime import datetime as _dt
+    now_iso = _dt.utcnow().strftime('%Y-%m-%dT%H:%M:%S')
+
+    fields = {
+        'finance_updated_at': now_iso,
+    }
+    if kw:
+        fields['market_cap_bil'] = kw.get('market_cap_bil')
+        fields['per'] = kw.get('per')
+        fields['roe'] = kw.get('roe')
+        fields['op_income_bil'] = kw.get('op_income_bil')
+    if dart_annual:
+        fields['debt_ratio'] = dart_annual.get('debt_ratio')
+        fields['current_ratio'] = dart_annual.get('current_ratio')
+    if dart_q_this:
+        fields['op_income_bil'] = dart_q_this.get('op_income_bil', fields.get('op_income_bil'))
+    if dart_q_prev:
+        fields['op_income_prev_bil'] = dart_q_prev.get('op_income_bil')
+
+    # 종목명 저장 (있으면)
+    name_map = _load_stock_name_map()
+    for nm, cd in name_map.items():
+        if cd == stock_code:
+            fields['stock_name'] = nm
+            break
+
+    if corp_info:
+        fields['corp_code'] = corp_info['corp_code']
+
+    ns.upsert_stock_master(stock_code, **fields)
+
+    result = {'stock_code': stock_code}
+    result.update(kw)
+    result.update(dart_annual)
+    if dart_q_this:
+        result['op_income_bil_q'] = dart_q_this.get('op_income_bil')
+        result['bsns_year_q'] = dart_q_this.get('bsns_year')
+        result['reprt_q'] = dart_q_this.get('reprt_code')
+    if dart_q_prev:
+        result['op_income_prev_bil_q'] = dart_q_prev.get('op_income_bil')
+        result['bsns_year_prev_q'] = dart_q_prev.get('bsns_year')
+
+    result['finance_updated_at'] = now_iso
+    return jsonify({'success': True, 'data': result})
+
+
+@app.route('/api/stock-master/<stock_code>/history', methods=['GET'])
+@auth.login_required
+def get_stock_siwhang_history(stock_code):
+    """종목별 시황 히스토리 (급등주 feed 기반, 최근 10개)."""
+    stock_code = stock_code.strip().zfill(6)
+    ns = _get_news_storage()
+    history = ns.get_stock_siwhang_history(stock_code, limit=10)
+    return jsonify({'success': True, 'history': history})
+
+
+@app.route('/api/stock-master/<stock_code>/history', methods=['POST'])
+@auth.login_required
+def add_stock_siwhang_history(stock_code):
+    """시황 히스토리 추가 (백테스트 스킬에서 호출)."""
+    stock_code = stock_code.strip().zfill(6)
+    body = request.json or {}
+    ns = _get_news_storage()
+    ok = ns.add_stock_siwhang_history(
+        stock_code=stock_code,
+        stock_name=body.get('stock_name', ''),
+        event_date=body.get('event_date', ''),
+        tag_type=body.get('tag_type', ''),
+        theme=body.get('theme', ''),
+        feed_text=body.get('feed_text', ''),
+        source_message_id=body.get('source_message_id'),
+    )
+    return jsonify({'success': ok})
+
+
+def _dart_financial_quarterly(corp_code: str):
+    """DART 1분기 보고서 2개 연도 조회: (올해1Q, 작년1Q) → (dict, dict)."""
+    from datetime import date as _date
+    results = []
+    for year in [_date.today().year, _date.today().year - 1]:
+        url = (f'https://opendart.fss.or.kr/api/fnlttSinglAcntAll.json'
+               f'?crtfc_key={_DART_KEY}&corp_code={corp_code}'
+               f'&bsns_year={year}&reprt_code=11014&fs_div=CFS')
+        try:
+            import urllib.request as _urlreq2
+            r = _urlreq2.urlopen(url, timeout=15).read()
+            data = _json.loads(r)
+            if data.get('status') != '000':
+                results.append({})
+                continue
+            items = data.get('list', [])
+            accts: dict = {}
+            for item in items:
+                nm = item.get('account_nm', '')
+                if nm == '영업이익' and '영업이익' not in accts:
+                    try:
+                        v = int(str(item.get('thstrm_amount', '0')).replace(',', ''))
+                        accts['영업이익'] = v
+                    except Exception:
+                        pass
+            op = accts.get('영업이익', 0)
+            results.append({'bsns_year': year, 'reprt_code': '11014',
+                             'op_income_bil': round(op / 1e8, 1) if op else None})
+        except Exception as e:
+            logger.warning(f"DART 분기 재무조회 실패 ({corp_code}, {year}): {e}")
+            results.append({})
+    this_q = results[0] if len(results) > 0 else {}
+    prev_q = results[1] if len(results) > 1 else {}
+    return this_q, prev_q
+
+
 # ─── 格言(Trading Mottos) ──────────────────────────────────────────────────
 
 @app.route('/api/mottos', methods=['GET'])

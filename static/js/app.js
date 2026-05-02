@@ -526,7 +526,10 @@ function renderMode2WatcherRow(w, idx) {
             <div class="watcher-drag-handle" style="cursor: move;">☰</div>
             <div class="watcher-cell">${w.record_id || '-'}</div>
             <div class="watcher-cell"><strong>${w.code}</strong></div>
-            <div class="watcher-cell" onclick="showNoteModal('${w.name || '-'}', '${w.code}', '${(w.note || '').replace(/'/g, "\\'")}' )" style="cursor: pointer; color: #228be6; font-weight: 600;">${autoPaused ? '⚠️ ' : ''}${w.name || '-'}</div>
+            <div class="watcher-cell" onclick="showNoteModal('${w.name || '-'}', '${w.code}', '${(w.note || '').replace(/'/g, "\\'")}' )"
+                 onmouseenter="showStockTooltip(event, '${w.code}', '${(w.name || '').replace(/'/g, "\\'")}')"
+                 onmouseleave="hideStockTooltip()"
+                 style="cursor: pointer; color: #228be6; font-weight: 600;">${autoPaused ? '⚠️ ' : ''}${w.name || '-'}</div>
             <div class="watcher-cell editable" data-field="buy_target_price" ondblclick="enableCellEdit(this, '${w.code}')">${formatNumber(w.buy_target_price)}</div>
             <div class="watcher-cell editable" data-field="budget" ondblclick="enableCellEdit(this, '${w.code}')">${(w.budget / 10000).toFixed(0)}만</div>
             <div class="watcher-cell">${w.quantity}주</div>
@@ -3100,6 +3103,212 @@ function syncOrderModeRadios(mode) {
 // ========== 종목명 노트 모달 ==========
 let currentNoteStockCode = null;
 let originalNoteText = '';
+
+// ========== 종목 마스터 Hover Tooltip ==========
+const _stockTooltipCache = {};  // stock_code → {data, history, fetchedAt}
+let _tooltipHideTimer = null;
+let _tooltipActiveCode = null;
+
+function _getOrCreateTooltip() {
+    let el = document.getElementById('stockMasterTooltip');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'stockMasterTooltip';
+        el.className = 'sm-tooltip';
+        el.addEventListener('mouseenter', () => {
+            clearTimeout(_tooltipHideTimer);
+        });
+        el.addEventListener('mouseleave', () => {
+            hideStockTooltip();
+        });
+        document.body.appendChild(el);
+    }
+    return el;
+}
+
+function showStockTooltip(event, stockCode, stockName) {
+    clearTimeout(_tooltipHideTimer);
+    _tooltipActiveCode = stockCode;
+
+    const tooltip = _getOrCreateTooltip();
+    tooltip.innerHTML = `<div class="sm-tooltip-loading">⏳ 로딩 중...</div>`;
+    _positionTooltip(tooltip, event);
+    tooltip.style.display = 'block';
+
+    const cached = _stockTooltipCache[stockCode];
+    const now = Date.now();
+    if (cached && (now - cached.fetchedAt) < 300000) {  // 5분 캐시
+        _renderTooltip(tooltip, cached.data, cached.history, cached.financeStale);
+        return;
+    }
+
+    fetch(`/api/stock-master/${stockCode}`, { credentials: 'same-origin' })
+        .then(r => r.json())
+        .then(res => {
+            if (_tooltipActiveCode !== stockCode) return;
+            if (res.success) {
+                _stockTooltipCache[stockCode] = {
+                    data: res.data || {},
+                    history: res.history || [],
+                    financeStale: res.finance_stale,
+                    fetchedAt: Date.now(),
+                };
+                _renderTooltip(tooltip, res.data || {}, res.history || [], res.finance_stale);
+            }
+        })
+        .catch(() => {
+            if (_tooltipActiveCode === stockCode)
+                tooltip.innerHTML = `<div class="sm-tooltip-loading">조회 실패</div>`;
+        });
+}
+
+function _positionTooltip(tooltip, event) {
+    const margin = 12;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let x = event.clientX + margin;
+    let y = event.clientY + margin;
+    tooltip.style.left = x + 'px';
+    tooltip.style.top = y + 'px';
+    tooltip.style.right = 'auto';
+    // 오른쪽 경계 보정은 렌더 후 처리
+    requestAnimationFrame(() => {
+        const rect = tooltip.getBoundingClientRect();
+        if (rect.right > vw - 8) {
+            tooltip.style.left = (event.clientX - rect.width - margin) + 'px';
+        }
+        if (rect.bottom > vh - 8) {
+            tooltip.style.top = (event.clientY - rect.height - margin) + 'px';
+        }
+    });
+}
+
+function hideStockTooltip() {
+    _tooltipHideTimer = setTimeout(() => {
+        const el = document.getElementById('stockMasterTooltip');
+        if (el) el.style.display = 'none';
+        _tooltipActiveCode = null;
+    }, 200);
+}
+
+function _fmt(v, unit = '', fallback = '-') {
+    if (v == null || v === '') return fallback;
+    return v + unit;
+}
+
+function _renderTooltip(tooltip, d, history, financeStale) {
+    const themes = d.themes ? d.themes.split(',').map(t => t.trim()).filter(Boolean) : [];
+    const themesHtml = themes.length
+        ? themes.map(t => `<span class="sm-theme-tag">${t}</span>`).join('')
+        : '<span style="color:#868e96">테마 미설정</span>';
+
+    // 재무 지표
+    const debtRatio = d.debt_ratio != null ? d.debt_ratio : null;
+    const currentRatio = d.current_ratio != null ? d.current_ratio : null;
+    const opIncome = d.op_income_bil != null ? d.op_income_bil : null;
+    const opIncomePrev = d.op_income_prev_bil != null ? d.op_income_prev_bil : null;
+
+    let opDeltaHtml = '';
+    if (opIncome != null && opIncomePrev != null && opIncomePrev !== 0) {
+        const delta = ((opIncome - opIncomePrev) / Math.abs(opIncomePrev) * 100).toFixed(1);
+        const cls = delta >= 0 ? 'sm-fi-up' : 'sm-fi-down';
+        opDeltaHtml = `<span class="${cls}">${delta >= 0 ? '+' : ''}${delta}%</span>`;
+    }
+
+    const debtClass = debtRatio == null ? '' : debtRatio > 200 ? 'sm-fi-warn' : debtRatio > 100 ? 'sm-fi-caution' : 'sm-fi-good';
+    const crClass = currentRatio == null ? '' : currentRatio < 100 ? 'sm-fi-warn' : currentRatio < 150 ? 'sm-fi-caution' : 'sm-fi-good';
+
+    const finStaleHtml = financeStale
+        ? `<button class="sm-refresh-btn" onclick="refreshStockFinance('${d.stock_code}')">🔄 재무 갱신</button>`
+        : '';
+
+    // 시황 히스토리
+    let histHtml = '';
+    if (history && history.length > 0) {
+        histHtml = history.slice(0, 10).map(h => {
+            const tagCls = h.tag_type === 'ss_up' ? 'sm-tag-up' : h.tag_type === 'vi' ? 'sm-tag-vi' : 'sm-tag-ss';
+            const tagLabel = h.tag_type === 'ss_up' ? 'SS⬆️' : h.tag_type === 'vi' ? 'VI' : 'SS';
+            const shortText = (h.feed_text || '').substring(0, 80);
+            return `<div class="sm-hist-row">
+                <span class="sm-hist-date">${h.event_date}</span>
+                <span class="sm-tag ${tagCls}">${tagLabel}</span>
+                ${h.theme ? `<span class="sm-hist-theme">${h.theme}</span>` : ''}
+                <div class="sm-hist-text">${shortText}${h.feed_text && h.feed_text.length > 80 ? '…' : ''}</div>
+            </div>`;
+        }).join('');
+    } else {
+        histHtml = '<div style="color:#868e96;font-size:11px">히스토리 없음</div>';
+    }
+
+    tooltip.innerHTML = `
+        <div class="sm-tooltip-header">
+            <strong>${d.stock_name || d.stock_code}</strong>
+            <span style="color:#868e96;font-size:11px;margin-left:6px">${d.stock_code || ''}</span>
+            ${finStaleHtml}
+        </div>
+        <div class="sm-themes">${themesHtml}</div>
+        <div class="sm-finance-grid">
+            <div class="sm-fi-item">
+                <span class="sm-fi-label">부채비율</span>
+                <span class="sm-fi-value ${debtClass}">${debtRatio != null ? debtRatio + '%' : '-'}</span>
+            </div>
+            <div class="sm-fi-item">
+                <span class="sm-fi-label">유동비율</span>
+                <span class="sm-fi-value ${crClass}">${currentRatio != null ? currentRatio + '%' : '-'}</span>
+            </div>
+            <div class="sm-fi-item">
+                <span class="sm-fi-label">영업이익</span>
+                <span class="sm-fi-value">${opIncome != null ? opIncome + '억' : '-'} ${opDeltaHtml}</span>
+            </div>
+            <div class="sm-fi-item">
+                <span class="sm-fi-label">시가총액</span>
+                <span class="sm-fi-value">${d.market_cap_bil != null ? Math.round(d.market_cap_bil / 100) + '조' : '-'}</span>
+            </div>
+            <div class="sm-fi-item">
+                <span class="sm-fi-label">PER</span>
+                <span class="sm-fi-value">${d.per != null ? d.per : '-'}</span>
+            </div>
+            <div class="sm-fi-item">
+                <span class="sm-fi-label">ROE</span>
+                <span class="sm-fi-value">${d.roe != null ? d.roe + '%' : '-'}</span>
+            </div>
+        </div>
+        <div class="sm-hist-title">📋 시황 히스토리</div>
+        <div class="sm-hist-list">${histHtml}</div>
+    `;
+}
+
+async function refreshStockFinance(stockCode) {
+    const tooltip = document.getElementById('stockMasterTooltip');
+    if (tooltip) tooltip.innerHTML = `<div class="sm-tooltip-loading">⏳ 재무 조회 중...</div>`;
+    try {
+        const res = await fetch(`/api/stock-master/${stockCode}/refresh-finance`, {
+            method: 'POST',
+            credentials: 'same-origin',
+        });
+        const r = await res.json();
+        if (r.success) {
+            delete _stockTooltipCache[stockCode];
+            // 업데이트된 데이터 다시 fetch
+            const r2 = await fetch(`/api/stock-master/${stockCode}`, { credentials: 'same-origin' });
+            const res2 = await r2.json();
+            if (res2.success) {
+                _stockTooltipCache[stockCode] = {
+                    data: res2.data || {},
+                    history: res2.history || [],
+                    financeStale: false,
+                    fetchedAt: Date.now(),
+                };
+                const tt = document.getElementById('stockMasterTooltip');
+                if (tt && tt.style.display !== 'none') {
+                    _renderTooltip(tt, res2.data || {}, res2.history || [], false);
+                }
+            }
+        }
+    } catch (e) {
+        showToast('재무 갱신 실패', 'error');
+    }
+}
 
 function showNoteModal(stockName, stockCode, noteText) {
     const modal = document.getElementById('noteModal');

@@ -156,6 +156,38 @@ class NewsStorage:
                     display_order INTEGER NOT NULL DEFAULT 0,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
+
+                CREATE TABLE IF NOT EXISTS stock_master (
+                    stock_code TEXT PRIMARY KEY,
+                    stock_name TEXT,
+                    corp_code TEXT,
+                    themes TEXT,
+                    note TEXT,
+                    market_cap_bil REAL,
+                    per REAL,
+                    roe REAL,
+                    debt_ratio REAL,
+                    current_ratio REAL,
+                    op_income_bil REAL,
+                    op_income_prev_bil REAL,
+                    finance_updated_at TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS stock_siwhang_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    stock_code TEXT NOT NULL,
+                    stock_name TEXT,
+                    event_date TEXT NOT NULL,
+                    tag_type TEXT,
+                    theme TEXT,
+                    feed_text TEXT,
+                    source_message_id INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_stock_siwhang_history_code ON stock_siwhang_history(stock_code);
+                CREATE INDEX IF NOT EXISTS idx_stock_siwhang_history_date ON stock_siwhang_history(event_date);
             """)
             # 기존 DB 마이그레이션 (컬럼 없으면 추가)
             for col, definition in [
@@ -755,3 +787,84 @@ class NewsStorage:
         except Exception as e:
             logger.error(f"reorder_mottos 실패: {e}")
             return False
+
+    # ─── 종목 마스터 (stock_master) ──────────────────────────────
+
+    def get_stock_master(self, stock_code: str) -> Optional[Dict]:
+        try:
+            with self._conn() as conn:
+                row = conn.execute(
+                    "SELECT * FROM stock_master WHERE stock_code=?", (stock_code,)
+                ).fetchone()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"get_stock_master 실패: {e}")
+            return None
+
+    def upsert_stock_master(self, stock_code: str, **fields) -> bool:
+        """stock_master 행 생성 또는 업데이트. fields의 키만 업데이트."""
+        allowed = {
+            'stock_name', 'corp_code', 'themes', 'note',
+            'market_cap_bil', 'per', 'roe', 'debt_ratio', 'current_ratio',
+            'op_income_bil', 'op_income_prev_bil', 'finance_updated_at',
+        }
+        fields = {k: v for k, v in fields.items() if k in allowed}
+        if not fields:
+            return False
+        try:
+            with self._conn() as conn:
+                existing = conn.execute(
+                    "SELECT stock_code FROM stock_master WHERE stock_code=?", (stock_code,)
+                ).fetchone()
+                if existing:
+                    set_clause = ', '.join(f"{k}=?" for k in fields) + ", updated_at=CURRENT_TIMESTAMP"
+                    conn.execute(
+                        f"UPDATE stock_master SET {set_clause} WHERE stock_code=?",
+                        list(fields.values()) + [stock_code]
+                    )
+                else:
+                    cols = ['stock_code'] + list(fields.keys())
+                    placeholders = ', '.join(['?'] * len(cols))
+                    conn.execute(
+                        f"INSERT INTO stock_master ({', '.join(cols)}) VALUES ({placeholders})",
+                        [stock_code] + list(fields.values())
+                    )
+            return True
+        except Exception as e:
+            logger.error(f"upsert_stock_master 실패: {e}")
+            return False
+
+    # ─── 종목 시황 히스토리 (stock_siwhang_history) ───────────────
+
+    def add_stock_siwhang_history(self, stock_code: str, stock_name: str,
+                                   event_date: str, tag_type: str,
+                                   theme: str, feed_text: str,
+                                   source_message_id: Optional[int] = None) -> bool:
+        try:
+            with self._conn() as conn:
+                conn.execute(
+                    """INSERT INTO stock_siwhang_history
+                       (stock_code, stock_name, event_date, tag_type, theme, feed_text, source_message_id)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (stock_code, stock_name, event_date, tag_type, theme, feed_text, source_message_id)
+                )
+            return True
+        except Exception as e:
+            logger.error(f"add_stock_siwhang_history 실패: {e}")
+            return False
+
+    def get_stock_siwhang_history(self, stock_code: str, limit: int = 10) -> List[Dict]:
+        try:
+            with self._conn() as conn:
+                rows = conn.execute(
+                    """SELECT id, event_date, tag_type, theme, feed_text, source_message_id, created_at
+                       FROM stock_siwhang_history
+                       WHERE stock_code=?
+                       ORDER BY event_date DESC, id DESC
+                       LIMIT ?""",
+                    (stock_code, limit)
+                ).fetchall()
+                return [dict(r) for r in rows]
+        except Exception as e:
+            logger.error(f"get_stock_siwhang_history 실패: {e}")
+            return []
