@@ -2706,11 +2706,15 @@ def get_stock_master(stock_code):
     # 시황 히스토리
     history = ns.get_stock_siwhang_history(stock_code, limit=10)
 
+    # 자유 노트
+    notes = ns.get_stock_notes(stock_code)
+
     return jsonify({
         'success': True,
         'data': data,
         'finance_stale': finance_stale,
         'history': history,
+        'notes': notes,
     })
 
 
@@ -2858,6 +2862,63 @@ def _dart_financial_quarterly(corp_code: str):
     this_q = results[0] if len(results) > 0 else {}
     prev_q = results[1] if len(results) > 1 else {}
     return this_q, prev_q
+
+
+# ─── 종목 자유 노트 (stock_notes) ───────────────────────────────────────────
+
+@app.route('/api/stock-master/<stock_code>/notes', methods=['GET'])
+@auth.login_required
+def get_stock_notes(stock_code):
+    ns = _get_news_storage()
+    notes = ns.get_stock_notes(stock_code)
+    return jsonify({'success': True, 'notes': notes})
+
+
+@app.route('/api/stock-master/<stock_code>/notes', methods=['POST'])
+@auth.login_required
+def add_stock_note(stock_code):
+    ns = _get_news_storage()
+    data = request.get_json() or {}
+    note_date = data.get('note_date', '')
+    content = data.get('content', '').strip()
+    source = data.get('source', 'manual')
+    if not note_date or not content:
+        return jsonify({'success': False, 'error': 'note_date, content 필수'}), 400
+    note_id = ns.add_stock_note(stock_code, note_date, content, source)
+    return jsonify({'success': True, 'id': note_id}), 201
+
+
+@app.route('/api/stock-master/<stock_code>/notes/<int:note_id>', methods=['PUT'])
+@auth.login_required
+def update_stock_note(stock_code, note_id):
+    ns = _get_news_storage()
+    data = request.get_json() or {}
+    content = data.get('content', '').strip()
+    note_date = data.get('note_date')
+    if not content:
+        return jsonify({'success': False, 'error': 'content 필수'}), 400
+    ns.update_stock_note(note_id, content, note_date)
+    return jsonify({'success': True})
+
+
+@app.route('/api/stock-master/<stock_code>/notes/<int:note_id>', methods=['DELETE'])
+@auth.login_required
+def delete_stock_note(stock_code, note_id):
+    ns = _get_news_storage()
+    ns.delete_stock_note(note_id)
+    return jsonify({'success': True})
+
+
+@app.route('/api/stock-master/<stock_code>/summary', methods=['PUT'])
+@auth.login_required
+def update_stock_summary(stock_code):
+    ns = _get_news_storage()
+    data = request.get_json() or {}
+    summary = data.get('summary_2line', '').strip()
+    if not summary:
+        return jsonify({'success': False, 'error': 'summary_2line 필수'}), 400
+    ns.update_stock_summary(stock_code, summary)
+    return jsonify({'success': True})
 
 
 # ─── 格言(Trading Mottos) ──────────────────────────────────────────────────

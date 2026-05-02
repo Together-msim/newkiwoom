@@ -2701,3 +2701,48 @@ tbody tr.inactive {
 
 /* Mode2 날짜 필터 */
 .mode2-section-card[style*="display:none"] { display: none !important; }
+
+/* ─── 종목 자유 노트 타임라인 ───────────────────────────── */
+.stock-note-row {
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border-color);
+    position: relative;
+}
+.stock-note-row:last-child { border-bottom: none; }
+.stock-note-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+.stock-note-date {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--primary);
+    background: rgba(99,102,241,.1);
+    padding: 2px 8px;
+    border-radius: 10px;
+}
+.stock-note-actions {
+    margin-left: auto;
+    display: flex;
+    gap: 4px;
+}
+.stock-note-actions .btn-icon {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 13px;
+    padding: 2px 4px;
+    border-radius: 4px;
+    opacity: 0.5;
+    transition: opacity 0.15s;
+}
+.stock-note-actions .btn-icon:hover { opacity: 1; background: var(--bg-secondary); }
+.stock-note-content {
+    font-size: 13px;
+    color: var(--text-primary);
+    line-height: 1.65;
+    white-space: pre-wrap;
+    word-break: break-word;
+}

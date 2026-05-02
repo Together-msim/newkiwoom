@@ -219,6 +219,19 @@ class NewsStorage:
                 CREATE INDEX IF NOT EXISTS idx_trade_watchlist_status ON trade_watchlist(status);
                 CREATE INDEX IF NOT EXISTS idx_reentry_signals_date ON reentry_signals(signal_date);
                 CREATE INDEX IF NOT EXISTS idx_reentry_signals_code ON reentry_signals(stock_code);
+
+                CREATE TABLE IF NOT EXISTS stock_notes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    stock_code TEXT NOT NULL,
+                    note_date TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    source TEXT DEFAULT 'manual',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_stock_notes_code ON stock_notes(stock_code);
+                CREATE INDEX IF NOT EXISTS idx_stock_notes_date ON stock_notes(note_date);
             """)
             # 기존 DB 마이그레이션 (컬럼 없으면 추가)
             for col, definition in [
@@ -261,6 +274,13 @@ class NewsStorage:
             ]:
                 try:
                     conn.execute(f"ALTER TABLE reentry_signals ADD COLUMN {col} {definition}")
+                except Exception:
+                    pass
+            for col, definition in [
+                ("summary_2line", "TEXT"),    # AI 생성 2줄 요약
+            ]:
+                try:
+                    conn.execute(f"ALTER TABLE stock_master ADD COLUMN {col} {definition}")
                 except Exception:
                     pass
         logger.info(f"NewsStorage 초기화 완료: {self.db_path}")
@@ -1064,3 +1084,69 @@ class NewsStorage:
                     (limit,)
                 ).fetchall()
             return [dict(r) for r in rows]
+
+    # ─── 종목 자유 노트 ──────────────────────────────────────────
+
+    def get_stock_notes(self, stock_code: str) -> List[Dict]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM stock_notes WHERE stock_code=? ORDER BY note_date DESC, id DESC",
+                (stock_code,)
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def add_stock_note(self, stock_code: str, note_date: str, content: str, source: str = 'manual') -> int:
+        with self._conn() as conn:
+            cur = conn.execute(
+                """INSERT INTO stock_notes (stock_code, note_date, content, source, updated_at)
+                   VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)""",
+                (stock_code, note_date, content, source)
+            )
+            return cur.lastrowid
+
+    def update_stock_note(self, note_id: int, content: str, note_date: str = None) -> bool:
+        with self._conn() as conn:
+            if note_date:
+                conn.execute(
+                    "UPDATE stock_notes SET content=?, note_date=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                    (content, note_date, note_id)
+                )
+            else:
+                conn.execute(
+                    "UPDATE stock_notes SET content=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                    (content, note_id)
+                )
+            return True
+
+    def delete_stock_note(self, note_id: int) -> bool:
+        with self._conn() as conn:
+            conn.execute("DELETE FROM stock_notes WHERE id=?", (note_id,))
+            return True
+
+    def bulk_insert_stock_notes(self, rows: List[Dict]) -> int:
+        """마이그레이션용 bulk insert. rows: [{stock_code, note_date, content, source}]"""
+        inserted = 0
+        with self._conn() as conn:
+            for r in rows:
+                try:
+                    conn.execute(
+                        """INSERT INTO stock_notes (stock_code, note_date, content, source, updated_at)
+                           VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)""",
+                        (r['stock_code'], r['note_date'], r['content'], r.get('source', 'import'))
+                    )
+                    inserted += 1
+                except Exception as e:
+                    logger.warning(f"bulk_insert_stock_notes 행 실패: {e}")
+        return inserted
+
+    def update_stock_summary(self, stock_code: str, summary_2line: str) -> bool:
+        with self._conn() as conn:
+            conn.execute(
+                """INSERT INTO stock_master (stock_code, summary_2line, updated_at)
+                   VALUES (?, ?, CURRENT_TIMESTAMP)
+                   ON CONFLICT(stock_code) DO UPDATE SET
+                       summary_2line=excluded.summary_2line,
+                       updated_at=CURRENT_TIMESTAMP""",
+                (stock_code, summary_2line)
+            )
+            return True
