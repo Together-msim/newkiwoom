@@ -88,6 +88,7 @@ if kiwoom_client:
         mode1_manager=mode1_mgr,
         mode2_manager=mode2_mgr
     )
+    price_monitor.news_storage = _get_news_storage()
     logger.info("PriceMonitor 초기화 완료")
 else:
     logger.warning("Kiwoom API 미연결 - PriceMonitor 비활성화")

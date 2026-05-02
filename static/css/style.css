@@ -2694,3 +2694,10 @@ tbody tr.inactive {
     text-align: left;
 }
 .reentry-watchlist-table th { background: var(--bg-secondary); color: var(--text-secondary); font-weight: 600; }
+
+/* Style3 벌크 등록 탭 */
+#ssReentryCard .btn-primary { background: var(--primary); color: white; }
+#reTabBulkContent code { font-family: monospace; font-size: 12px; }
+
+/* Mode2 날짜 필터 */
+.mode2-section-card[style*="display:none"] { display: none !important; }

@@ -297,6 +297,11 @@
             <div id="mode2Page" class="page active">
                 <div class="page-header">
                     <h2>📉 Mode2 자동매매 (저항/지지 레벨)</h2>
+                    <div class="page-controls">
+                        <label style="font-size:13px;color:#868e96;">날짜 필터:</label>
+                        <input type="date" id="mode2DateFilter" class="filter-input" style="padding:6px 10px;border:1px solid #dee2e6;border-radius:6px;font-size:13px;" onchange="applyMode2DateFilter()">
+                        <button class="btn btn-secondary" style="font-size:13px;" onclick="clearMode2DateFilter()">전체 보기</button>
+                    </div>
                 </div>
 
                 <section class="input-section">
@@ -672,43 +677,67 @@
                     </div>
                 </div>
 
-                <!-- 재진입 체크 (Type3) — Seeking Signal과 독립적으로 사용 가능 -->
+                <!-- 재진입 체크 (Style 3) -->
                 <div class="card" id="ssReentryCard">
-                    <h3>🔄 재진입 체크 (Style 3)</h3>
-                    <p style="font-size: 13px; color: #868e96; margin-bottom: 16px;">익절 이력이 있는 종목의 거감음봉→재상승 패턴 분석</p>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
-                        <div>
-                            <label style="font-size: 13px; color: #868e96;">종목코드</label>
-                            <input type="text" id="reStockCode" placeholder="054920">
-                        </div>
-                        <div>
-                            <label style="font-size: 13px; color: #868e96;">종목명</label>
-                            <input type="text" id="reStockName" placeholder="한컴위드">
-                        </div>
-                        <div>
-                            <label style="font-size: 13px; color: #868e96;">내 매수가</label>
-                            <input type="number" id="reBuyPrice" placeholder="6190">
-                        </div>
-                        <div>
-                            <label style="font-size: 13px; color: #868e96;">매수일 (YYYY-MM-DD)</label>
-                            <input type="text" id="reBuyDate" placeholder="2026-04-17">
-                        </div>
-                        <div>
-                            <label style="font-size: 13px; color: #868e96;">내 익절가</label>
-                            <input type="number" id="reExitPrice" placeholder="6760">
-                        </div>
-                        <div>
-                            <label style="font-size: 13px; color: #868e96;">익절일 (YYYY-MM-DD)</label>
-                            <input type="text" id="reExitDate" placeholder="2026-04-20">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                        <h3 style="margin:0;">🔄 재진입 체크 (Style 3)</h3>
+                        <div style="display:flex;gap:6px;">
+                            <button class="btn btn-secondary" style="font-size:12px;" onclick="switchReentryTab('single')" id="reTabSingle">단건 입력</button>
+                            <button class="btn btn-secondary" style="font-size:12px;" onclick="switchReentryTab('bulk')" id="reTabBulk">벌크 등록</button>
                         </div>
                     </div>
-                    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-                        <button class="btn btn-primary" onclick="checkReentry()">🔍 재진입 시그널 체크</button>
-                        <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#868e96;cursor:pointer;">
-                            <input type="checkbox" id="reBacktestMode"> 히스토리컬 백테스트 (익절일 이후 전체)
-                        </label>
-                        <button class="btn btn-secondary" onclick="saveTradeWatchlist()">💾 감시 목록 등록</button>
+
+                    <!-- 단건 입력 탭 -->
+                    <div id="reTabSingleContent">
+                        <p style="font-size: 13px; color: #868e96; margin-bottom: 16px;">익절 이력이 있는 종목의 거감음봉→재상승 패턴 분석</p>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+                            <div>
+                                <label style="font-size: 13px; color: #868e96;">종목코드</label>
+                                <input type="text" id="reStockCode" placeholder="054920">
+                            </div>
+                            <div>
+                                <label style="font-size: 13px; color: #868e96;">종목명</label>
+                                <input type="text" id="reStockName" placeholder="한컴위드">
+                            </div>
+                            <div>
+                                <label style="font-size: 13px; color: #868e96;">내 매수가</label>
+                                <input type="number" id="reBuyPrice" placeholder="6190">
+                            </div>
+                            <div>
+                                <label style="font-size: 13px; color: #868e96;">매수일 (YYYY-MM-DD)</label>
+                                <input type="text" id="reBuyDate" placeholder="2026-04-17">
+                            </div>
+                            <div>
+                                <label style="font-size: 13px; color: #868e96;">내 익절가</label>
+                                <input type="number" id="reExitPrice" placeholder="6760">
+                            </div>
+                            <div>
+                                <label style="font-size: 13px; color: #868e96;">익절일 (YYYY-MM-DD)</label>
+                                <input type="text" id="reExitDate" placeholder="2026-04-20">
+                            </div>
+                        </div>
+                        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                            <button class="btn btn-primary" onclick="checkReentry()">🔍 재진입 시그널 체크</button>
+                            <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#868e96;cursor:pointer;">
+                                <input type="checkbox" id="reBacktestMode"> 히스토리컬 백테스트
+                            </label>
+                            <button class="btn btn-secondary" onclick="saveTradeWatchlist()">💾 감시 등록</button>
+                        </div>
                     </div>
+
+                    <!-- 벌크 등록 탭 -->
+                    <div id="reTabBulkContent" style="display:none;">
+                        <p style="font-size: 13px; color: #868e96; margin-bottom: 8px;">
+                            형식: <code style="background:#f1f3f5;padding:2px 6px;border-radius:4px;">종목코드,종목명,매수날짜,매수가,매도날짜,매도가</code> (한 줄에 하나)
+                        </p>
+                        <p style="font-size: 12px; color: #adb5bd; margin-bottom: 12px;">예: 054920,한컴위드,2026-04-17,6190,2026-04-20,6760</p>
+                        <textarea id="reBulkInput" style="width:100%;height:120px;padding:10px;border:1px solid #dee2e6;border-radius:6px;font-size:13px;font-family:monospace;resize:vertical;" placeholder="054920,한컴위드,2026-04-17,6190,2026-04-20,6760&#10;005930,삼성전자,2026-05-01,75000,2026-05-02,78000"></textarea>
+                        <div style="display:flex;gap:8px;margin-top:8px;align-items:center;">
+                            <button class="btn btn-primary" onclick="parseBulkReentry()">📋 파싱 미리보기</button>
+                        </div>
+                        <div id="reBulkPreview" style="margin-top:12px;"></div>
+                    </div>
+
                     <div id="reentryResult" style="margin-top: 16px;"></div>
                 </div>
 

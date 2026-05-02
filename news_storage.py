@@ -255,6 +255,14 @@ class NewsStorage:
                     conn.execute(f"ALTER TABLE siwhang_results ADD COLUMN {col} {definition}")
                 except Exception:
                     pass
+            for col, definition in [
+                ("signal_time", "TEXT"),      # HH:MM 장중 시간
+                ("support_price", "REAL"),    # C2 쌍바닥 지지가
+            ]:
+                try:
+                    conn.execute(f"ALTER TABLE reentry_signals ADD COLUMN {col} {definition}")
+                except Exception:
+                    pass
         logger.info(f"NewsStorage 초기화 완료: {self.db_path}")
 
     # ─── 메시지 저장 ───────────────────────────────────────────
@@ -1021,15 +1029,18 @@ class NewsStorage:
     def save_reentry_signal(self, watchlist_id: int, stock_code: str, stock_name: str,
                              signal_type: str, signal_date: str,
                              entry_price_suggestion: float, confidence: str,
-                             reason: str, ss_matched: bool = False) -> int:
+                             reason: str, ss_matched: bool = False,
+                             signal_time: str = '', support_price: float = 0) -> int:
         with self._conn() as conn:
             cur = conn.execute(
                 """INSERT INTO reentry_signals
                    (watchlist_id, stock_code, stock_name, signal_type, signal_date,
-                    entry_price_suggestion, confidence, reason, ss_matched)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    entry_price_suggestion, confidence, reason, ss_matched,
+                    signal_time, support_price)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (watchlist_id, stock_code, stock_name, signal_type, signal_date,
-                 entry_price_suggestion, confidence, reason, 1 if ss_matched else 0)
+                 entry_price_suggestion, confidence, reason, 1 if ss_matched else 0,
+                 signal_time, support_price)
             )
             return cur.lastrowid
 

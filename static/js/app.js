@@ -444,14 +444,22 @@ function renderMode2SectionList(sections, allWatchers) {
         });
     });
 
+    // 날짜 필터 상태 유지
+    const activeFilter = document.getElementById('mode2DateFilter')?.value || '';
+
     container.innerHTML = sections.map(section => {
         const watchers = watchersBySection[section.id] || [];
         const collapsed = section.collapsed || false;
 
+        // 섹션명에서 날짜 추출 (YYYY-MM-DD 패턴)
+        const dateMatch = (section.name || '').match(/(\d{4}-\d{2}-\d{2})/);
+        const sectionDate = dateMatch ? dateMatch[1] : '';
+        const hideSection = activeFilter && sectionDate && sectionDate !== activeFilter ? ' style="display:none"' : '';
+
         return `
-            <div class="mode2-section" data-section-id="${section.id}" data-section-order="${section.order}"
+            <div class="mode2-section mode2-section-card" data-section-id="${section.id}" data-section-order="${section.order}" data-section-date="${sectionDate}"
                  draggable="true" ondragstart="handleSectionDragStart(event)" ondragend="handleSectionDragEnd(event)"
-                 ondragover="handleSectionDragOver(event)" ondrop="handleSectionDrop(event)">
+                 ondragover="handleSectionDragOver(event)" ondrop="handleSectionDrop(event)"${hideSection}>
                 <div class="mode2-section-header ${collapsed ? 'collapsed' : ''}" onclick="toggleSection('${section.id}')">
                     <span class="section-drag-handle" title="드래그하여 섹션 이동" style="cursor: move;">☰</span>
                     <span class="section-toggle ${collapsed ? 'collapsed' : ''}">▼</span>
@@ -7623,21 +7631,58 @@ async function saveTradeWatchlist() {
         showToast('종목코드, 종목명, 매수가, 익절가 필수', 'error');
         return;
     }
+    await _registerStyle3Item({ code: stockCode, name: stockName, buyPrice, buyDate, exitPrice, exitDate });
+    loadTradeWatchlist();
+}
+
+async function _registerStyle3Item({ code, name, buyPrice, buyDate, exitPrice, exitDate }) {
     try {
+        // 1. trade_watchlist 등록
         const res = await fetch('/api/trade-watchlist', {
             method: 'POST', credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ stock_code: stockCode, stock_name: stockName, buy_price: buyPrice, buy_date: buyDate, exit_price: exitPrice, exit_date: exitDate }),
+            body: JSON.stringify({ stock_code: code, stock_name: name, buy_price: buyPrice, buy_date: buyDate, exit_price: exitPrice, exit_date: exitDate }),
         });
         const r = await res.json();
-        if (r.success) {
-            showToast(`${stockName} 감시 목록 등록 완료`, 'success');
-            loadTradeWatchlist();
+        if (!r.success) { showToast('감시 등록 실패', 'error'); return false; }
+
+        // 2. Mode2 섹션 자동 생성/조회
+        const today = new Date().toISOString().slice(0, 10);
+        const sectionName = `${today} Style3 발라먹기`;
+        const sectionsRes = await fetch('/api/mode2/sections', { credentials: 'same-origin' });
+        const sectionsData = await sectionsRes.json();
+        let sectionId = null;
+        const existing = (sectionsData.sections || []).find(s => s.name === sectionName);
+        if (existing) {
+            sectionId = existing.id;
         } else {
-            showToast('등록 실패', 'error');
+            const createRes = await fetch('/api/mode2/sections', {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: sectionName }),
+            });
+            const createData = await createRes.json();
+            sectionId = createData.id;
         }
+
+        // 3. Mode2 watcher 등록 (support_1_price = 익절가의 97% 초기값, 실제 C2 계산은 price_monitor에서)
+        const supportPrice = Math.round(exitPrice * 0.97);
+        await fetch('/api/mode2/watchers', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                code, name, buy_target_price: Math.round(buyPrice * 1.01),
+                budget: 0, polling_interval: 180, notify_only: true,
+                section: sectionId, support_1_price: supportPrice,
+                notes: `Style3 발라먹기 | 매수가:${buyPrice} 익절가:${exitPrice} 익절일:${exitDate}`,
+            }),
+        });
+
+        showToast(`${name} Style3 감시 등록 완료`, 'success');
+        return true;
     } catch (e) {
         showToast('오류: ' + e.message, 'error');
+        return false;
     }
 }
 
@@ -7652,20 +7697,26 @@ async function loadTradeWatchlist() {
             container.innerHTML = '<p style="color:#868e96;font-size:14px;">등록된 감시 종목 없음</p>';
             return;
         }
+        const today = new Date();
         container.innerHTML = `<table class="reentry-watchlist-table">
-            <thead><tr><th>종목</th><th>매수가</th><th>익절가</th><th>익절일</th><th>상태</th><th></th></tr></thead>
-            <tbody>${items.map(w => `
+            <thead><tr><th>종목</th><th>매수가</th><th>익절가</th><th>익절일</th><th>등록</th><th>상태</th><th></th></tr></thead>
+            <tbody>${items.map(w => {
+                const createdAt = w.created_at ? new Date(w.created_at) : null;
+                const daysSince = createdAt ? Math.floor((today - createdAt) / 86400000) + 1 : '-';
+                const dayLabel = typeof daysSince === 'number' ? `등록 ${daysSince}일차` : '-';
+                return `
                 <tr>
                     <td><strong>${w.stock_name}</strong><br><small style="color:#868e96">${w.stock_code}</small></td>
                     <td>${(w.buy_price||0).toLocaleString()}원</td>
                     <td>${(w.exit_price||0).toLocaleString()}원</td>
                     <td>${w.exit_date||'-'}</td>
+                    <td style="font-size:12px;color:#868e96;">${dayLabel}</td>
                     <td><span class="reentry-status-${w.status}">${w.status}</span></td>
                     <td>
                         <button class="btn btn-sm btn-secondary" onclick="deleteTradeWatchlist(${w.id})">삭제</button>
                     </td>
-                </tr>
-            `).join('')}</tbody>
+                </tr>`;
+            }).join('')}</tbody>
         </table>`;
     } catch (e) {
         container.innerHTML = '<p style="color:#e74c3c">로드 실패</p>';
@@ -7677,6 +7728,117 @@ async function deleteTradeWatchlist(id) {
     const res = await fetch(`/api/trade-watchlist/${id}`, { method: 'DELETE', credentials: 'same-origin' });
     const r = await res.json();
     if (r.success) loadTradeWatchlist();
+}
+
+// ─── Style3 벌크 등록 + 탭 전환 ──────────────────────────────────────
+
+function switchReentryTab(tab) {
+    document.getElementById('reTabSingleContent').style.display = tab === 'single' ? '' : 'none';
+    document.getElementById('reTabBulkContent').style.display = tab === 'bulk' ? '' : 'none';
+    document.getElementById('reTabSingle').classList.toggle('btn-primary', tab === 'single');
+    document.getElementById('reTabSingle').classList.toggle('btn-secondary', tab !== 'single');
+    document.getElementById('reTabBulk').classList.toggle('btn-primary', tab === 'bulk');
+    document.getElementById('reTabBulk').classList.toggle('btn-secondary', tab !== 'bulk');
+}
+
+function parseBulkReentry() {
+    const raw = document.getElementById('reBulkInput').value.trim();
+    const preview = document.getElementById('reBulkPreview');
+    if (!raw) { preview.innerHTML = ''; return; }
+
+    const lines = raw.split('\n').map(l => l.trim()).filter(l => l);
+    const items = [];
+    const errors = [];
+
+    lines.forEach((line, idx) => {
+        const parts = line.split(',').map(p => p.trim());
+        if (parts.length < 6) { errors.push(`줄 ${idx+1}: 필드 부족 (${parts.length}개)`); return; }
+        const [code, name, buyDate, buyPrice, exitDate, exitPrice] = parts;
+        if (!/^\d{5,6}$/.test(code)) { errors.push(`줄 ${idx+1}: 종목코드 오류 (${code})`); return; }
+        if (!parseFloat(buyPrice) || !parseFloat(exitPrice)) { errors.push(`줄 ${idx+1}: 가격 오류`); return; }
+        items.push({ code, name, buyDate, buyPrice: parseFloat(buyPrice), exitDate, exitPrice: parseFloat(exitPrice) });
+    });
+
+    if (errors.length) {
+        preview.innerHTML = `<div style="color:#e74c3c;font-size:13px;margin-bottom:8px;">${errors.join('<br>')}</div>`;
+    }
+
+    if (!items.length) { preview.innerHTML += '<p style="color:#868e96;font-size:13px;">유효한 항목 없음</p>'; return; }
+
+    preview.innerHTML += `
+        <div style="font-size:13px;color:#495057;margin-bottom:8px;">${items.length}건 파싱 완료</div>
+        <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:12px;">
+            <thead><tr style="background:#f8f9fa;">
+                <th style="padding:6px;border:1px solid #dee2e6;">종목</th>
+                <th style="padding:6px;border:1px solid #dee2e6;">매수가</th>
+                <th style="padding:6px;border:1px solid #dee2e6;">매수일</th>
+                <th style="padding:6px;border:1px solid #dee2e6;">익절가</th>
+                <th style="padding:6px;border:1px solid #dee2e6;">익절일</th>
+                <th style="padding:6px;border:1px solid #dee2e6;"></th>
+            </tr></thead>
+            <tbody>${items.map((it, i) => `
+                <tr id="bulkRow${i}">
+                    <td style="padding:6px;border:1px solid #dee2e6;"><strong>${it.name}</strong> <small style="color:#868e96">${it.code}</small></td>
+                    <td style="padding:6px;border:1px solid #dee2e6;text-align:right;">${it.buyPrice.toLocaleString()}원</td>
+                    <td style="padding:6px;border:1px solid #dee2e6;">${it.buyDate}</td>
+                    <td style="padding:6px;border:1px solid #dee2e6;text-align:right;">${it.exitPrice.toLocaleString()}원</td>
+                    <td style="padding:6px;border:1px solid #dee2e6;">${it.exitDate}</td>
+                    <td style="padding:6px;border:1px solid #dee2e6;">
+                        <button class="btn btn-sm btn-primary" onclick="registerBulkItem(${i})">감시 등록</button>
+                    </td>
+                </tr>
+            `).join('')}</tbody>
+        </table>
+        <button class="btn btn-primary" onclick="registerAllBulkItems()">📋 전체 등록</button>
+    `;
+    window._reBulkItems = items;
+}
+
+async function registerBulkItem(idx) {
+    const items = window._reBulkItems || [];
+    const it = items[idx];
+    if (!it) return;
+    const ok = await _registerStyle3Item({ code: it.code, name: it.name, buyPrice: it.buyPrice, buyDate: it.buyDate, exitPrice: it.exitPrice, exitDate: it.exitDate });
+    if (ok) {
+        const row = document.getElementById('bulkRow' + idx);
+        if (row) row.style.opacity = '0.4';
+        loadTradeWatchlist();
+    }
+}
+
+async function registerAllBulkItems() {
+    const items = window._reBulkItems || [];
+    if (!items.length) return;
+    let ok = 0;
+    for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        const success = await _registerStyle3Item({ code: it.code, name: it.name, buyPrice: it.buyPrice, buyDate: it.buyDate, exitPrice: it.exitPrice, exitDate: it.exitDate });
+        if (success) { ok++; const row = document.getElementById('bulkRow' + i); if (row) row.style.opacity = '0.4'; }
+    }
+    showToast(`${ok}/${items.length}건 등록 완료`, 'success');
+    loadTradeWatchlist();
+}
+
+// ─── Mode2 날짜 필터 ──────────────────────────────────────────────────
+
+function applyMode2DateFilter() {
+    const filterDate = document.getElementById('mode2DateFilter')?.value || '';
+    document.querySelectorAll('.mode2-section-card').forEach(card => {
+        const sectionDate = card.dataset.sectionDate || '';
+        if (!filterDate || sectionDate === filterDate) {
+            card.style.display = '';
+        } else {
+            card.style.display = 'none';
+        }
+    });
+}
+
+function clearMode2DateFilter() {
+    const el = document.getElementById('mode2DateFilter');
+    if (el) el.value = '';
+    document.querySelectorAll('.mode2-section-card').forEach(card => {
+        card.style.display = '';
+    });
 }
 
 // ─── 실전페이지 재진입 시그널 ─────────────────────────────────────────

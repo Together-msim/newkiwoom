@@ -14,6 +14,7 @@ from kiwoom_token import get_token
 from trend_analyzer import check_condition_satisfied, format_candles_summary
 from global_config import get_global_config
 from kiwoom_client_async import KiwoomClientAsync
+from style3_signals import is_overheat_period, calc_c2_support, scan_style3_signals
 
 load_dotenv()
 
@@ -38,6 +39,11 @@ class PriceMonitor:
         self.mode2_last_check = {}
         # support_1 이탈 후 하락 감시: {code: {'price': float, 'alerted': bool}}
         self.support1_breach_watch = {}
+        # Style3 마지막 체크 시간 + 중복 알림 방지
+        self.style3_last_check = datetime.min.replace(tzinfo=None)
+        self.style3_last_signals: dict = {}  # {(code, sig_type, date): price}
+        # news_storage 참조 (Style3 시그널 저장용)
+        self.news_storage = None
 
         # 비동기 클라이언트 초기화
         self.kiwoom_async = None
@@ -1074,6 +1080,16 @@ class PriceMonitor:
                             logger.error(f"Mode2 주문 처리 실패 ({code}): {e}")
                             continue
 
+                # Style3 발라먹기 — 3분마다 폴링
+                now_naive = now.replace(tzinfo=None) if hasattr(now, 'tzinfo') else now
+                style3_elapsed = (datetime.now() - self.style3_last_check).total_seconds()
+                if style3_elapsed >= 180:
+                    self.style3_last_check = datetime.now()
+                    try:
+                        await self.check_style3_conditions()
+                    except Exception as e:
+                        logger.error(f"Style3 체크 실패: {e}")
+
                 logger.info(f"=== 가격 체크 완료 ===\n")
 
                 # 적응형 sleep: 가장 짧은 polling interval의 절반 사용
@@ -1089,6 +1105,141 @@ class PriceMonitor:
             except Exception as e:
                 logger.error(f"모니터링 루프 에러: {e}")
                 await asyncio.sleep(self.interval)
+
+    async def check_style3_conditions(self):
+        """trade_watchlist watching 종목에 대해 3분봉 기반 Style3 시그널 체크."""
+        if not self.news_storage:
+            return
+        try:
+            watchlist = self.news_storage.get_trade_watchlist(status='watching')
+        except Exception as e:
+            logger.error(f"Style3 watchlist 조회 실패: {e}")
+            return
+
+        if not watchlist:
+            return
+
+        token = None
+        try:
+            token = get_token()
+        except Exception as e:
+            logger.error(f"Style3 token 취득 실패: {e}")
+            return
+
+        today_str = datetime.now(KST).strftime('%Y-%m-%d')
+        time_str = datetime.now(KST).strftime('%H:%M')
+
+        import requests as _rq
+        import os as _os
+        HOST = _os.environ.get('KIWOOM_HOST', 'https://api.kiwoom.com')
+
+        for item in watchlist:
+            code = item['stock_code']
+            buy_price = float(item.get('buy_price') or 0)
+            exit_price = float(item.get('exit_price') or 0)
+            exit_date = item.get('exit_date', '')
+            watchlist_id = item['id']
+            stock_name = item['stock_name']
+
+            if not buy_price:
+                continue
+
+            # 단기과열 억제
+            if is_overheat_period(exit_date):
+                logger.debug(f"Style3 {code} 단기과열 기간 — 스킵")
+                continue
+
+            try:
+                # 3분봉 조회 (최근 20봉)
+                minute_bars = get_minute_chart(token, code, "3분", count=20)
+                if not minute_bars or len(minute_bars) < 3:
+                    continue
+
+                # C2 지지가: 일봉 배열로 계산 (ka10081 직접 호출)
+                support_price = None
+                try:
+                    kw_headers = {
+                        'Content-Type': 'application/json;charset=UTF-8',
+                        'api-id': 'ka10081',
+                        'authorization': 'Bearer ' + token,
+                    }
+                    base_dt = datetime.now(KST).strftime('%Y%m%d')
+                    payload = {'stk_cd': code, 'base_dt': base_dt, 'upd_stkpc_tp': '1'}
+                    resp = _rq.post(HOST.rstrip('/') + '/api/dostk/chart', headers=kw_headers, json=payload, timeout=15)
+                    chart_resp = resp.json() if resp.ok else {}
+                    raw_bars = chart_resp.get('stk_dt_pole_chart_qry', [])
+
+                    def _pp(v):
+                        return abs(int(str(v).replace('+', '').replace('-', '').replace(',', ''))) if v else 0
+
+                    daily_bars = sorted([{
+                        'date': str(b.get('dt', '')),
+                        'open': _pp(b.get('open_pric')),
+                        'high': _pp(b.get('high_pric')),
+                        'low': _pp(b.get('low_pric')),
+                        'close': _pp(b.get('cur_prc')),
+                        'volume': int(str(b.get('trde_qty', '0')).replace(',', '')),
+                    } for b in raw_bars], key=lambda x: x['date'])
+
+                    support_price = calc_c2_support(daily_bars, exit_date)
+                except Exception as e:
+                    logger.warning(f"Style3 {code} 일봉 조회 실패: {e}")
+
+                # 시그널 탐지
+                signals = scan_style3_signals(minute_bars, buy_price, exit_price, support_price)
+
+                for sig in signals:
+                    sig_type = sig['type']
+                    sig_key = (code, sig_type, today_str)
+                    last_price = self.style3_last_signals.get(sig_key)
+
+                    # 중복 억제: 같은 날 같은 타입, 가격 ±1% 이내
+                    if last_price and abs(sig['entry_price'] - last_price) / last_price < 0.01:
+                        continue
+                    self.style3_last_signals[sig_key] = sig['entry_price']
+
+                    # DB 저장
+                    try:
+                        self.news_storage.save_reentry_signal(
+                            watchlist_id=watchlist_id,
+                            stock_code=code,
+                            stock_name=stock_name,
+                            signal_type=sig_type,
+                            signal_date=today_str,
+                            entry_price_suggestion=sig['entry_price'],
+                            confidence=sig['confidence'],
+                            reason=sig['reason'],
+                            signal_time=time_str,
+                            support_price=sig.get('support_price', 0),
+                        )
+                    except Exception as e:
+                        logger.error(f"Style3 시그널 저장 실패: {e}")
+
+                    # 텔레그램 알림
+                    type_label = {
+                        'A': '원가 복귀',
+                        'B': '익절가 돌파 (기록)',
+                        'C1': '거감봉 진행중',
+                        'C2': '쌍바닥 지지 터치',
+                        'C3': '거래량 급증 재상승',
+                    }.get(sig_type, sig_type)
+                    overheat_days = 0
+                    msg = (
+                        f"🔄 Style3 재진입 시그널 [{sig_type}]\n\n"
+                        f"종목: {stock_name} ({code})\n"
+                        f"타입: {type_label}\n"
+                        f"현재가: {sig['entry_price']:,}원"
+                        + (f" | 지지선: {int(sig['support_price']):,}원" if sig.get('support_price') else "")
+                        + f"\n내 매수가: {int(buy_price):,}원 | 익절가: {int(exit_price):,}원\n"
+                        f"시간: {time_str}\n\n"
+                        f"{sig['reason']}"
+                    )
+                    await self.send_notification(msg)
+                    logger.info(f"Style3 시그널: {code} [{sig_type}] @ {sig['entry_price']:,}원 ({time_str})")
+
+            except Exception as e:
+                logger.error(f"Style3 종목 체크 실패 ({code}): {e}")
+                continue
 
     async def start_monitoring_task(self):
         """모니터링 태스크 시작"""
