@@ -3051,6 +3051,32 @@ def seeking_signal_reentry_check():
         exit_date_compact = exit_date.replace('-', '') if exit_date else ''
         analysis_bars = [b for b in all_bars if b['date'] > exit_date_compact] if exit_date_compact else all_bars
 
+        # ── 익절 당일 선행 체크 (analysis_bars에 포함 안 되므로 별도 처리) ──
+        exit_day_signals = []
+        if exit_date_compact:
+            exit_bar = next((b for b in all_bars if b['date'] == exit_date_compact), None)
+            if exit_bar:
+                # Type A: 익절 당일 저가가 매수가 존 터치 → 재매수 기회
+                if exit_bar['low'] <= buy_price * 1.03:
+                    exit_day_signals.append({
+                        'type': 'A',
+                        'date': exit_bar['date'],
+                        'desc': f"익절 당일 저가({exit_bar['low']:,}원)가 매수가({int(buy_price):,}원) 존 터치 — 재매수 기회",
+                        'entry_price': exit_bar['low'],
+                        'confidence': 'H',
+                        'note': '익절 직후 원가 복귀 — 빠른 재진입 타점',
+                    })
+                # Type B-pre: 익절 당일 익절가보다 5%+ 고가 형성 (돌파 확인 진입)
+                if exit_price and exit_bar['high'] > exit_price * 1.05:
+                    exit_day_signals.append({
+                        'type': 'B',
+                        'date': exit_bar['date'],
+                        'desc': f"익절 당일 고가({exit_bar['high']:,}원)가 익절가({int(exit_price):,}원) +5% 돌파 — 돌파 확인 진입",
+                        'entry_price': int(exit_price * 1.01),
+                        'confidence': 'M',
+                        'note': '기록용 — 돌파 확인 후 재진입',
+                    })
+
         def _detect_overheat(bars):
             """최근 봉 중 폭등일(거래량 5배+, 등락률 10%+) 탐지.
             반환: {'date': '20260420', 'days_ago': 2} or None
@@ -3161,21 +3187,23 @@ def seeking_signal_reentry_check():
                     sig['overheat_msg'] = f"⚠️ {overheat_info['date']} 폭등 후 {overheat_info['days_ago']}거래일째 — 단기과열 주의"
                 found.append(sig)
 
-            # C2: 쌍바닥 형성 확인 (매수 고려 타점)
-            if weak_bars >= 1 and double_bottom:
+            # C2: 쌍바닥 형성 확인 (가격 패턴만 체크 — 거감봉 카운트 불필요)
+            if double_bottom:
                 bottom_price, d1, d2 = double_bottom
-                sig = {
-                    'type': 'C2',
-                    'date': last['date'],
-                    'desc': f"쌍바닥 형성 — {d1}·{d2} 저점 {bottom_price:,}원 ±4% 이내. 매수 고려 타점",
-                    'entry_price': int(bottom_price * 1.005),
-                    'confidence': 'M',
-                    'note': f"저점 {bottom_price:,}원 지지 확인 후 진입",
-                }
-                if overheat_info and overheat_info['days_ago'] <= 3:
-                    sig['overheat_warning'] = True
-                    sig['overheat_msg'] = f"⚠️ {overheat_info['date']} 폭등 후 {overheat_info['days_ago']}거래일째 — 단기과열 주의"
-                found.append(sig)
+                # 두 저점이 서로 다른 날이어야 진짜 쌍바닥
+                if d1 != d2:
+                    sig = {
+                        'type': 'C2',
+                        'date': last['date'],
+                        'desc': f"쌍바닥 형성 — {d1}·{d2} 저점 {bottom_price:,}원 ±4% 이내. 지지 확인 타점",
+                        'entry_price': int(bottom_price * 1.005),
+                        'confidence': 'M',
+                        'note': f"저점 {bottom_price:,}원 근처 반등 확인 후 진입",
+                    }
+                    if overheat_info and overheat_info['days_ago'] <= 3:
+                        sig['overheat_warning'] = True
+                        sig['overheat_msg'] = f"⚠️ {overheat_info['date']} 폭등 후 {overheat_info['days_ago']}거래일째 — 단기과열 주의"
+                    found.append(sig)
 
             # C3: 거감봉 이후 거래량 증가 양봉 (재상승 시작)
             is_vol_up = last['volume'] > vol_avg * 1.5
@@ -3194,15 +3222,16 @@ def seeking_signal_reentry_check():
                     sig['overheat_msg'] = f"⚠️ {overheat_info['date']} 폭등 후 {overheat_info['days_ago']}거래일째 — 단기과열 주의"
                 found.append(sig)
 
-            # ── Type B: 익절가 상향 돌파 (기록용) ────────────────────────
-            if exit_price and last['high'] > exit_price and last['close'] > exit_price:
+            # ── Type B: 익절가 5%+ 확실한 돌파 (기록용) ──────────────────
+            # 익절가 근처(±5%) 는 지지 형성 구간 — 돌파 아님
+            if exit_price and last['close'] > exit_price * 1.05:
                 found.append({
                     'type': 'B',
                     'date': last['date'],
-                    'desc': f"익절가({int(exit_price):,}원) 상향 돌파",
-                    'entry_price': exit_price,
+                    'desc': f"익절가({int(exit_price):,}원) +5% 돌파 (종가 {last['close']:,}원) — 상승 추세 확인",
+                    'entry_price': int(exit_price * 1.01),
                     'confidence': 'M',
-                    'note': '기록용 — 실시간 돌파 확인 진입',
+                    'note': '기록용 — 돌파 확인 후 재진입',
                 })
 
             return found
@@ -3288,7 +3317,7 @@ def seeking_signal_reentry_check():
                     'exit_date': exit_date,
                     'bars_analyzed': len(analysis_bars),
                     'overheat_date': overheat_date,
-                    'signals': all_signals,
+                    'signals': exit_day_signals + all_signals,
                 }
             })
         else:
