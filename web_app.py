@@ -2998,12 +2998,15 @@ def save_reentry_signal():
 @app.route('/api/seeking-signal/reentry-check', methods=['POST'])
 @auth.login_required
 def seeking_signal_reentry_check():
-    """일봉 데이터 기반 Type A/B/C 재진입 시그널 체크"""
+    """일봉 데이터 기반 Type A/B/C 재진입 시그널 체크.
+    backtest_mode=True 이면 exit_date 이후 전체 구간을 일별 시뮬레이션.
+    """
     data = request.json or {}
     stock_code = normalize_stock_code(data.get('stock_code', ''))
     buy_price = float(data.get('buy_price', 0))
     exit_price = float(data.get('exit_price', 0))
-    exit_date = data.get('exit_date', '')
+    exit_date = data.get('exit_date', '')   # YYYY-MM-DD
+    backtest_mode = bool(data.get('backtest_mode', False))
 
     if not stock_code or not buy_price or not exit_price:
         return jsonify({'success': False, 'error': 'stock_code, buy_price, exit_price 필요'}), 400
@@ -3013,30 +3016,28 @@ def seeking_signal_reentry_check():
         if not token:
             return jsonify({'success': False, 'error': 'Kiwoom API 미연결'}), 503
 
-        from kiwoom_chart import get_intraday_summary
         import requests as rq
+        from datetime import datetime as _dt
+        from zoneinfo import ZoneInfo as _ZI
 
-        # 최근 10일 일봉 조회 (ka10081)
         HOST = os.environ.get('KIWOOM_HOST', 'https://api.kiwoom.com')
-        headers = {
+        kw_headers = {
             'Content-Type': 'application/json;charset=UTF-8',
             'api-id': 'ka10081',
             'authorization': f'Bearer {token}',
         }
-        from datetime import datetime as _dt
-        from zoneinfo import ZoneInfo as _ZI
         _today = _dt.now(_ZI('Asia/Seoul')).strftime('%Y%m%d')
         payload = {'stk_cd': stock_code, 'base_dt': _today, 'upd_stkpc_tp': '1'}
-        resp = rq.post(HOST.rstrip('/') + '/api/dostk/chart', headers=headers, json=payload, timeout=15)
+        resp = rq.post(HOST.rstrip('/') + '/api/dostk/chart', headers=kw_headers, json=payload, timeout=15)
         chart_resp = resp.json() if resp.ok else {}
-        daily_bars = chart_resp.get('stk_dt_pole_chart_qry', [])
+        daily_bars_raw = chart_resp.get('stk_dt_pole_chart_qry', [])
 
         def pp(v):
             return abs(int(str(v).replace('+', '').replace('-', '').replace(',', ''))) if v else 0
 
-        bars = []
-        for b in daily_bars[:15]:
-            bars.append({
+        all_bars = []
+        for b in daily_bars_raw:
+            all_bars.append({
                 'date': str(b.get('dt', '')),
                 'open': pp(b.get('open_pric')),
                 'high': pp(b.get('high_pric')),
@@ -3044,67 +3045,106 @@ def seeking_signal_reentry_check():
                 'close': pp(b.get('cur_prc')),
                 'volume': int(str(b.get('trde_qty', '0')).replace(',', '')),
             })
-        bars.sort(key=lambda x: x['date'])
+        all_bars.sort(key=lambda x: x['date'])
 
-        signals = []
+        # exit_date 이후 봉만 분석 대상
+        exit_date_compact = exit_date.replace('-', '') if exit_date else ''
+        analysis_bars = [b for b in all_bars if b['date'] > exit_date_compact] if exit_date_compact else all_bars
 
-        if len(bars) >= 3:
-            recent = bars[-10:]
+        def _scan_signals(bars, window_end_idx):
+            """bars[0..window_end_idx] 구간에서 시그널 탐색. 마지막 봉이 오늘."""
+            if window_end_idx < 2:
+                return []
+            window = bars[:window_end_idx + 1]
+            last = window[-1]
+            prev = window[:-1]
+            vol_avg = sum(b['volume'] for b in prev) / max(len(prev), 1)
 
-            # Type A — 현재가 ≤ 매수가 × 1.03
-            last_close = recent[-1]['close'] if recent else 0
-            if last_close and last_close <= buy_price * 1.03:
-                signals.append({
+            found = []
+
+            # Type A — 마지막 봉 종가 ≤ 매수가 × 1.03
+            if last['close'] and last['close'] <= buy_price * 1.03:
+                found.append({
                     'type': 'A',
-                    'desc': f'현재가({last_close:,}원)가 매수가({buy_price:,}원) 근처 복귀',
-                    'entry_price': last_close,
+                    'date': last['date'],
+                    'desc': f"종가({last['close']:,}원) ≤ 매수가({int(buy_price):,}원) 근처",
+                    'entry_price': last['close'],
+                    'confidence': 'M',
                 })
 
-            # Type C — 거감음봉 N일 후 거량급증 양봉
-            vol_avg = sum(b['volume'] for b in recent[:-1]) / max(len(recent) - 1, 1)
+            # Type C — 연속 거감음봉 → 거량급증 양봉
             consecutive_down = 0
-            for b in reversed(recent[:-1]):
+            for b in reversed(prev[-6:]):
                 if b['close'] < b['open'] and b['volume'] < vol_avg * 0.6:
                     consecutive_down += 1
                 else:
                     break
-
-            last = recent[-1]
             is_vol_spike = last['volume'] > vol_avg * 1.8
             is_bullish = last['close'] >= last['open']
             near_buy = last['low'] <= buy_price * 1.08
-
             if consecutive_down >= 2 and is_vol_spike and is_bullish:
                 confidence = 'H' if consecutive_down >= 3 and near_buy else 'M'
-                signals.append({
+                found.append({
                     'type': 'C',
-                    'desc': f'거감음봉 {consecutive_down}일 후 거래량 급증 양봉 (거래량 {last["volume"]:,}, 평균 {int(vol_avg):,})',
+                    'date': last['date'],
+                    'desc': f"거감음봉 {consecutive_down}일 후 거래량 급증 양봉 (거래량 {last['volume']:,} vs 평균 {int(vol_avg):,})",
                     'entry_price': last['open'],
                     'confidence': confidence,
                 })
 
-            # Type B — 익절가 상향 돌파 (기록용)
-            for b in recent[-3:]:
-                if exit_price and b['high'] > exit_price and b['close'] > exit_price:
-                    signals.append({
-                        'type': 'B',
-                        'desc': f'익절가({exit_price:,}원) 상향 돌파 확인 ({b["date"]})',
-                        'entry_price': exit_price,
-                        'note': '기록용 — 실시간 진입 필요',
-                    })
-                    break
+            # Type B — 익절가 상향 돌파 (마지막 봉 기준)
+            if exit_price and last['high'] > exit_price and last['close'] > exit_price:
+                found.append({
+                    'type': 'B',
+                    'date': last['date'],
+                    'desc': f"익절가({int(exit_price):,}원) 상향 돌파",
+                    'entry_price': exit_price,
+                    'confidence': 'M',
+                    'note': '기록용 — 실시간 돌파 확인 진입',
+                })
 
-        return jsonify({
-            'success': True,
-            'data': {
-                'stock_code': stock_code,
-                'buy_price': buy_price,
-                'exit_price': exit_price,
-                'signals': signals,
-                'bars_analyzed': len(bars),
-                'last_close': bars[-1]['close'] if bars else 0,
-            }
-        })
+            return found
+
+        if backtest_mode:
+            # 날짜별 롤링 시뮬레이션 — 매일 "그 시점까지의 데이터"로 판단
+            all_signals = []
+            seen_dates = set()
+            for i in range(2, len(analysis_bars)):
+                day_signals = _scan_signals(analysis_bars, i)
+                for s in day_signals:
+                    key = (s['type'], s['date'])
+                    if key not in seen_dates:
+                        seen_dates.add(key)
+                        all_signals.append(s)
+
+            return jsonify({
+                'success': True,
+                'mode': 'backtest',
+                'data': {
+                    'stock_code': stock_code,
+                    'buy_price': buy_price,
+                    'exit_price': exit_price,
+                    'exit_date': exit_date,
+                    'bars_analyzed': len(analysis_bars),
+                    'signals': all_signals,
+                }
+            })
+        else:
+            # 실시간 모드 — 최근 10봉 기준
+            recent = analysis_bars[-10:] if len(analysis_bars) >= 10 else analysis_bars
+            signals = _scan_signals(recent, len(recent) - 1) if len(recent) >= 3 else []
+            return jsonify({
+                'success': True,
+                'mode': 'realtime',
+                'data': {
+                    'stock_code': stock_code,
+                    'buy_price': buy_price,
+                    'exit_price': exit_price,
+                    'signals': signals,
+                    'bars_analyzed': len(recent),
+                    'last_close': recent[-1]['close'] if recent else 0,
+                }
+            })
     except Exception as e:
         logger.error(f'reentry-check 실패: {e}')
         return jsonify({'success': False, 'error': str(e)}), 500
