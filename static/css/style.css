@@ -2650,3 +2650,47 @@ tbody tr.inactive {
     padding: 1px 5px;
     font-size: 11px;
 }
+
+/* ─── 재진입 시그널 ──────────────────────────────────── */
+.reentry-signal-card {
+    background: #f0faf4;
+    border: 1px solid #b2dfdb;
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin-bottom: 10px;
+}
+.reentry-type-badge {
+    display: inline-block;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 12px;
+}
+.reentry-confidence {
+    display: inline-block;
+    background: #fff3cd;
+    color: #856404;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 4px;
+    border: 1px solid #ffc107;
+}
+.reentry-desc { font-size: 13px; color: #37474f; margin: 6px 0 4px; }
+.reentry-entry { font-size: 13px; color: #1b5e20; }
+.reentry-status-watching { color: #1565c0; font-size: 12px; font-weight: 600; }
+.reentry-status-triggered { color: #2e7d32; font-size: 12px; font-weight: 600; }
+.reentry-status-expired { color: #757575; font-size: 12px; }
+
+.reentry-watchlist-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+.reentry-watchlist-table th, .reentry-watchlist-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border-color);
+    text-align: left;
+}
+.reentry-watchlist-table th { background: var(--bg-secondary); color: var(--text-secondary); font-weight: 600; }

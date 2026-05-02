@@ -188,6 +188,37 @@ class NewsStorage:
 
                 CREATE INDEX IF NOT EXISTS idx_stock_siwhang_history_code ON stock_siwhang_history(stock_code);
                 CREATE INDEX IF NOT EXISTS idx_stock_siwhang_history_date ON stock_siwhang_history(event_date);
+
+                CREATE TABLE IF NOT EXISTS trade_watchlist (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    stock_code TEXT NOT NULL,
+                    stock_name TEXT NOT NULL,
+                    buy_price REAL,
+                    buy_date TEXT,
+                    exit_price REAL,
+                    exit_date TEXT,
+                    status TEXT NOT NULL DEFAULT 'watching',
+                    notes TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS reentry_signals (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    watchlist_id INTEGER REFERENCES trade_watchlist(id),
+                    stock_code TEXT,
+                    stock_name TEXT,
+                    signal_type TEXT,
+                    signal_date TEXT,
+                    entry_price_suggestion REAL,
+                    confidence TEXT,
+                    reason TEXT,
+                    ss_matched INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_trade_watchlist_status ON trade_watchlist(status);
+                CREATE INDEX IF NOT EXISTS idx_reentry_signals_date ON reentry_signals(signal_date);
+                CREATE INDEX IF NOT EXISTS idx_reentry_signals_code ON reentry_signals(stock_code);
             """)
             # 기존 DB 마이그레이션 (컬럼 없으면 추가)
             for col, definition in [
@@ -930,3 +961,95 @@ class NewsStorage:
         except Exception as e:
             logger.error(f"get_stock_siwhang_history 실패: {e}")
             return []
+
+    # ─── 매매 감시 목록 (trade_watchlist) ─────────────────────────
+
+    def add_trade_watchlist(self, stock_code: str, stock_name: str,
+                             buy_price: float, buy_date: str,
+                             exit_price: float, exit_date: str,
+                             notes: str = "") -> int:
+        with self._conn() as conn:
+            cur = conn.execute(
+                """INSERT INTO trade_watchlist
+                   (stock_code, stock_name, buy_price, buy_date, exit_price, exit_date, notes)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (stock_code, stock_name, buy_price, buy_date, exit_price, exit_date, notes)
+            )
+            return cur.lastrowid
+
+    def get_trade_watchlist(self, status: Optional[str] = None) -> List[Dict]:
+        with self._conn() as conn:
+            if status:
+                rows = conn.execute(
+                    "SELECT * FROM trade_watchlist WHERE status=? ORDER BY created_at DESC",
+                    (status,)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM trade_watchlist ORDER BY created_at DESC"
+                ).fetchall()
+            return [dict(r) for r in rows]
+
+    def update_trade_watchlist(self, watchlist_id: int, **fields) -> bool:
+        allowed = {"status", "buy_price", "buy_date", "exit_price", "exit_date", "notes", "stock_name"}
+        updates = {k: v for k, v in fields.items() if k in allowed}
+        if not updates:
+            return False
+        set_clause = ", ".join(f"{k}=?" for k in updates)
+        try:
+            with self._conn() as conn:
+                conn.execute(
+                    f"UPDATE trade_watchlist SET {set_clause} WHERE id=?",
+                    list(updates.values()) + [watchlist_id]
+                )
+            return True
+        except Exception as e:
+            logger.error(f"update_trade_watchlist 실패: {e}")
+            return False
+
+    def delete_trade_watchlist(self, watchlist_id: int) -> bool:
+        try:
+            with self._conn() as conn:
+                conn.execute("DELETE FROM trade_watchlist WHERE id=?", (watchlist_id,))
+            return True
+        except Exception as e:
+            logger.error(f"delete_trade_watchlist 실패: {e}")
+            return False
+
+    # ─── 재진입 시그널 (reentry_signals) ──────────────────────────
+
+    def save_reentry_signal(self, watchlist_id: int, stock_code: str, stock_name: str,
+                             signal_type: str, signal_date: str,
+                             entry_price_suggestion: float, confidence: str,
+                             reason: str, ss_matched: bool = False) -> int:
+        with self._conn() as conn:
+            cur = conn.execute(
+                """INSERT INTO reentry_signals
+                   (watchlist_id, stock_code, stock_name, signal_type, signal_date,
+                    entry_price_suggestion, confidence, reason, ss_matched)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (watchlist_id, stock_code, stock_name, signal_type, signal_date,
+                 entry_price_suggestion, confidence, reason, 1 if ss_matched else 0)
+            )
+            return cur.lastrowid
+
+    def get_reentry_signals(self, signal_date: Optional[str] = None, limit: int = 50) -> List[Dict]:
+        with self._conn() as conn:
+            if signal_date:
+                rows = conn.execute(
+                    """SELECT r.*, w.buy_price, w.exit_price, w.buy_date, w.exit_date
+                       FROM reentry_signals r
+                       LEFT JOIN trade_watchlist w ON r.watchlist_id = w.id
+                       WHERE r.signal_date=?
+                       ORDER BY r.created_at DESC LIMIT ?""",
+                    (signal_date, limit)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """SELECT r.*, w.buy_price, w.exit_price, w.buy_date, w.exit_date
+                       FROM reentry_signals r
+                       LEFT JOIN trade_watchlist w ON r.watchlist_id = w.id
+                       ORDER BY r.created_at DESC LIMIT ?""",
+                    (limit,)
+                ).fetchall()
+            return [dict(r) for r in rows]

@@ -2909,6 +2909,204 @@ def reorder_mottos():
     return jsonify({'success': ok})
 
 
+# ─── 매매 감시 목록 (trade_watchlist) ────────────────────────────────
+
+@app.route('/api/trade-watchlist', methods=['GET'])
+@auth.login_required
+def get_trade_watchlist():
+    status = request.args.get('status')
+    ns = _get_news_storage()
+    items = ns.get_trade_watchlist(status=status)
+    return jsonify({'success': True, 'data': items})
+
+
+@app.route('/api/trade-watchlist', methods=['POST'])
+@auth.login_required
+def add_trade_watchlist():
+    data = request.json or {}
+    stock_code = normalize_stock_code(data.get('stock_code', ''))
+    stock_name = data.get('stock_name', '')
+    if not stock_code or not stock_name:
+        return jsonify({'success': False, 'error': 'stock_code, stock_name 필요'}), 400
+    ns = _get_news_storage()
+    wid = ns.add_trade_watchlist(
+        stock_code=stock_code,
+        stock_name=stock_name,
+        buy_price=float(data.get('buy_price', 0)),
+        buy_date=data.get('buy_date', ''),
+        exit_price=float(data.get('exit_price', 0)),
+        exit_date=data.get('exit_date', ''),
+        notes=data.get('notes', ''),
+    )
+    return jsonify({'success': True, 'id': wid})
+
+
+@app.route('/api/trade-watchlist/<int:wid>', methods=['PUT'])
+@auth.login_required
+def update_trade_watchlist(wid):
+    data = request.json or {}
+    ns = _get_news_storage()
+    ok = ns.update_trade_watchlist(wid, **data)
+    return jsonify({'success': ok})
+
+
+@app.route('/api/trade-watchlist/<int:wid>', methods=['DELETE'])
+@auth.login_required
+def delete_trade_watchlist(wid):
+    ns = _get_news_storage()
+    ok = ns.delete_trade_watchlist(wid)
+    return jsonify({'success': ok})
+
+
+# ─── 재진입 시그널 (reentry_signals) ─────────────────────────────────
+
+@app.route('/api/reentry/signals', methods=['GET'])
+@auth.login_required
+def get_reentry_signals():
+    signal_date = request.args.get('date')
+    limit = int(request.args.get('limit', 50))
+    ns = _get_news_storage()
+    signals = ns.get_reentry_signals(signal_date=signal_date, limit=limit)
+    return jsonify({'success': True, 'data': signals})
+
+
+@app.route('/api/reentry/signals', methods=['POST'])
+@auth.login_required
+def save_reentry_signal():
+    data = request.json or {}
+    results = data.get('results', [data])
+    ns = _get_news_storage()
+    saved_ids = []
+    for r in results:
+        sid = ns.save_reentry_signal(
+            watchlist_id=r.get('watchlist_id', 0),
+            stock_code=normalize_stock_code(r.get('stock_code', '')),
+            stock_name=r.get('stock_name', ''),
+            signal_type=r.get('signal_type', 'C'),
+            signal_date=r.get('signal_date', ''),
+            entry_price_suggestion=float(r.get('entry_price_suggestion', 0)),
+            confidence=r.get('confidence', 'M'),
+            reason=r.get('reason', ''),
+            ss_matched=bool(r.get('ss_matched', False)),
+        )
+        saved_ids.append(sid)
+    return jsonify({'success': True, 'ids': saved_ids})
+
+
+# ─── Seeking Signal 재진입 체크 ───────────────────────────────────────
+
+@app.route('/api/seeking-signal/reentry-check', methods=['POST'])
+@auth.login_required
+def seeking_signal_reentry_check():
+    """일봉 데이터 기반 Type A/B/C 재진입 시그널 체크"""
+    data = request.json or {}
+    stock_code = normalize_stock_code(data.get('stock_code', ''))
+    buy_price = float(data.get('buy_price', 0))
+    exit_price = float(data.get('exit_price', 0))
+    exit_date = data.get('exit_date', '')
+
+    if not stock_code or not buy_price or not exit_price:
+        return jsonify({'success': False, 'error': 'stock_code, buy_price, exit_price 필요'}), 400
+
+    try:
+        token = kiwoom_client.token if kiwoom_client else None
+        if not token:
+            return jsonify({'success': False, 'error': 'Kiwoom API 미연결'}), 503
+
+        from kiwoom_chart import get_intraday_summary
+        import requests as rq
+
+        # 최근 10일 일봉 조회 (ka10081)
+        HOST = os.environ.get('KIWOOM_HOST', 'https://api.kiwoom.com')
+        headers = {
+            'Content-Type': 'application/json;charset=UTF-8',
+            'api-id': 'ka10081',
+            'authorization': f'Bearer {token}',
+        }
+        payload = {'stk_cd': stock_code, 'upd_stkpc_tp': '1'}
+        resp = rq.post(HOST.rstrip('/') + '/api/dostk/chart', headers=headers, json=payload, timeout=15)
+        chart_resp = resp.json() if resp.ok else {}
+        daily_bars = chart_resp.get('stk_dt_pole_chart_qry', [])
+
+        def pp(v):
+            return abs(int(str(v).replace('+', '').replace('-', '').replace(',', ''))) if v else 0
+
+        bars = []
+        for b in daily_bars[:15]:
+            bars.append({
+                'date': str(b.get('dt', '')),
+                'open': pp(b.get('open_pric')),
+                'high': pp(b.get('high_pric')),
+                'low': pp(b.get('low_pric')),
+                'close': pp(b.get('cur_prc')),
+                'volume': int(str(b.get('trde_qty', '0')).replace(',', '')),
+            })
+        bars.sort(key=lambda x: x['date'])
+
+        signals = []
+
+        if len(bars) >= 3:
+            recent = bars[-10:]
+
+            # Type A — 현재가 ≤ 매수가 × 1.03
+            last_close = recent[-1]['close'] if recent else 0
+            if last_close and last_close <= buy_price * 1.03:
+                signals.append({
+                    'type': 'A',
+                    'desc': f'현재가({last_close:,}원)가 매수가({buy_price:,}원) 근처 복귀',
+                    'entry_price': last_close,
+                })
+
+            # Type C — 거감음봉 N일 후 거량급증 양봉
+            vol_avg = sum(b['volume'] for b in recent[:-1]) / max(len(recent) - 1, 1)
+            consecutive_down = 0
+            for b in reversed(recent[:-1]):
+                if b['close'] < b['open'] and b['volume'] < vol_avg * 0.6:
+                    consecutive_down += 1
+                else:
+                    break
+
+            last = recent[-1]
+            is_vol_spike = last['volume'] > vol_avg * 1.8
+            is_bullish = last['close'] >= last['open']
+            near_buy = last['low'] <= buy_price * 1.08
+
+            if consecutive_down >= 2 and is_vol_spike and is_bullish:
+                confidence = 'H' if consecutive_down >= 3 and near_buy else 'M'
+                signals.append({
+                    'type': 'C',
+                    'desc': f'거감음봉 {consecutive_down}일 후 거래량 급증 양봉 (거래량 {last["volume"]:,}, 평균 {int(vol_avg):,})',
+                    'entry_price': last['open'],
+                    'confidence': confidence,
+                })
+
+            # Type B — 익절가 상향 돌파 (기록용)
+            for b in recent[-3:]:
+                if exit_price and b['high'] > exit_price and b['close'] > exit_price:
+                    signals.append({
+                        'type': 'B',
+                        'desc': f'익절가({exit_price:,}원) 상향 돌파 확인 ({b["date"]})',
+                        'entry_price': exit_price,
+                        'note': '기록용 — 실시간 진입 필요',
+                    })
+                    break
+
+        return jsonify({
+            'success': True,
+            'data': {
+                'stock_code': stock_code,
+                'buy_price': buy_price,
+                'exit_price': exit_price,
+                'signals': signals,
+                'bars_analyzed': len(bars),
+                'last_close': bars[-1]['close'] if bars else 0,
+            }
+        })
+    except Exception as e:
+        logger.error(f'reentry-check 실패: {e}')
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 def start_price_monitor():
     """PriceMonitor를 별도 스레드에서 실행"""
     if not price_monitor:

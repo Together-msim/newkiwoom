@@ -43,6 +43,7 @@ function switchPage(pageName) {
     else if (pageName === 'tradelog') loadTradelog();
     else if (pageName === 'siwhang') loadSiwhang();
     else if (pageName === 'live') loadLive();
+    else if (pageName === 'seeking-signal') loadTradeWatchlist();
     else if (pageName === 'backtest') { loadBacktestSessions(); loadMottos(); }
     else if (pageName === 'test') loadMode2PickList();
 }
@@ -7257,6 +7258,7 @@ async function loadLive() {
         _liveCarouselIdx = 0;
         Object.keys(_liveChartLoaded).forEach(k => delete _liveChartLoaded[k]);
         _renderLive();
+        loadReentrySignals();
     } catch (e) {
         showToast('로드 실패', 'error');
         console.error(e);
@@ -7524,6 +7526,187 @@ async function requestLiveAnalysis() {
     } catch (e) {
         showToast('요청 실패', 'error');
         btn.disabled = false; btn.textContent = '▶ 지금 분석';
+    }
+}
+
+// ─── 재진입 체크 (Seeking Signal Type3) ──────────────────────────────
+
+async function checkReentry() {
+    const stockCode = document.getElementById('reStockCode').value.trim();
+    const stockName = document.getElementById('reStockName').value.trim();
+    const buyPrice = parseFloat(document.getElementById('reBuyPrice').value);
+    const exitPrice = parseFloat(document.getElementById('reExitPrice').value);
+    const exitDate = document.getElementById('reExitDate').value.trim();
+    const resultEl = document.getElementById('reentryResult');
+
+    if (!stockCode || !buyPrice || !exitPrice) {
+        showToast('종목코드, 매수가, 익절가 필수', 'error');
+        return;
+    }
+
+    resultEl.innerHTML = '<p style="color:#868e96">분석 중...</p>';
+    try {
+        const res = await fetch('/api/seeking-signal/reentry-check', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ stock_code: stockCode, buy_price: buyPrice, exit_price: exitPrice, exit_date: exitDate }),
+        });
+        const r = await res.json();
+        if (!r.success) { resultEl.innerHTML = `<p style="color:#e74c3c">${r.error}</p>`; return; }
+        const d = r.data;
+        const signals = d.signals || [];
+        if (!signals.length) {
+            resultEl.innerHTML = '<p style="color:#868e96; padding: 12px 0;">현재 시그널 없음 — 계속 모니터링</p>';
+            return;
+        }
+        const typeColor = { A: '#3498db', B: '#f39c12', C: '#27ae60' };
+        resultEl.innerHTML = signals.map(s => `
+            <div class="reentry-signal-card">
+                <span class="reentry-type-badge" style="background:${typeColor[s.type]||'#95a5a6'}">Type ${s.type}</span>
+                <span class="reentry-confidence">${s.confidence || 'M'}</span>
+                <div class="reentry-desc">${s.desc}</div>
+                <div class="reentry-entry">추천 진입가: <strong>${(s.entry_price||0).toLocaleString()}원</strong></div>
+                ${s.note ? `<div style="font-size:12px;color:#868e96">${s.note}</div>` : ''}
+            </div>
+        `).join('');
+    } catch (e) {
+        resultEl.innerHTML = `<p style="color:#e74c3c">오류: ${e.message}</p>`;
+    }
+}
+
+async function saveTradeWatchlist() {
+    const stockCode = document.getElementById('reStockCode').value.trim();
+    const stockName = document.getElementById('reStockName').value.trim();
+    const buyPrice = parseFloat(document.getElementById('reBuyPrice').value);
+    const buyDate = document.getElementById('reBuyDate').value.trim();
+    const exitPrice = parseFloat(document.getElementById('reExitPrice').value);
+    const exitDate = document.getElementById('reExitDate').value.trim();
+
+    if (!stockCode || !stockName || !buyPrice || !exitPrice) {
+        showToast('종목코드, 종목명, 매수가, 익절가 필수', 'error');
+        return;
+    }
+    try {
+        const res = await fetch('/api/trade-watchlist', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ stock_code: stockCode, stock_name: stockName, buy_price: buyPrice, buy_date: buyDate, exit_price: exitPrice, exit_date: exitDate }),
+        });
+        const r = await res.json();
+        if (r.success) {
+            showToast(`${stockName} 감시 목록 등록 완료`, 'success');
+            loadTradeWatchlist();
+        } else {
+            showToast('등록 실패', 'error');
+        }
+    } catch (e) {
+        showToast('오류: ' + e.message, 'error');
+    }
+}
+
+async function loadTradeWatchlist() {
+    const container = document.getElementById('tradeWatchlistContainer');
+    if (!container) return;
+    try {
+        const res = await fetch('/api/trade-watchlist', { credentials: 'same-origin' });
+        const r = await res.json();
+        const items = r.data || [];
+        if (!items.length) {
+            container.innerHTML = '<p style="color:#868e96;font-size:14px;">등록된 감시 종목 없음</p>';
+            return;
+        }
+        container.innerHTML = `<table class="reentry-watchlist-table">
+            <thead><tr><th>종목</th><th>매수가</th><th>익절가</th><th>익절일</th><th>상태</th><th></th></tr></thead>
+            <tbody>${items.map(w => `
+                <tr>
+                    <td><strong>${w.stock_name}</strong><br><small style="color:#868e96">${w.stock_code}</small></td>
+                    <td>${(w.buy_price||0).toLocaleString()}원</td>
+                    <td>${(w.exit_price||0).toLocaleString()}원</td>
+                    <td>${w.exit_date||'-'}</td>
+                    <td><span class="reentry-status-${w.status}">${w.status}</span></td>
+                    <td>
+                        <button class="btn btn-sm btn-secondary" onclick="deleteTradeWatchlist(${w.id})">삭제</button>
+                    </td>
+                </tr>
+            `).join('')}</tbody>
+        </table>`;
+    } catch (e) {
+        container.innerHTML = '<p style="color:#e74c3c">로드 실패</p>';
+    }
+}
+
+async function deleteTradeWatchlist(id) {
+    if (!confirm('감시 목록에서 삭제할까요?')) return;
+    const res = await fetch(`/api/trade-watchlist/${id}`, { method: 'DELETE', credentials: 'same-origin' });
+    const r = await res.json();
+    if (r.success) loadTradeWatchlist();
+}
+
+// ─── 실전페이지 재진입 시그널 ─────────────────────────────────────────
+
+async function loadReentrySignals() {
+    const container = document.getElementById('liveReentryList');
+    if (!container) return;
+    const today = new Date().toISOString().slice(0, 10);
+    try {
+        const res = await fetch(`/api/reentry/signals?date=${today}`, { credentials: 'same-origin' });
+        const r = await res.json();
+        const signals = r.data || [];
+        if (!signals.length) {
+            container.innerHTML = '<p style="color:#868e96;font-size:14px;text-align:center;padding:16px;">오늘 재진입 시그널 없음</p>';
+            return;
+        }
+        const typeColor = { A: '#3498db', B: '#f39c12', C: '#27ae60' };
+        container.innerHTML = signals.map(s => `
+            <div class="reentry-signal-card" style="margin-bottom:12px;">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+                    <strong>${s.stock_name}</strong>
+                    <span class="reentry-type-badge" style="background:${typeColor[s.signal_type]||'#95a5a6'}">Type ${s.signal_type}</span>
+                    <span class="reentry-confidence">${s.confidence||'M'}</span>
+                    ${s.ss_matched ? '<span style="font-size:11px;background:#e8f5e9;color:#27ae60;padding:2px 6px;border-radius:4px;">SS감지</span>' : ''}
+                </div>
+                <div style="font-size:13px;color:#495057;margin-bottom:4px;">${s.reason||''}</div>
+                <div style="font-size:13px;">
+                    추천 진입가: <strong>${(s.entry_price_suggestion||0).toLocaleString()}원</strong>
+                    &nbsp;|&nbsp; 매수가: ${(s.buy_price||0).toLocaleString()}원
+                    &nbsp;|&nbsp; 익절가: ${(s.exit_price||0).toLocaleString()}원
+                </div>
+                ${s.stock_code ? `<div style="margin-top:8px;">
+                    <button class="btn btn-sm btn-success" onclick="liveRegisterMode2FromReentry(${JSON.stringify(s).replace(/"/g,'&quot;')})">📊 Mode2 등록</button>
+                </div>` : ''}
+            </div>
+        `).join('');
+    } catch (e) {
+        container.innerHTML = '<p style="color:#e74c3c">로드 실패</p>';
+    }
+}
+
+async function liveRegisterMode2FromReentry(signal) {
+    const buyPrice = signal.entry_price_suggestion || signal.buy_price;
+    const name = signal.stock_name;
+    const code = signal.stock_code;
+    if (!code) { showToast('종목코드 없음', 'error'); return; }
+
+    const payload = {
+        code, name,
+        buy_target_price: buyPrice,
+        notify_only: true,
+        tag: `재진입 Type${signal.signal_type}`,
+    };
+    try {
+        const res = await fetch('/api/mode2/watchers', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        const r = await res.json();
+        if (r.success || r.code === code) {
+            showToast(`${name} Mode2 등록 완료`, 'success');
+        } else {
+            showToast('등록 실패: ' + (r.error || ''), 'error');
+        }
+    } catch (e) {
+        showToast('오류: ' + e.message, 'error');
     }
 }
 

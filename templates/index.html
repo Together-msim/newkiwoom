@@ -647,7 +647,7 @@
 
                     <!-- 탭 네비게이션 -->
                     <div class="card">
-                        <div style="display: flex; gap: 8px; margin-bottom: 16px; border-bottom: 2px solid #e9ecef;">
+                        <div style="display: flex; gap: 8px; margin-bottom: 16px; border-bottom: 2px solid #e9ecef; flex-wrap: wrap;">
                             <button class="ss-tab-btn active" data-tab="type1">타입1</button>
                             <button class="ss-tab-btn" data-tab="type2">타입2</button>
                             <button class="ss-tab-btn" data-tab="volume">거래대금</button>
@@ -669,6 +669,54 @@
 
                         <!-- Raw Data 탭 -->
                         <div class="ss-tab-content" data-tab="raw" id="ssRawContent"></div>
+                    </div>
+                </div>
+
+                <!-- 재진입 체크 (Type3) — Seeking Signal과 독립적으로 사용 가능 -->
+                <div class="card" id="ssReentryCard">
+                    <h3>🔄 재진입 체크 (Style 3)</h3>
+                    <p style="font-size: 13px; color: #868e96; margin-bottom: 16px;">익절 이력이 있는 종목의 거감음봉→재상승 패턴 분석</p>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+                        <div>
+                            <label style="font-size: 13px; color: #868e96;">종목코드</label>
+                            <input type="text" id="reStockCode" placeholder="054920">
+                        </div>
+                        <div>
+                            <label style="font-size: 13px; color: #868e96;">종목명</label>
+                            <input type="text" id="reStockName" placeholder="한컴위드">
+                        </div>
+                        <div>
+                            <label style="font-size: 13px; color: #868e96;">내 매수가</label>
+                            <input type="number" id="reBuyPrice" placeholder="6190">
+                        </div>
+                        <div>
+                            <label style="font-size: 13px; color: #868e96;">매수일 (YYYY-MM-DD)</label>
+                            <input type="text" id="reBuyDate" placeholder="2026-04-17">
+                        </div>
+                        <div>
+                            <label style="font-size: 13px; color: #868e96;">내 익절가</label>
+                            <input type="number" id="reExitPrice" placeholder="6760">
+                        </div>
+                        <div>
+                            <label style="font-size: 13px; color: #868e96;">익절일 (YYYY-MM-DD)</label>
+                            <input type="text" id="reExitDate" placeholder="2026-04-20">
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="btn btn-primary" onclick="checkReentry()">🔍 재진입 시그널 체크</button>
+                        <button class="btn btn-secondary" onclick="saveTradeWatchlist()">💾 감시 목록 등록</button>
+                    </div>
+                    <div id="reentryResult" style="margin-top: 16px;"></div>
+                </div>
+
+                <!-- 감시 목록 -->
+                <div class="card">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                        <h3 style="margin: 0;">👁 재진입 감시 목록</h3>
+                        <button class="btn btn-secondary" style="font-size: 13px;" onclick="loadTradeWatchlist()">🔄 새로고침</button>
+                    </div>
+                    <div id="tradeWatchlistContainer">
+                        <p style="color: #868e96; font-size: 14px;">로딩 중...</p>
                     </div>
                 </div>
             </div>
@@ -1080,7 +1128,18 @@
                 <!-- 데스크탑: 스크롤 리스트 -->
                 <div id="liveDesktopList" class="backtest-picks-list"></div>
 
-                <p id="liveEmptyState" class="empty-state" style="display:none;">오늘 날짜의 백테스트 세션이 없습니다.<br><small>백테스트 페이지에서 오늘 날짜로 실행하거나 '▶ 지금 분석' 버튼을 누르세요.</small></p>
+                <p id="liveEmptyState" class="empty-state" style="display:none;">오늘 날짜의 시황 분석 결과가 없습니다.<br><small>'▶ 지금 분석' 버튼을 누르거나 /siwhang 스킬을 실행하세요.</small></p>
+
+                <!-- 재진입 시그널 섹션 -->
+                <div class="card" id="liveReentrySection" style="margin-top: 16px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                        <h3 style="margin: 0;">🔄 재진입 알림</h3>
+                        <button class="btn btn-secondary btn-sm" onclick="loadReentrySignals()">🔄</button>
+                    </div>
+                    <div id="liveReentryList">
+                        <p style="color: #868e96; font-size: 14px; text-align: center; padding: 16px;">오늘 재진입 시그널 없음</p>
+                    </div>
+                </div>
             </div>
 
             <!-- 백테스트 페이지 -->
