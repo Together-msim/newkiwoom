@@ -3057,24 +3057,34 @@ def seeking_signal_reentry_check():
             exit_bar = next((b for b in all_bars if b['date'] == exit_date_compact), None)
             if exit_bar:
                 # Type A: 익절 당일 저가가 매수가 존 터치 → 재매수 기회
+                # 저가=당일 저점이므로 오전~오후 장중 언제든 가능. 시가 기준으로 시각 추정
                 if exit_bar['low'] <= buy_price * 1.03:
+                    # 시가보다 저가가 낮으면 오전 하락, 높으면 오후 하락
+                    timing = "오전 장중 (시가 하회)" if exit_bar['low'] < exit_bar['open'] else "오후 장중"
                     exit_day_signals.append({
                         'type': 'A',
                         'date': exit_bar['date'],
-                        'desc': f"익절 당일 저가({exit_bar['low']:,}원)가 매수가({int(buy_price):,}원) 존 터치 — 재매수 기회",
+                        'signal_timing': timing,
+                        'desc': f"익절 당일 저가({exit_bar['low']:,}원) → 매수가({int(buy_price):,}원) 존 터치. 재매수 기회",
                         'entry_price': exit_bar['low'],
                         'confidence': 'H',
-                        'note': '익절 직후 원가 복귀 — 빠른 재진입 타점',
+                        'note': f"타점 시각 추정: {timing}",
                     })
-                # Type B-pre: 익절 당일 익절가보다 5%+ 고가 형성 (돌파 확인 진입)
+                # Type B: 익절 당일 익절가보다 5%+ 고가 형성 (돌파 확인 진입)
                 if exit_price and exit_bar['high'] > exit_price * 1.05:
+                    # 고가 = 종가보다 높으면 오전에 찍고 내려온 것, 종가 근처면 오후 마감 강세
+                    if exit_bar['high'] > exit_bar['close'] * 1.05:
+                        b_timing = "오전 고점 (이후 하락)"
+                    else:
+                        b_timing = "오후 마감 강세"
                     exit_day_signals.append({
                         'type': 'B',
                         'date': exit_bar['date'],
-                        'desc': f"익절 당일 고가({exit_bar['high']:,}원)가 익절가({int(exit_price):,}원) +5% 돌파 — 돌파 확인 진입",
+                        'signal_timing': b_timing,
+                        'desc': f"익절 당일 고가({exit_bar['high']:,}원) → 익절가({int(exit_price):,}원) +{(exit_bar['high']/exit_price-1)*100:.0f}% 돌파. 돌파 확인 진입",
                         'entry_price': int(exit_price * 1.01),
                         'confidence': 'M',
-                        'note': '기록용 — 돌파 확인 후 재진입',
+                        'note': f"타점 시각 추정: {b_timing} / 기록용",
                     })
 
         def _detect_overheat(bars):
@@ -3192,13 +3202,16 @@ def seeking_signal_reentry_check():
                 bottom_price, d1, d2 = double_bottom
                 # 두 저점이 서로 다른 날이어야 진짜 쌍바닥
                 if d1 != d2:
+                    # 일봉 기준 시그널 확정 시각: 당일 종가 확정 = 15:30
                     sig = {
                         'type': 'C2',
                         'date': last['date'],
-                        'desc': f"쌍바닥 형성 — {d1}·{d2} 저점 {bottom_price:,}원 ±4% 이내. 지지 확인 타점",
+                        'signal_timing': '15:30 (당일 종가 확정 후)',
+                        'support_price': bottom_price,
+                        'desc': f"쌍바닥 [{d1}·{d2}] 저점 {bottom_price:,}원 지지 확인. 타점: {int(bottom_price*1.005):,}원",
                         'entry_price': int(bottom_price * 1.005),
                         'confidence': 'M',
-                        'note': f"저점 {bottom_price:,}원 근처 반등 확인 후 진입",
+                        'note': f"저점 {bottom_price:,}원 지지선 근처 반등 확인 후 진입",
                     }
                     if overheat_info and overheat_info['days_ago'] <= 3:
                         sig['overheat_warning'] = True
@@ -3228,7 +3241,8 @@ def seeking_signal_reentry_check():
                 found.append({
                     'type': 'B',
                     'date': last['date'],
-                    'desc': f"익절가({int(exit_price):,}원) +5% 돌파 (종가 {last['close']:,}원) — 상승 추세 확인",
+                    'signal_timing': '15:30 (당일 종가 확정 후)',
+                    'desc': f"익절가({int(exit_price):,}원) +{(last['close']/exit_price-1)*100:.0f}% 돌파 (종가 {last['close']:,}원) — 상승 추세 확인",
                     'entry_price': int(exit_price * 1.01),
                     'confidence': 'M',
                     'note': '기록용 — 돌파 확인 후 재진입',
@@ -3302,7 +3316,19 @@ def seeking_signal_reentry_check():
 
                 day_signals = _scan_signals(analysis_bars, i, overheat_suppressed=False)
                 for s in day_signals:
-                    key = (s['type'], s['date'])
+                    sig_type = s.get('type', '')
+                    # C2: 같은 support_price(지지가격대)는 첫 감지만 기록
+                    # 다른 가격대면 신규 쌍바닥으로 별도 기록
+                    if sig_type == 'C2':
+                        support = s.get('support_price', 0)
+                        # 100원 이내면 같은 지지대로 간주
+                        already = any(
+                            x.get('type') == 'C2' and abs(x.get('support_price', 0) - support) <= 100
+                            for x in all_signals
+                        )
+                        if already:
+                            continue
+                    key = (sig_type, s['date'])
                     if key not in seen_dates:
                         seen_dates.add(key)
                         all_signals.append(s)
