@@ -3239,19 +3239,24 @@ def seeking_signal_reentry_check():
             overheat_date = _find_overheat_date(all_bars)
 
         if backtest_mode:
+            # 과열일이 analysis_bars 밖(exit_date)에 있을 수 있으므로
+            # all_bars 기준으로 overheat 위치 파악 후 analysis_bars 시작 offset 계산
+            overheat_all_idx = next((j for j, b in enumerate(all_bars) if b['date'] == overheat_date), None)
+            analysis_start_all_idx = next((j for j, b in enumerate(all_bars) if b['date'] == (analysis_bars[0]['date'] if analysis_bars else '9')), 0)
+
             # 날짜별 롤링 시뮬레이션
             all_signals = []
             seen_dates = set()
             for i in range(2, len(analysis_bars)):
                 current_date = analysis_bars[i]['date']
-                # 과열기간(폭등 후 3거래일) 계산
+                # 과열기간(폭등 후 3거래일) 계산 — all_bars 기준 거리
                 suppressed = False
-                if overheat_date:
-                    overheat_idx = next((j for j, b in enumerate(analysis_bars) if b['date'] == overheat_date), None)
-                    if overheat_idx is not None:
-                        days_since = i - overheat_idx
-                        if 1 <= days_since <= 3:
-                            suppressed = True
+                days_since_overheat = None
+                if overheat_date and overheat_all_idx is not None:
+                    current_all_idx = analysis_start_all_idx + i
+                    days_since_overheat = current_all_idx - overheat_all_idx
+                    if 1 <= days_since_overheat <= 3:
+                        suppressed = True
 
                 if suppressed:
                     # 과열기간 봉은 시그널 스킵 — 대신 경고 기록
@@ -3261,7 +3266,7 @@ def seeking_signal_reentry_check():
                         all_signals.append({
                             'type': 'OVERHEAT',
                             'date': current_date,
-                            'desc': f"단기과열 기간 ({overheat_date} 폭등 후 {i - overheat_idx}거래일째) — 시그널 억제",
+                            'desc': f"단기과열 기간 ({overheat_date} 폭등 후 {days_since_overheat}거래일째) — 시그널 억제",
                             'confidence': '-',
                         })
                     continue
