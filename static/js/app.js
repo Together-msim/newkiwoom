@@ -1178,6 +1178,12 @@ function formatDate(dateStr) {
     return date.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' });
 }
 
+// 날짜 문자열에서 4자리 연도를 '26 형식으로 축약 (표시용)
+function shortenYear(text) {
+    if (!text) return text;
+    return text.replace(/\b(20\d{2})\b/g, (m, y) => "'" + y.slice(2));
+}
+
 function getStatusText(status) {
     const map = {
         'waiting_buy': '매수대기',
@@ -3240,7 +3246,7 @@ function _renderTooltip(tooltip, d, history, financeStale) {
             const tagLabel = h.tag_type === 'ss_up' ? 'SS⬆️' : h.tag_type === 'vi' ? 'VI' : 'SS';
             const shortText = (h.feed_text || '').substring(0, 80);
             return `<div class="sm-hist-row">
-                <span class="sm-hist-date">${h.event_date}</span>
+                <span class="sm-hist-date">${shortenYear(h.event_date)}</span>
                 <span class="sm-tag ${tagCls}">${tagLabel}</span>
                 ${h.theme ? `<span class="sm-hist-theme">${h.theme}</span>` : ''}
                 <div class="sm-hist-text">${shortText}${h.feed_text && h.feed_text.length > 80 ? '…' : ''}</div>
@@ -3325,7 +3331,7 @@ async function refreshStockFinance(stockCode) {
     }
 }
 
-// ─── 종목 자유 노트 모달 ──────────────────────────────────────────────────
+// ─── 종목 노트 모달 (1종목 1노트 단일 텍스트) ────────────────────────────
 
 let _stockNotesCurrentCode = null;
 let _stockNotesCurrentName = null;
@@ -3333,199 +3339,142 @@ let _stockNotesCurrentName = null;
 async function openStockNotesModal(stockCode, stockName) {
     _stockNotesCurrentCode = stockCode;
     _stockNotesCurrentName = stockName;
-
     document.getElementById('stockNotesModalTitle').textContent = `${stockName} (${stockCode}) 노트`;
-
-    // 오늘 날짜 기본값
-    const today = new Date().toISOString().slice(0, 10);
-    document.getElementById('stockNoteNewDate').value = today;
-    document.getElementById('stockNoteNewContent').value = '';
-    document.getElementById('stockNotesAddStatus').textContent = '';
-
+    // 오늘 날짜 기본값 (M/D 형식 — 2026→'26 변환)
+    const today = new Date();
+    const dateStr = _fmtNoteDate(today);
+    document.getElementById('stockNotePrependDate').value = today.toISOString().slice(0, 10);
+    document.getElementById('stockNotePrependContent').value = '';
     document.getElementById('stockNotesModal').style.display = 'flex';
-    await _loadStockNotes();
+    await _reloadStockNote();
+    setTimeout(() => document.getElementById('stockNotePrependContent').focus(), 100);
 }
 
 function closeStockNotesModal() {
     document.getElementById('stockNotesModal').style.display = 'none';
     _stockNotesCurrentCode = null;
-    _stockNotesCurrentName = null;
 }
 
-async function _loadStockNotes() {
+// M/D 포맷 (연도 앞 2자리 '26 형식)
+function _fmtNoteDate(dateObj) {
+    const yy = String(dateObj.getFullYear()).slice(2);
+    return `'${yy}/${dateObj.getMonth()+1}/${dateObj.getDate()}`;
+}
+
+async function _reloadStockNote() {
     const code = _stockNotesCurrentCode;
     if (!code) return;
-
-    const [notesRes, masterRes] = await Promise.all([
-        fetch(`/api/stock-master/${code}/notes`, { credentials: 'same-origin' }).then(r => r.json()).catch(() => ({})),
-        fetch(`/api/stock-master/${code}`, { credentials: 'same-origin' }).then(r => r.json()).catch(() => ({})),
-    ]);
-
-    const notes = (notesRes.notes || []);
-    const summary = masterRes.data?.summary_2line || '';
-
-    // 요약 표시
-    const summaryText = document.getElementById('stockNotesSummaryText');
-    const summaryTextarea = document.getElementById('stockNotesSummaryTextarea');
-    summaryText.textContent = summary || '요약 없음 (AI 요약 버튼으로 생성하거나 직접 입력하세요)';
-    summaryText.style.color = summary ? '#495057' : '#adb5bd';
-    summaryTextarea.value = summary;
-    document.getElementById('stockNotesSummaryEdit').style.display = 'none';
-    summaryText.style.display = 'block';
-    // summary 클릭 → 편집
-    summaryText.onclick = () => {
-        summaryText.style.display = 'none';
-        summaryTextarea.value = summary;
-        document.getElementById('stockNotesSummaryEdit').style.display = 'block';
-        summaryTextarea.focus();
-    };
-
-    // 타임라인 렌더
-    _renderStockNotesTimeline(notes);
+    const res = await fetch(`/api/stock-master/${code}/note`, { credentials: 'same-origin' }).then(r => r.json()).catch(() => ({}));
+    document.getElementById('stockNotesFullText').value = res.note || '';
 }
 
-function _renderStockNotesTimeline(notes) {
-    const container = document.getElementById('stockNotesTimeline');
-    if (!notes.length) {
-        container.innerHTML = '<div style="color:#adb5bd; font-size:13px; text-align:center; padding:20px;">등록된 노트 없음</div>';
+async function prependStockNote() {
+    const code = _stockNotesCurrentCode;
+    const rawDate = document.getElementById('stockNotePrependDate').value; // YYYY-MM-DD
+    const content = document.getElementById('stockNotePrependContent').value.trim();
+    if (!content) return;
+    // 날짜 표시 포맷: 'YY/M/D
+    let dateStr = '';
+    if (rawDate) {
+        const d = new Date(rawDate + 'T00:00:00');
+        dateStr = _fmtNoteDate(d);
+    }
+    const res = await fetch(`/api/stock-master/${code}/note/prepend`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ date_str: dateStr, content }),
+    }).then(r => r.json()).catch(() => ({}));
+    if (res.success) {
+        document.getElementById('stockNotesFullText').value = res.note || '';
+        document.getElementById('stockNotePrependContent').value = '';
+        showToast('추가됨', 'success');
+    }
+}
+
+async function saveFullStockNote() {
+    const code = _stockNotesCurrentCode;
+    const note = document.getElementById('stockNotesFullText').value;
+    const res = await fetch(`/api/stock-master/${code}/note`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ note }),
+    }).then(r => r.json()).catch(() => ({}));
+    if (res.success) showToast('저장됨', 'success');
+}
+
+// ─── 종목 마스터 관리 모달 ─────────────────────────────────────────────────
+
+let _smEditCode = null;
+
+let _smSearchTimer = null;
+function smSearch(q) {
+    clearTimeout(_smSearchTimer);
+    _smSearchTimer = setTimeout(() => _doSmSearch(q), 300);
+}
+
+async function _doSmSearch(q) {
+    if (!q || q.length < 1) { document.getElementById('smSearchResults').innerHTML = ''; return; }
+    const res = await fetch(`/api/stock-master/search?q=${encodeURIComponent(q)}`, { credentials: 'same-origin' }).then(r => r.json()).catch(() => ({}));
+    const items = res.data || [];
+    const container = document.getElementById('smSearchResults');
+    if (!items.length) {
+        container.innerHTML = '<div style="color:#adb5bd; font-size:13px; padding:8px;">검색 결과 없음</div>';
         return;
     }
-
-    container.innerHTML = notes.map(n => {
-        const escaped = (n.content || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
-        return `
-        <div class="stock-note-row" id="stock-note-${n.id}">
-            <div class="stock-note-meta">
-                <span class="stock-note-date">${n.note_date}</span>
-                <span class="stock-note-source" style="color:#adb5bd; font-size:10px;">${n.source === 'import' ? '가져오기' : n.source === 'manual' ? '직접' : n.source}</span>
-                <div class="stock-note-actions">
-                    <button class="btn-icon" title="편집" onclick="editStockNote(${n.id}, '${n.note_date}', this)">✏️</button>
-                    <button class="btn-icon" title="삭제" onclick="deleteStockNote(${n.id})">🗑️</button>
-                </div>
+    container.innerHTML = items.map(item => {
+        const notePreview = shortenYear((item.note || '').slice(0, 60).replace(/\n/g, ' '));
+        const themes = (item.themes || '').split(',').filter(Boolean).map(t => `<span style="background:#e7f5ff;color:#1971c2;padding:1px 6px;border-radius:10px;font-size:11px;">${t.trim()}</span>`).join(' ');
+        return `<div class="sm-result-row" onclick="smOpenEdit('${item.stock_code}', '${(item.stock_name||'').replace(/'/g,"\\'")}', '${(item.themes||'').replace(/'/g,"\\'")}', \`${(item.note||'').replace(/`/g,'\\`')}\`)">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-weight:600;">${item.stock_name || '-'} <span style="color:#868e96; font-size:11px;">${item.stock_code}</span></span>
+                <span style="font-size:10px; color:#adb5bd;">${(item.updated_at||'').slice(0,10)}</span>
             </div>
-            <div class="stock-note-content" id="stock-note-content-${n.id}">${escaped}</div>
-            <div class="stock-note-edit-area" id="stock-note-edit-${n.id}" style="display:none;">
-                <input type="date" id="stock-note-edit-date-${n.id}" value="${n.note_date}" style="padding:4px 8px; border:1px solid #dee2e6; border-radius:4px; font-size:12px; margin-bottom:6px;">
-                <textarea id="stock-note-edit-ta-${n.id}" style="width:100%; min-height:80px; padding:8px; border:1px solid #dee2e6; border-radius:6px; font-size:13px; resize:vertical; box-sizing:border-box;">${n.content}</textarea>
-                <div style="display:flex; gap:8px; margin-top:6px;">
-                    <button class="btn btn-primary" style="font-size:12px;" onclick="saveStockNoteEdit(${n.id})">저장</button>
-                    <button class="btn btn-secondary" style="font-size:12px;" onclick="cancelStockNoteEdit(${n.id})">취소</button>
-                </div>
-            </div>
+            ${themes ? `<div style="margin-top:4px;">${themes}</div>` : ''}
+            ${notePreview ? `<div style="font-size:12px; color:#868e96; margin-top:3px;">${notePreview}${item.note && item.note.length > 60 ? '…' : ''}</div>` : ''}
         </div>`;
     }).join('');
 }
 
-function editStockNote(noteId, noteDate, btn) {
-    document.getElementById('stock-note-content-' + noteId).style.display = 'none';
-    document.getElementById('stock-note-edit-' + noteId).style.display = 'block';
-    if (btn) btn.style.display = 'none';
+function smOpenEdit(code, name, themes, note) {
+    _smEditCode = code;
+    document.getElementById('smEditTitle').textContent = `✏️ ${name} (${code})`;
+    document.getElementById('smEditThemes').value = themes || '';
+    document.getElementById('smEditNote').value = note || '';
+    document.getElementById('smSaveStatus').textContent = '';
+    document.getElementById('smEditPanel').style.display = 'block';
+    document.getElementById('smEditPanel').scrollIntoView({ behavior: 'smooth' });
 }
 
-function cancelStockNoteEdit(noteId) {
-    document.getElementById('stock-note-content-' + noteId).style.display = 'block';
-    document.getElementById('stock-note-edit-' + noteId).style.display = 'none';
-}
-
-async function saveStockNoteEdit(noteId) {
-    const content = document.getElementById('stock-note-edit-ta-' + noteId).value.trim();
-    const noteDate = document.getElementById('stock-note-edit-date-' + noteId).value;
-    if (!content) return;
-    const code = _stockNotesCurrentCode;
-    const res = await fetch(`/api/stock-master/${code}/notes/${noteId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({ content, note_date: noteDate }),
-    }).then(r => r.json()).catch(() => ({}));
-    if (res.success) {
-        await _loadStockNotes();
-    } else {
-        showToast('저장 실패', 'error');
-    }
-}
-
-async function deleteStockNote(noteId) {
-    if (!confirm('이 노트를 삭제할까요?')) return;
-    const code = _stockNotesCurrentCode;
-    const res = await fetch(`/api/stock-master/${code}/notes/${noteId}`, {
-        method: 'DELETE',
-        credentials: 'same-origin',
-    }).then(r => r.json()).catch(() => ({}));
-    if (res.success) {
-        document.getElementById('stock-note-' + noteId)?.remove();
-        // 남은 노트 체크
-        const container = document.getElementById('stockNotesTimeline');
-        if (!container.querySelector('.stock-note-row')) {
-            container.innerHTML = '<div style="color:#adb5bd; font-size:13px; text-align:center; padding:20px;">등록된 노트 없음</div>';
-        }
-    }
-}
-
-async function submitStockNote() {
-    const content = document.getElementById('stockNoteNewContent').value.trim();
-    const noteDate = document.getElementById('stockNoteNewDate').value;
-    const status = document.getElementById('stockNotesAddStatus');
-    if (!content || !noteDate) { status.textContent = '날짜와 내용 입력 필수'; return; }
-    const code = _stockNotesCurrentCode;
-    const res = await fetch(`/api/stock-master/${code}/notes`, {
+async function smSaveEdit() {
+    if (!_smEditCode) return;
+    const themes = document.getElementById('smEditThemes').value.trim();
+    const note = document.getElementById('smEditNote').value;
+    const status = document.getElementById('smSaveStatus');
+    const res = await fetch(`/api/stock-master/${_smEditCode}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ note_date: noteDate, content }),
+        body: JSON.stringify({ themes, note }),
     }).then(r => r.json()).catch(() => ({}));
     if (res.success) {
-        document.getElementById('stockNoteNewContent').value = '';
-        status.textContent = '추가됨';
-        setTimeout(() => { status.textContent = ''; }, 2000);
-        await _loadStockNotes();
+        status.textContent = '저장됨 ✓';
+        showToast('종목 마스터 저장됨', 'success');
+        // 검색 결과 갱신
+        _doSmSearch(document.getElementById('smSearchInput').value);
+        setTimeout(() => { status.textContent = ''; }, 3000);
     } else {
         status.textContent = '실패';
     }
 }
 
-function cancelStockSummaryEdit() {
-    const summaryText = document.getElementById('stockNotesSummaryText');
-    summaryText.style.display = 'block';
-    document.getElementById('stockNotesSummaryEdit').style.display = 'none';
-}
-
-async function saveStockSummary() {
-    const val = document.getElementById('stockNotesSummaryTextarea').value.trim();
-    if (!val) return;
-    const code = _stockNotesCurrentCode;
-    const res = await fetch(`/api/stock-master/${code}/summary`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+async function smSyncWatchlist() {
+    const res = await fetch('/api/stock-master/sync-watchlist', {
+        method: 'POST',
         credentials: 'same-origin',
-        body: JSON.stringify({ summary_2line: val }),
     }).then(r => r.json()).catch(() => ({}));
-    if (res.success) {
-        await _loadStockNotes();
-        showToast('요약 저장됨', 'success');
-    }
-}
-
-async function generateStockSummary() {
-    const code = _stockNotesCurrentCode;
-    const name = _stockNotesCurrentName;
-    const notesRes = await fetch(`/api/stock-master/${code}/notes`, { credentials: 'same-origin' }).then(r => r.json()).catch(() => ({}));
-    const notes = (notesRes.notes || []);
-    if (!notes.length) { showToast('노트가 없어 요약 불가', 'error'); return; }
-
-    // 최근 10개 노트 텍스트 수집
-    const noteTexts = notes.slice(0, 10).map(n => `[${n.note_date}] ${n.content}`).join('\n\n');
-
-    // AI 생성 요청 (백엔드 없이 클라이언트 측 간단 처리 → 실제 AI 요약은 서버 API 필요)
-    // 임시: 가장 최근 노트 첫 2문장 추출
-    const recent = notes[0];
-    const firstLine = (recent.content || '').split('\n').filter(l => l.trim()).slice(0, 2).join(' / ');
-    const summary = `[${recent.note_date}] ${firstLine.slice(0, 120)}`;
-
-    document.getElementById('stockNotesSummaryTextarea').value = summary;
-    document.getElementById('stockNotesSummaryText').style.display = 'none';
-    document.getElementById('stockNotesSummaryEdit').style.display = 'block';
-    showToast('요약 초안 생성. 확인 후 저장하세요.', 'success');
+    if (res.success) showToast(`감시종목 ${res.synced}개 동기화됨`, 'success');
 }
 
 function showNoteModal(stockName, stockCode, noteText) {

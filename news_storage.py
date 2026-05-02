@@ -1085,59 +1085,38 @@ class NewsStorage:
                 ).fetchall()
             return [dict(r) for r in rows]
 
-    # ─── 종목 자유 노트 ──────────────────────────────────────────
+    # ─── 종목 노트 (stock_master.note 단일 텍스트) ────────────────
 
-    def get_stock_notes(self, stock_code: str) -> List[Dict]:
+    def update_stock_note(self, stock_code: str, note: str) -> bool:
+        """stock_master.note 전체 텍스트 저장."""
         with self._conn() as conn:
-            rows = conn.execute(
-                "SELECT * FROM stock_notes WHERE stock_code=? ORDER BY note_date DESC, id DESC",
-                (stock_code,)
-            ).fetchall()
-            return [dict(r) for r in rows]
-
-    def add_stock_note(self, stock_code: str, note_date: str, content: str, source: str = 'manual') -> int:
-        with self._conn() as conn:
-            cur = conn.execute(
-                """INSERT INTO stock_notes (stock_code, note_date, content, source, updated_at)
-                   VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)""",
-                (stock_code, note_date, content, source)
+            conn.execute(
+                """INSERT INTO stock_master (stock_code, note, updated_at)
+                   VALUES (?, ?, CURRENT_TIMESTAMP)
+                   ON CONFLICT(stock_code) DO UPDATE SET
+                       note=excluded.note,
+                       updated_at=CURRENT_TIMESTAMP""",
+                (stock_code, note)
             )
-            return cur.lastrowid
-
-    def update_stock_note(self, note_id: int, content: str, note_date: str = None) -> bool:
-        with self._conn() as conn:
-            if note_date:
-                conn.execute(
-                    "UPDATE stock_notes SET content=?, note_date=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                    (content, note_date, note_id)
-                )
-            else:
-                conn.execute(
-                    "UPDATE stock_notes SET content=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                    (content, note_id)
-                )
             return True
 
-    def delete_stock_note(self, note_id: int) -> bool:
+    def prepend_stock_note(self, stock_code: str, date_str: str, content: str) -> str:
+        """날짜+내용을 기존 노트 앞에 붙여서 저장. 새 노트 텍스트 반환."""
         with self._conn() as conn:
-            conn.execute("DELETE FROM stock_notes WHERE id=?", (note_id,))
-            return True
-
-    def bulk_insert_stock_notes(self, rows: List[Dict]) -> int:
-        """마이그레이션용 bulk insert. rows: [{stock_code, note_date, content, source}]"""
-        inserted = 0
-        with self._conn() as conn:
-            for r in rows:
-                try:
-                    conn.execute(
-                        """INSERT INTO stock_notes (stock_code, note_date, content, source, updated_at)
-                           VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)""",
-                        (r['stock_code'], r['note_date'], r['content'], r.get('source', 'import'))
-                    )
-                    inserted += 1
-                except Exception as e:
-                    logger.warning(f"bulk_insert_stock_notes 행 실패: {e}")
-        return inserted
+            row = conn.execute(
+                "SELECT note FROM stock_master WHERE stock_code=?", (stock_code,)
+            ).fetchone()
+            existing = (row['note'] or '') if row else ''
+            new_block = f"{date_str} {content.strip()}"
+            merged = new_block + ('\n\n' + existing if existing else '')
+            conn.execute(
+                """INSERT INTO stock_master (stock_code, note, updated_at)
+                   VALUES (?, ?, CURRENT_TIMESTAMP)
+                   ON CONFLICT(stock_code) DO UPDATE SET
+                       note=excluded.note, updated_at=CURRENT_TIMESTAMP""",
+                (stock_code, merged)
+            )
+            return merged
 
     def update_stock_summary(self, stock_code: str, summary_2line: str) -> bool:
         with self._conn() as conn:
@@ -1150,3 +1129,26 @@ class NewsStorage:
                 (stock_code, summary_2line)
             )
             return True
+
+    def search_stock_master(self, query: str, limit: int = 20) -> List[Dict]:
+        """종목명 또는 코드로 stock_master 검색."""
+        q = f'%{query}%'
+        with self._conn() as conn:
+            rows = conn.execute(
+                """SELECT stock_code, stock_name, themes, note, summary_2line, updated_at
+                   FROM stock_master
+                   WHERE stock_name LIKE ? OR stock_code LIKE ?
+                   ORDER BY updated_at DESC LIMIT ?""",
+                (q, q, limit)
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_stock_master_list(self, limit: int = 30, offset: int = 0) -> List[Dict]:
+        """전체 목록 (페이지네이션)."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                """SELECT stock_code, stock_name, themes, note, summary_2line, updated_at
+                   FROM stock_master ORDER BY updated_at DESC LIMIT ? OFFSET ?""",
+                (limit, offset)
+            ).fetchall()
+            return [dict(r) for r in rows]

@@ -2706,15 +2706,11 @@ def get_stock_master(stock_code):
     # 시황 히스토리
     history = ns.get_stock_siwhang_history(stock_code, limit=10)
 
-    # 자유 노트
-    notes = ns.get_stock_notes(stock_code)
-
     return jsonify({
         'success': True,
         'data': data,
         'finance_stale': finance_stale,
         'history': history,
-        'notes': notes,
     })
 
 
@@ -2864,49 +2860,49 @@ def _dart_financial_quarterly(corp_code: str):
     return this_q, prev_q
 
 
-# ─── 종목 자유 노트 (stock_notes) ───────────────────────────────────────────
+# ─── 종목 마스터 노트 / 검색 ─────────────────────────────────────────────────
 
-@app.route('/api/stock-master/<stock_code>/notes', methods=['GET'])
+@app.route('/api/stock-master/search', methods=['GET'])
 @auth.login_required
-def get_stock_notes(stock_code):
+def search_stock_master():
     ns = _get_news_storage()
-    notes = ns.get_stock_notes(stock_code)
-    return jsonify({'success': True, 'notes': notes})
+    q = request.args.get('q', '').strip()
+    if not q:
+        return jsonify({'success': True, 'data': []})
+    results = ns.search_stock_master(q, limit=20)
+    return jsonify({'success': True, 'data': results})
 
 
-@app.route('/api/stock-master/<stock_code>/notes', methods=['POST'])
+@app.route('/api/stock-master/<stock_code>/note', methods=['GET'])
 @auth.login_required
-def add_stock_note(stock_code):
+def get_stock_note(stock_code):
     ns = _get_news_storage()
-    data = request.get_json() or {}
-    note_date = data.get('note_date', '')
-    content = data.get('content', '').strip()
-    source = data.get('source', 'manual')
-    if not note_date or not content:
-        return jsonify({'success': False, 'error': 'note_date, content 필수'}), 400
-    note_id = ns.add_stock_note(stock_code, note_date, content, source)
-    return jsonify({'success': True, 'id': note_id}), 201
+    data = ns.get_stock_master(stock_code) or {}
+    return jsonify({'success': True, 'note': data.get('note', ''), 'summary_2line': data.get('summary_2line', '')})
 
 
-@app.route('/api/stock-master/<stock_code>/notes/<int:note_id>', methods=['PUT'])
+@app.route('/api/stock-master/<stock_code>/note', methods=['PUT'])
 @auth.login_required
-def update_stock_note(stock_code, note_id):
+def update_stock_note_api(stock_code):
     ns = _get_news_storage()
     data = request.get_json() or {}
+    note = data.get('note', '')
+    ns.update_stock_note(stock_code, note)
+    return jsonify({'success': True})
+
+
+@app.route('/api/stock-master/<stock_code>/note/prepend', methods=['POST'])
+@auth.login_required
+def prepend_stock_note(stock_code):
+    """날짜+내용을 기존 노트 앞에 붙이기."""
+    ns = _get_news_storage()
+    data = request.get_json() or {}
+    date_str = data.get('date_str', '').strip()
     content = data.get('content', '').strip()
-    note_date = data.get('note_date')
     if not content:
         return jsonify({'success': False, 'error': 'content 필수'}), 400
-    ns.update_stock_note(note_id, content, note_date)
-    return jsonify({'success': True})
-
-
-@app.route('/api/stock-master/<stock_code>/notes/<int:note_id>', methods=['DELETE'])
-@auth.login_required
-def delete_stock_note(stock_code, note_id):
-    ns = _get_news_storage()
-    ns.delete_stock_note(note_id)
-    return jsonify({'success': True})
+    merged = ns.prepend_stock_note(stock_code, date_str, content)
+    return jsonify({'success': True, 'note': merged})
 
 
 @app.route('/api/stock-master/<stock_code>/summary', methods=['PUT'])
@@ -2919,6 +2915,27 @@ def update_stock_summary(stock_code):
         return jsonify({'success': False, 'error': 'summary_2line 필수'}), 400
     ns.update_stock_summary(stock_code, summary)
     return jsonify({'success': True})
+
+
+# ─── 종목 마스터 ← 관심종목 동기화 ──────────────────────────────────────────
+
+@app.route('/api/stock-master/sync-watchlist', methods=['POST'])
+@auth.login_required
+def sync_watchlist_to_master():
+    """Mode1/Mode2 감시종목을 stock_master에 upsert."""
+    ns = _get_news_storage()
+    from mode2_manager import Mode2Manager
+    from mode1_manager import Mode1Manager
+    m2 = Mode2Manager()
+    m1 = Mode1Manager()
+    synced = 0
+    for w in m2.get_all_watchers() + m1.get_all_watchers():
+        code = w.get('code') or w.get('stock_code')
+        name = w.get('name') or w.get('stock_name')
+        if code:
+            ns.upsert_stock_master(code, stock_name=name)
+            synced += 1
+    return jsonify({'success': True, 'synced': synced})
 
 
 # ─── 格言(Trading Mottos) ──────────────────────────────────────────────────
