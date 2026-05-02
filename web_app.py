@@ -3070,8 +3070,10 @@ def seeking_signal_reentry_check():
 
         def _count_weak_bars(bars_slice):
             """거감봉(거래량 감소 약세봉) 연속 카운트.
-            - 음봉 (close < open)
-            - OR 양봉이어도 거래량이 직전 평균 50% 미만인 힘없는 봉
+            조건 (OR):
+            - 음봉(close < open) + 거래량 감소
+            - 양봉이어도 거래량이 평균 45% 미만인 힘없는 봉
+            → 4/22처럼 미세 양봉이지만 거래량 대폭 감소인 봉도 포함
             """
             if not bars_slice:
                 return 0
@@ -3079,8 +3081,9 @@ def seeking_signal_reentry_check():
             count = 0
             for b in reversed(bars_slice):
                 is_bearish = b['close'] < b['open']
-                is_weak_vol = b['volume'] < vol_avg * 0.55
-                if is_bearish and is_weak_vol:
+                is_weak_vol = b['volume'] < vol_avg * 0.50
+                # 음봉이면서 거래량 감소 OR 양봉이어도 거래량이 매우 적으면
+                if (is_bearish and is_weak_vol) or (is_weak_vol and b['volume'] < vol_avg * 0.45):
                     count += 1
                 else:
                     break
@@ -3204,11 +3207,14 @@ def seeking_signal_reentry_check():
 
             return found
 
-        # 단기과열 기준일 산정 (all_bars 전체에서 폭등일 탐색)
+        # 단기과열 기준일 산정
+        # exit_date가 있으면 익절일 = 폭등일로 직접 사용 (가장 정확)
+        # 없으면 all_bars에서 자동 탐지
         def _find_overheat_date(bars):
             if len(bars) < 3:
                 return None
             vol_avg = sum(b['volume'] for b in bars) / len(bars)
+            # exit_date 이후 봉에서 탐색 (exit_date 자체 포함)
             for b in bars:
                 if b['open'] == 0:
                     continue
@@ -3217,7 +3223,20 @@ def seeking_signal_reentry_check():
                     return b['date']
             return None
 
-        overheat_date = _find_overheat_date(all_bars)
+        exit_date_compact = exit_date.replace('-', '') if exit_date else ''
+        if exit_date_compact:
+            # 익절일 봉이 all_bars에 있으면 그게 폭등일
+            exit_bar = next((b for b in all_bars if b['date'] == exit_date_compact), None)
+            if exit_bar and exit_bar['open'] > 0:
+                change_pct = (exit_bar['close'] - exit_bar['open']) / exit_bar['open'] * 100
+                if exit_bar['volume'] > 0 and change_pct >= 5:
+                    overheat_date = exit_date_compact
+                else:
+                    overheat_date = _find_overheat_date(all_bars)
+            else:
+                overheat_date = exit_date_compact  # 봉이 없어도 직접 사용
+        else:
+            overheat_date = _find_overheat_date(all_bars)
 
         if backtest_mode:
             # 날짜별 롤링 시뮬레이션
