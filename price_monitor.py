@@ -272,6 +272,35 @@ class PriceMonitor:
                     )
                     return {'action': 'sell', 'price': current_price, 'quantity': sell_qty, 'reason': 'resistance_1', 'ratio': resistance_1_pct}
 
+                # 트레일링 익절 — 1차 저항 익절 후 하락 전환 시 잔여 전량 청산
+                # 조건: resistance_1 익절 실행됨 + buy_target 존재 + 아직 미실행
+                # 트리거가: resistance_1 - (resistance_1 - buy_target) / 4
+                buy_target_price = watcher.get('buy_target_price', 0)
+                if ('resistance_1' in sold_history
+                        and 'trailing_exit' not in sold_history
+                        and resistance_1 > 0 and buy_target_price > 0):
+                    trailing_trigger = resistance_1 - (resistance_1 - buy_target_price) / 4
+                    if current_price <= trailing_trigger:
+                        current_bought_qty = watcher.get('bought_quantity', 0)
+                        profit_pct = ((current_price - bought_price) / bought_price) * 100
+                        logger.info(f"Mode2 | {code} | 트레일링 익절: {current_price:,}원 (트리거:{trailing_trigger:,.0f}원), 잔여 {current_bought_qty}주 전량")
+                        mode_icon = "🔔" if notify_only else "🤖"
+                        mode_text = "[감시중]" if notify_only else "[자동매매]"
+                        await self.send_notification(
+                            f"📉 {mode_icon} Mode2 {mode_text} 트레일링 익절\n"
+                            f"\n"
+                            f"종목: {watcher.get('name', code)} ({code})\n"
+                            f"매수가: {bought_price:,}원\n"
+                            f"현재가: {current_price:,}원\n"
+                            f"수익률: {profit_pct:+.1f}%\n"
+                            f"트리거: {trailing_trigger:,.0f}원 (1차저항 {resistance_1:,}↓ 25%)\n"
+                            f"매도 수량: {current_bought_qty}주 (잔여 전량)\n"
+                            f"\n"
+                            f"{'━' * 25}\n"
+                            f"{'📱 알림만 발송 (수동 매도 필요)' if notify_only else '🤖 자동 익절 매도 주문 실행 예정'}"
+                        )
+                        return {'action': 'sell', 'price': current_price, 'quantity': current_bought_qty, 'reason': 'trailing_exit', 'ratio': 100}
+
                 # 2차 지지 (손절)
                 support_2 = watcher.get('support_2_price', 0)
                 support_2_pct = watcher.get('support_2_loss_pct', 0)
