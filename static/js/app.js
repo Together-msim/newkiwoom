@@ -5829,7 +5829,20 @@ async function executeBulkAdd() {
         return;
     }
 
-    // 첫 줄은 헤더 (무시)
+    // 첫 줄은 헤더 — 컬럼명으로 인덱스 매핑
+    const headerParts = lines[0].split(',').map(p => p.trim().replace(/\s/g, ''));
+    const colMap = {};
+    const headerAliases = {
+        '종목코드': 'code',
+        '매수타점': 'buy_target', '매수가': 'buy_target',
+        '1차지지': 'support_1', '1차지지가': 'support_1',
+        '2차지지': 'support_2', '2차지지가': 'support_2',
+        '1차저항': 'resistance_1', '1차저항가': 'resistance_1',
+        '2차저항': 'resistance_2', '2차저항가': 'resistance_2',
+        '섹션명': 'section', '섹션': 'section',
+    };
+    headerParts.forEach((h, i) => { if (headerAliases[h]) colMap[headerAliases[h]] = i; });
+
     const dataLines = lines.slice(1);
 
     resultDiv.style.display = 'block';
@@ -5855,7 +5868,14 @@ async function executeBulkAdd() {
             continue;
         }
 
-        const [code, buy_target, support_1, resistance_1, support_2, resistance_2, sectionName] = parts;
+        const get = (key, fallbackIdx) => parts[colMap[key] !== undefined ? colMap[key] : fallbackIdx] || '';
+        const code       = get('code', 0);
+        const buy_target = get('buy_target', 1);
+        const support_1  = get('support_1', 2);
+        const support_2  = get('support_2', 3);
+        const resistance_1 = get('resistance_1', 4);
+        const resistance_2 = get('resistance_2', 5);
+        const sectionName  = get('section', 6);
 
         // 종목코드 검증
         if (!code) {
