@@ -8142,6 +8142,14 @@ function renderLivePickCard(p) {
             <input type="number" id="liveBuyPrice_${p.id}" placeholder="${p.price_at_slot ? Math.round(p.price_at_slot) : ''}">
         </div>
         <div class="live-register-field">
+            <label>익절가</label>
+            <input type="number" id="liveExitPrice_${p.id}" placeholder="">
+        </div>
+        <div class="live-register-field">
+            <label>손절가</label>
+            <input type="number" id="liveStopPrice_${p.id}" placeholder="">
+        </div>
+        <div class="live-register-field">
             <label>예산(만원)</label>
             <input type="number" id="liveBudget_${p.id}" placeholder="100">
         </div>
@@ -8212,12 +8220,18 @@ async function liveRegisterMode2(pickId) {
     const pick = _liveAllPicks.find(p => p.id === pickId);
     if (!pick || !pick.stock_code) { showToast('종목코드 없음', 'error'); return; }
 
-    const buyPriceInput = document.getElementById(`liveBuyPrice_${pickId}`);
-    const budgetInput = document.getElementById(`liveBudget_${pickId}`);
-    const buyPrice = parseFloat(buyPriceInput?.value) || pick.price_at_slot || null;
-    const budgetMan = parseFloat(budgetInput?.value) || null;
+    const buyPrice = parseFloat(document.getElementById(`liveBuyPrice_${pickId}`)?.value) || pick.price_at_slot || 0;
+    const exitPrice = parseFloat(document.getElementById(`liveExitPrice_${pickId}`)?.value) || 0;
+    const stopPrice = parseFloat(document.getElementById(`liveStopPrice_${pickId}`)?.value) || 0;
+    const budgetMan = parseFloat(document.getElementById(`liveBudget_${pickId}`)?.value) || 0;
 
     if (!budgetMan) { showToast('예산(만원) 입력 필요', 'error'); return; }
+
+    // MM-DD 추천종목 섹션 자동생성
+    const today = new Date();
+    const mmdd = String(today.getMonth()+1).padStart(2,'0') + '-' + String(today.getDate()).padStart(2,'0');
+    const sectionName = `${mmdd} 추천종목`;
+    const sectionId = await _ensureSection(sectionName);
 
     const payload = {
         code: pick.stock_code,
@@ -8225,11 +8239,12 @@ async function liveRegisterMode2(pickId) {
         buy_target_price: buyPrice ? Math.round(buyPrice) : 0,
         budget: budgetMan * 10000,
         notify_only: true,
-        support_1_price: 0,
+        resistance_1_price: exitPrice ? Math.round(exitPrice) : 0,
+        support_1_price: stopPrice ? Math.round(stopPrice) : 0,
         support_2_price: 0,
-        resistance_1_price: 0,
         resistance_2_price: 0,
         polling_interval: 60,
+        section: sectionId,
     };
     try {
         const res = await fetch('/api/mode2/watchers', {
@@ -8238,14 +8253,29 @@ async function liveRegisterMode2(pickId) {
             body: JSON.stringify(payload)
         });
         const r = await res.json();
-        if (r.success) {
-            showToast(`📊 Mode2 등록: ${pick.stock_name}`, 'success');
+        if (r.success || r.code === pick.stock_code) {
+            showToast(`📊 Mode2 등록: ${pick.stock_name} → [${sectionName}]`, 'success');
             const btn = document.querySelector(`#liveCard_${pickId} .btn-success`);
             if (btn) { btn.textContent = '✅ 등록됨'; btn.disabled = true; }
         } else {
             showToast(r.error || '등록 실패', 'error');
         }
     } catch (e) { showToast('등록 실패', 'error'); }
+}
+
+// MM-DD 섹션명으로 섹션 조회 또는 생성, sectionId 반환
+async function _ensureSection(sectionName) {
+    const res = await fetch('/api/mode2/sections', { credentials: 'same-origin' });
+    const d = await res.json();
+    const existing = (d.sections || []).find(s => s.name === sectionName);
+    if (existing) return existing.id;
+    const cr = await fetch('/api/mode2/sections', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: sectionName }),
+    });
+    const cd = await cr.json();
+    return cd.id || null;
 }
 
 async function requestLiveAnalysis() {
@@ -8383,7 +8413,8 @@ async function saveTradeWatchlist() {
     loadTradeWatchlist();
 }
 
-async function _registerStyle3Item({ code, name, buyPrice, buyDate, exitPrice, exitDate }) {
+// opts: { stopPrice, budget } 선택
+async function _registerStyle3Item({ code, name, buyPrice, buyDate, exitPrice, exitDate, stopPrice = 0, budget = 0 }) {
     try {
         // 1. trade_watchlist 등록
         const res = await fetch('/api/trade-watchlist', {
@@ -8394,39 +8425,31 @@ async function _registerStyle3Item({ code, name, buyPrice, buyDate, exitPrice, e
         const r = await res.json();
         if (!r.success) { showToast('감시 등록 실패', 'error'); return false; }
 
-        // 2. Mode2 섹션 자동 생성/조회
-        const today = new Date().toISOString().slice(0, 10);
-        const sectionName = `${today} Style3 발라먹기`;
-        const sectionsRes = await fetch('/api/mode2/sections', { credentials: 'same-origin' });
-        const sectionsData = await sectionsRes.json();
-        let sectionId = null;
-        const existing = (sectionsData.sections || []).find(s => s.name === sectionName);
-        if (existing) {
-            sectionId = existing.id;
-        } else {
-            const createRes = await fetch('/api/mode2/sections', {
-                method: 'POST', credentials: 'same-origin',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: sectionName }),
-            });
-            const createData = await createRes.json();
-            sectionId = createData.id;
-        }
+        // 2. MM-DD 발라먹기 섹션 자동 생성/조회
+        const today = new Date();
+        const mmdd = String(today.getMonth()+1).padStart(2,'0') + '-' + String(today.getDate()).padStart(2,'0');
+        const sectionName = `${mmdd} 발라먹기`;
+        const sectionId = await _ensureSection(sectionName);
 
-        // 3. Mode2 watcher 등록 (support_1_price = 익절가의 97% 초기값, 실제 C2 계산은 price_monitor에서)
-        const supportPrice = Math.round(exitPrice * 0.97);
+        // 3. Mode2 watcher 등록
+        // resistance_1 = 익절가, support_1 = 손절가(입력 시), 없으면 매수가*0.97
+        const support1 = stopPrice > 0 ? Math.round(stopPrice) : Math.round(buyPrice * 0.97);
         await fetch('/api/mode2/watchers', {
             method: 'POST', credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                code, name, buy_target_price: Math.round(buyPrice * 1.01),
-                budget: 0, polling_interval: 180, notify_only: true,
-                section: sectionId, support_1_price: supportPrice,
-                notes: `Style3 발라먹기 | 매수가:${buyPrice} 익절가:${exitPrice} 익절일:${exitDate}`,
+                code, name,
+                buy_target_price: Math.round(buyPrice),
+                budget: budget > 0 ? budget * 10000 : 0,
+                polling_interval: 180, notify_only: true,
+                section: sectionId,
+                resistance_1_price: exitPrice ? Math.round(exitPrice) : 0,
+                support_1_price: support1,
+                notes: `발라먹기 | 매수가:${buyPrice} 익절가:${exitPrice} 손절:${support1} 익절일:${exitDate}`,
             }),
         });
 
-        showToast(`${name} Style3 감시 등록 완료`, 'success');
+        showToast(`${name} 발라먹기 등록 완료 → [${sectionName}]`, 'success');
         return true;
     } catch (e) {
         showToast('오류: ' + e.message, 'error');
@@ -8831,15 +8854,18 @@ async function liveRegisterStyle3() {
     const buyDate = document.getElementById('liveReBuyDate').value.trim();
     const exitPrice = parseFloat(document.getElementById('liveReExitPrice').value);
     const exitDate = document.getElementById('liveReExitDate').value.trim();
+    const stopPrice = parseFloat(document.getElementById('liveReStopPrice')?.value) || 0;
+    const budget = parseFloat(document.getElementById('liveReBudget')?.value) || 0;
     if (!code || !name || !buyPrice || !exitPrice) {
         showToast('종목코드, 종목명, 매수가, 익절가 필수', 'error'); return;
     }
-    const ok = await _registerStyle3Item({ code, name, buyPrice, buyDate, exitPrice, exitDate });
+    const ok = await _registerStyle3Item({ code, name, buyPrice, buyDate, exitPrice, exitDate, stopPrice, budget });
     if (ok) liveStyle3SwitchTab('watchlist');
 }
 
 async function liveCheckStyle3Now() {
     const code = document.getElementById('liveReCode').value.trim();
+    const name = document.getElementById('liveReName').value.trim();
     const buyPrice = parseFloat(document.getElementById('liveReBuyPrice').value);
     const exitPrice = parseFloat(document.getElementById('liveReExitPrice').value);
     const exitDate = document.getElementById('liveReExitDate').value.trim();
@@ -8858,11 +8884,65 @@ async function liveCheckStyle3Now() {
         if (!r.success) { resultEl.innerHTML = `<p style="color:#e74c3c">${r.error}</p>`; return; }
         const signals = r.data.signals || [];
         const src = r.data.chart_source ? `<div style="font-size:11px;color:#868e96;margin-bottom:6px;">차트 소스: ${r.data.chart_source}</div>` : '';
+
+        // Mode2 등록 폼 — 시그널 유무와 관계없이 항상 표시
+        const mode2FormHtml = `
+        <div style="margin-top:12px;padding:10px;background:var(--bg-secondary);border-radius:6px;border:1px solid var(--border-color);">
+            <div style="font-size:12px;color:#868e96;margin-bottom:8px;">📊 Mode2 등록 — <strong style="color:var(--text-primary)">${name||code}</strong> → <span style="color:#3498db">MM-DD 발라먹기</span> 섹션</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px;">
+                <div><label style="font-size:11px;color:#868e96;">재진입 매수가</label>
+                    <input type="number" id="s3m2BuyPrice" placeholder="${buyPrice}" value="${buyPrice}" style="width:100%;box-sizing:border-box;padding:5px 7px;border:1px solid var(--border-color);border-radius:4px;font-size:12px;background:var(--bg-primary);color:var(--text-primary);">
+                </div>
+                <div><label style="font-size:11px;color:#868e96;">손절가</label>
+                    <input type="number" id="s3m2StopPrice" placeholder="${Math.round(buyPrice*0.97)}" style="width:100%;box-sizing:border-box;padding:5px 7px;border:1px solid var(--border-color);border-radius:4px;font-size:12px;background:var(--bg-primary);color:var(--text-primary);">
+                </div>
+                <div><label style="font-size:11px;color:#868e96;">예산(만원)</label>
+                    <input type="number" id="s3m2Budget" placeholder="100" style="width:100%;box-sizing:border-box;padding:5px 7px;border:1px solid var(--border-color);border-radius:4px;font-size:12px;background:var(--bg-primary);color:var(--text-primary);">
+                </div>
+            </div>
+            <button class="btn btn-sm btn-success" onclick="_liveS3RegisterMode2('${code}','${name||code}',${buyPrice},${exitPrice})">📊 Mode2 등록</button>
+        </div>`;
+
         if (!signals.length) {
-            resultEl.innerHTML = src + '<p style="color:#868e96;padding:6px 0;font-size:13px;">현재 시그널 없음 — 계속 모니터링</p>'; return;
+            resultEl.innerHTML = src + '<p style="color:#868e96;padding:6px 0;font-size:13px;">현재 시그널 없음 — 계속 모니터링</p>' + mode2FormHtml;
+            return;
         }
-        resultEl.innerHTML = src + signals.map(s => renderSignalCard(s, false)).join('');
+        resultEl.innerHTML = src + signals.map(s => renderSignalCard(s, false)).join('') + mode2FormHtml;
     } catch (e) { resultEl.innerHTML = `<p style="color:#e74c3c">오류: ${e.message}</p>`; }
+}
+
+async function _liveS3RegisterMode2(code, name, buyPrice, exitPrice) {
+    const reentryBuy = parseFloat(document.getElementById('s3m2BuyPrice')?.value) || buyPrice;
+    const stopPrice = parseFloat(document.getElementById('s3m2StopPrice')?.value) || Math.round(buyPrice * 0.97);
+    const budgetMan = parseFloat(document.getElementById('s3m2Budget')?.value) || 0;
+    if (!budgetMan) { showToast('예산(만원) 입력 필요', 'error'); return; }
+
+    const today = new Date();
+    const mmdd = String(today.getMonth()+1).padStart(2,'0') + '-' + String(today.getDate()).padStart(2,'0');
+    const sectionName = `${mmdd} 발라먹기`;
+    const sectionId = await _ensureSection(sectionName);
+
+    const res = await fetch('/api/mode2/watchers', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            code, name,
+            buy_target_price: Math.round(reentryBuy),
+            budget: budgetMan * 10000,
+            polling_interval: 60, notify_only: true,
+            section: sectionId,
+            resistance_1_price: exitPrice ? Math.round(exitPrice) : 0,
+            support_1_price: Math.round(stopPrice),
+        }),
+    });
+    const r = await res.json();
+    if (r.success || r.code === code) {
+        showToast(`${name} Mode2 등록 완료 → [${sectionName}]`, 'success');
+        const btn = document.querySelector('#liveS3CheckResult .btn-success');
+        if (btn) { btn.textContent = '✅ 등록됨'; btn.disabled = true; }
+    } else {
+        showToast(r.error || '등록 실패', 'error');
+    }
 }
 
 // 캐로셀 터치 스와이프
