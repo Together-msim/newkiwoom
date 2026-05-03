@@ -143,13 +143,7 @@ function setupEventListeners() {
     const support1LossPct = document.getElementById('support1LossPct');
     const support2LossPct = document.querySelector('select[name="support_2_loss_pct"]');
 
-    if (resistance1ProfitPct && resistance2ProfitPct) {
-        resistance1ProfitPct.addEventListener('change', () => {
-            const val1 = parseInt(resistance1ProfitPct.value);
-            const val2 = 100 - val1;
-            resistance2ProfitPct.value = val2;
-        });
-    }
+    // resistance_1 변경 시 resistance_2 자동계산 제거 — 각각 독립 입력
 
     if (support1LossPct && support2LossPct) {
         support1LossPct.addEventListener('change', () => {
