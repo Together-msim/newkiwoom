@@ -7787,14 +7787,21 @@ async function btRegisterMode2(pickId) {
     if (!buy) { showToast('매수가 입력 필요', 'error'); return; }
     if (!budgetMan) { showToast('버짓(만원) 입력 필요', 'error'); return; }
 
+    // MM-DD 추천종목 섹션 자동생성
+    const today = new Date();
+    const mmdd = String(today.getMonth()+1).padStart(2,'0') + '-' + String(today.getDate()).padStart(2,'0');
+    const sectionName = `${mmdd} 추천종목`;
+    const sectionId = await _ensureSection(sectionName);
+
     const payload = {
         code: pick.stock_code,
         name: pick.stock_name,
         buy_target_price: buy,
-        resistance_1_price: exit || null,
-        support_1_price: stop || null,
+        resistance_1_price: exit || 0,
+        support_1_price: stop || 0,
         budget: budgetMan * 10000,
         notify_only: true,
+        section: sectionId,
     };
 
     try {
@@ -7805,8 +7812,10 @@ async function btRegisterMode2(pickId) {
             body: JSON.stringify(payload)
         });
         const r = await res.json();
-        if (r.success) {
-            showToast(`📊 Mode2 등록 완료: ${pick.stock_name}`, 'success');
+        if (r.success || r.code === pick.stock_code) {
+            showToast(`📊 Mode2 등록: ${pick.stock_name} → [${sectionName}]`, 'success');
+            const btn = document.querySelector(`#btCard_${pickId} .btn-success`);
+            if (btn) { btn.textContent = '✅ 등록됨'; btn.disabled = true; }
         } else {
             showToast(r.error || '등록 실패', 'error');
         }

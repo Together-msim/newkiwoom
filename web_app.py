@@ -3549,56 +3549,129 @@ def seeking_signal_reentry_check():
             overheat_date = _find_overheat_date(all_bars)
 
         if backtest_mode:
-            # 과열일이 analysis_bars 밖(exit_date)에 있을 수 있으므로
-            # all_bars 기준으로 overheat 위치 파악 후 analysis_bars 시작 offset 계산
-            overheat_all_idx = next((j for j, b in enumerate(all_bars) if b['date'] == overheat_date), None)
-            analysis_start_all_idx = next((j for j, b in enumerate(all_bars) if b['date'] == (analysis_bars[0]['date'] if analysis_bars else '9')), 0)
+            # ── 3분봉 기반 발라먹기 백테스트 ──────────────────────────────
+            # 익절일 다음 거래일부터 최대 5거래일치 3분봉을 날짜별로 조회,
+            # 각 봉에서 Style3 시그널 감지 → 날짜+시각 타점 반환
+            from kiwoom_chart import get_minute_chart
+            from style3_signals import scan_style3_signals, calc_c2_support
 
-            # 날짜별 롤링 시뮬레이션
+            # 분석 대상 거래일 목록 (analysis_bars 기준, 최대 5일)
+            trading_dates = [b['date'] for b in analysis_bars][:5]
+
+            # C2 지지가 — 일봉에서 미리 계산 (exit_date 이후 8봉)
+            support_price = calc_c2_support(all_bars, exit_date)
+
             all_signals = []
-            seen_dates = set()
-            for i in range(2, len(analysis_bars)):
-                current_date = analysis_bars[i]['date']
-                # 과열기간(폭등 후 3거래일) 계산 — all_bars 기준 거리
-                suppressed = False
-                days_since_overheat = None
-                if overheat_date and overheat_all_idx is not None:
-                    current_all_idx = analysis_start_all_idx + i
-                    days_since_overheat = current_all_idx - overheat_all_idx
-                    if 1 <= days_since_overheat <= 3:
-                        suppressed = True
+            seen_key = set()  # (type, date, hhmm) 중복 방지
+            total_bars = 0
 
-                if suppressed:
-                    # 과열기간 봉은 시그널 스킵 — 대신 경고 기록
-                    key = ('OVERHEAT', current_date)
-                    if key not in seen_dates:
-                        seen_dates.add(key)
-                        all_signals.append({
-                            'type': 'OVERHEAT',
-                            'date': current_date,
-                            'desc': f"단기과열 기간 ({overheat_date} 폭등 후 {days_since_overheat}거래일째) — 시그널 억제",
-                            'confidence': '-',
-                        })
+            for day_date in trading_dates:
+                # 과열기간 체크
+                if overheat_date:
+                    overheat_all_idx = next((j for j, b in enumerate(all_bars) if b['date'] == overheat_date), None)
+                    day_all_idx = next((j for j, b in enumerate(all_bars) if b['date'] == day_date), None)
+                    if overheat_all_idx is not None and day_all_idx is not None:
+                        days_since = day_all_idx - overheat_all_idx
+                        if 1 <= days_since <= 3:
+                            key = ('OVERHEAT', day_date)
+                            if key not in seen_key:
+                                seen_key.add(key)
+                                all_signals.append({
+                                    'type': 'OVERHEAT',
+                                    'date': day_date,
+                                    'signal_time': '',
+                                    'desc': f"단기과열 기간 ({overheat_date} 폭등 후 {days_since}거래일째) — 시그널 억제",
+                                    'confidence': '-',
+                                })
+                            continue
+
+                # 해당 날짜 3분봉 조회
+                # base_dt를 당일로 고정하는 대신 임시로 환경 조작 없이
+                # get_minute_chart의 최근 거래일 자동감지 사용 — 단, 과거 날짜는
+                # API가 base_dt 파라미터로 해당 날짜 데이터를 반환함
+                import requests as _rq
+                HOST2 = os.environ.get('KIWOOM_HOST', 'https://api.kiwoom.com')
+                _min_headers = {
+                    'Content-Type': 'application/json;charset=UTF-8',
+                    'api-id': 'ka10080',
+                    'authorization': f'Bearer {token}',
+                }
+                _min_payload = {
+                    'stk_cd': stock_code,
+                    'base_dt': day_date,
+                    'tic_scope': '3',
+                    'cnt': 80,
+                    'upd_stkpc_tp': '1',
+                }
+                try:
+                    _r = _rq.post(HOST2.rstrip('/') + '/api/dostk/chart',
+                                  headers=_min_headers, json=_min_payload, timeout=15)
+                    _raw = _r.json() if _r.ok else {}
+                except Exception:
+                    _raw = {}
+
+                raw_bars = _raw.get('stk_min_pole_chart_qry') or []
+                # 해당 날짜 봉만 필터 + 시간순
+                day_bars = [b for b in raw_bars if isinstance(b, dict) and (b.get('cntr_tm') or '')[:8] == day_date]
+                day_bars.sort(key=lambda b: b.get('cntr_tm', ''))
+                if not day_bars:
                     continue
 
-                day_signals = _scan_signals(analysis_bars, i, overheat_suppressed=False)
-                for s in day_signals:
-                    sig_type = s.get('type', '')
-                    # C2: 같은 support_price(지지가격대)는 첫 감지만 기록
-                    # 다른 가격대면 신규 쌍바닥으로 별도 기록
-                    if sig_type == 'C2':
-                        support = s.get('support_price', 0)
-                        # 100원 이내면 같은 지지대로 간주
-                        already = any(
-                            x.get('type') == 'C2' and abs(x.get('support_price', 0) - support) <= 100
-                            for x in all_signals
-                        )
-                        if already:
+                def _parse_min_bar(bar):
+                    def _p(keys):
+                        for k in keys:
+                            v = bar.get(k)
+                            if v:
+                                try:
+                                    return abs(float(str(v).replace(',', '')))
+                                except Exception:
+                                    pass
+                        return 0.0
+                    raw_vol = bar.get('trde_qty') or bar.get('volume') or 0
+                    try:
+                        vol = abs(int(str(raw_vol).replace(',', '')))
+                    except Exception:
+                        vol = 0
+                    cntr = bar.get('cntr_tm', '')
+                    hhmm = cntr[8:12] if len(cntr) >= 12 else ''
+                    hhmmss = cntr[8:14] if len(cntr) >= 14 else ''
+                    return {
+                        'time': hhmmss,
+                        'hhmm': hhmm,
+                        'open': _p(['open_pric', 'open']),
+                        'high': _p(['high_pric', 'high']),
+                        'low': _p(['low_pric', 'low']),
+                        'close': _p(['cur_prc', 'close']),
+                        'volume': vol,
+                        'date': day_date,
+                    }
+
+                minute_bars = [_parse_min_bar(b) for b in day_bars]
+                total_bars += len(minute_bars)
+
+                # 봉 단위 롤링 시그널 감지 (최소 3봉 필요)
+                for idx in range(3, len(minute_bars) + 1):
+                    window = minute_bars[:idx]
+                    raw_sigs = scan_style3_signals(window, buy_price, exit_price, support_price)
+                    for s in raw_sigs:
+                        sig_time = s.get('signal_time', '')  # HH:MM
+                        key = (s['type'], day_date, sig_time)
+                        if key in seen_key:
                             continue
-                    key = (sig_type, s['date'])
-                    if key not in seen_dates:
-                        seen_dates.add(key)
-                        all_signals.append(s)
+                        seen_key.add(key)
+                        all_signals.append({
+                            'type': s['type'],
+                            'date': day_date,
+                            'signal_time': sig_time,
+                            'desc': s['reason'],
+                            'entry_price': s['entry_price'],
+                            'support_price': s.get('support_price', 0),
+                            'confidence': s['confidence'],
+                            'note': f"3분봉 기준 {day_date} {sig_time} 감지",
+                        })
+
+            # 날짜+시간순 정렬
+            all_signals.sort(key=lambda x: (x.get('date', ''), x.get('signal_time', '')))
 
             return jsonify({
                 'success': True,
@@ -3608,9 +3681,11 @@ def seeking_signal_reentry_check():
                     'buy_price': buy_price,
                     'exit_price': exit_price,
                     'exit_date': exit_date,
-                    'bars_analyzed': len(analysis_bars),
+                    'bars_analyzed': total_bars,
+                    'trading_days': len(trading_dates),
                     'overheat_date': overheat_date,
                     'signals': exit_day_signals + all_signals,
+                    'chart_source': '3분봉',
                 }
             })
         else:
