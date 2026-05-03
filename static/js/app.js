@@ -3490,7 +3490,7 @@ async function _doSmSearch(q) {
         const rawNote = (item.note || '').replace(/<[^>]+>/g, '');  // HTML 태그 제거 후 미리보기
         const notePreview = shortenYear(rawNote.slice(0, 60).replace(/\n/g, ' '));
         const themes = (item.themes || '').split(',').filter(Boolean).map(t => `<span style="background:#e7f5ff;color:#1971c2;padding:1px 6px;border-radius:10px;font-size:11px;">${t.trim()}</span>`).join(' ');
-        return `<div class="sm-result-row" onclick="smFetchAndOpenEdit('${item.stock_code}', '${(item.stock_name||\'\').replace(/\'/g,"\\\\'")}')"
+        return `<div class="sm-result-row" onclick="smFetchAndOpenEdit('${item.stock_code}', '${_esc(item.stock_name||'')}')">
             <div style="display:flex; justify-content:space-between; align-items:center;">
                 <span style="font-weight:600;">${item.stock_name || '-'} <span style="color:#868e96; font-size:11px;">${item.stock_code}</span></span>
                 <span style="font-size:10px; color:#adb5bd;">${(item.updated_at||'').slice(0,10)}</span>
