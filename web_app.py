@@ -1018,20 +1018,22 @@ def test_mode2_monitor():
 
 @app.route('/api/mode2/watchers', methods=['GET'])
 def get_mode2_watchers():
-    """Mode2 감시 리스트 조회"""
+    """Mode2 감시 리스트 조회 (stock_master.note 포함)"""
     try:
         active_only = request.args.get('active_only', 'false').lower() == 'true'
         watchers = mode2_mgr.get_all_watchers(active_only=active_only)
-        return jsonify({
-            "success": True,
-            "data": watchers
-        })
+        # stock_master note/summary 병합
+        codes = [w['code'] for w in watchers if w.get('code')]
+        if codes:
+            sm_map = news_storage.get_stock_master_notes(codes)
+            for w in watchers:
+                sm = sm_map.get(w.get('code'), {})
+                w['sm_note'] = sm.get('note', '')
+                w['sm_summary'] = sm.get('summary_2line', '')
+        return jsonify({"success": True, "data": watchers})
     except Exception as e:
         logger.error(f"감시 리스트 조회 실패: {e}")
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        }), 500
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @app.route('/api/mode2/watchers', methods=['POST'])
@@ -1204,15 +1206,20 @@ def reset_mode2_watcher(code):
             return jsonify({"success": False, "error": "종목을 찾을 수 없습니다"}), 404
 
         name = watcher.get('name', code)
-        asyncio.run_coroutine_threadsafe(
-            price_monitor.send_notification(
-                f"🔄 Mode2 새 매매 시작\n\n"
-                f"종목: {name} ({code})\n"
-                f"매수타점: {watcher.get('buy_target_price', 0):,}원\n"
-                f"sold_history 초기화 → 모니터링 재개"
-            ),
-            price_monitor.loop
-        )
+        # 텔레그램 알림 (동기 방식)
+        try:
+            import requests as _req
+            bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
+            chat_id = os.getenv('TELEGRAM_CHAT_ID')
+            if bot_token and chat_id:
+                msg = (f"🔄 Mode2 새 매매 시작\n\n"
+                       f"종목: {name} ({code})\n"
+                       f"매수타점: {watcher.get('buy_target_price', 0):,}원\n"
+                       f"sold_history 초기화 → 모니터링 재개")
+                _req.post(f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                          json={"chat_id": chat_id, "text": msg}, timeout=5)
+        except Exception:
+            pass
         return jsonify({"success": True, "message": f"{name} 새 매매 리셋 완료", "data": watcher})
     except Exception as e:
         logger.error(f"Mode2 리셋 실패: {e}")

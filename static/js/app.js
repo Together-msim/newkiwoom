@@ -566,6 +566,10 @@ function renderMode2WatcherRow(w, idx) {
             <div class="watcher-cell"><span class="status-badge status-${w.status}">${getStatusText(w.status)}</span></div>
             <div class="watcher-cell monitoring-status ${getMonitoringStatusClass(w.monitoring_status)}">${renderZoneCell(w)}</div>
             <div class="watcher-cell editable" data-field="note" title="${w.note || ''}" ondblclick="enableCellEdit(this, '${w.code}')">${truncateText(w.note || '', 20)}</div>
+            <div class="watcher-cell sm-note-cell" title="${(w.sm_note || '').replace(/"/g,'&quot;')}"
+                 onclick="smFetchAndOpenEdit('${w.code}','${(w.name||'').replace(/'/g,"\\'")}')">
+                ${w.sm_note ? `<span class="sm-note-preview-inline">${_esc((w.sm_note||'').split('\n')[0].slice(0,40))}${(w.sm_note||'').length > 40 ? '…' : ''}</span>` : '<span style="color:#adb5bd;font-size:11px;">노트없음</span>'}
+            </div>
             <div class="watcher-actions">
                 <div class="active-toggle ${w.active ? 'on' : 'off'}" onclick="toggleActive('${w.code}', ${!w.active})">
                     ${w.active ? 'ON' : 'OFF'}

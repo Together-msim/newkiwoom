@@ -935,6 +935,22 @@ class NewsStorage:
 
     # ─── 종목 마스터 (stock_master) ──────────────────────────────
 
+    def get_stock_master_notes(self, codes: list) -> dict:
+        """여러 종목코드의 note/summary_2line 일괄 조회. {code: {note, summary_2line}}"""
+        if not codes:
+            return {}
+        try:
+            placeholders = ','.join('?' * len(codes))
+            with self._conn() as conn:
+                rows = conn.execute(
+                    f"SELECT stock_code, note, summary_2line FROM stock_master WHERE stock_code IN ({placeholders})",
+                    codes
+                ).fetchall()
+                return {r['stock_code']: {'note': r['note'] or '', 'summary_2line': r['summary_2line'] or ''} for r in rows}
+        except Exception as e:
+            logger.error(f"get_stock_master_notes 실패: {e}")
+            return {}
+
     def get_stock_master(self, stock_code: str) -> Optional[Dict]:
         try:
             with self._conn() as conn:
