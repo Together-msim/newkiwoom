@@ -565,7 +565,6 @@ function renderMode2WatcherRow(w, idx) {
             </div>
             <div class="watcher-cell"><span class="status-badge status-${w.status}">${getStatusText(w.status)}</span></div>
             <div class="watcher-cell monitoring-status ${getMonitoringStatusClass(w.monitoring_status)}">${renderZoneCell(w)}</div>
-            <div class="watcher-cell editable" data-field="note" title="${w.note || ''}" ondblclick="enableCellEdit(this, '${w.code}')">${truncateText(w.note || '', 20)}</div>
             <div class="watcher-cell sm-note-cell" title="${(w.sm_note || '').replace(/"/g,'&quot;')}"
                  onclick="smFetchAndOpenEdit('${w.code}','${(w.name||'').replace(/'/g,"\\'")}')">
                 ${w.sm_note ? `<span class="sm-note-preview-inline">${_esc((w.sm_note||'').split('\n')[0].slice(0,40))}${(w.sm_note||'').length > 40 ? '…' : ''}</span>` : '<span style="color:#adb5bd;font-size:11px;">노트없음</span>'}
@@ -5520,11 +5519,7 @@ async function saveWatcherRow(code) {
                 hasChanges = true;
             }
 
-            if (field === 'note') {
-                data[field] = currentValue;
-            } else {
-                data[field] = parseInt(currentValue) || 0;
-            }
+            data[field] = parseInt(currentValue) || 0;
         }
     });
 
@@ -5608,20 +5603,11 @@ function enableCellEdit(cell, code) {
     if (cell.querySelector('input, textarea')) return;
 
     const field = cell.getAttribute('data-field');
-    const isNote = field === 'note';
     const isBudget = field === 'budget';
-    const originalValue = isNote ? cell.getAttribute('title') : cell.textContent.replace(/,/g, '').replace(/원/g, '').trim();
+    const originalValue = cell.textContent.replace(/,/g, '').replace(/원/g, '').trim();
 
-    // input 또는 textarea 생성
-    const input = document.createElement(isNote ? 'textarea' : 'input');
-
-    if (isNote) {
-        input.value = originalValue || '';
-        input.maxLength = 500;
-        input.style.width = '100%';
-        input.style.minHeight = '40px';
-        input.style.resize = 'vertical';
-    } else {
+    const input = document.createElement('input');
+    {
         input.type = 'number';
         // Budget 필드는 만원 단위로 표시
         input.value = isBudget ? (parseInt(originalValue) / 10000 || 0) : originalValue;
@@ -5752,21 +5738,12 @@ function enterEditMode(row, code) {
         const field = cell.getAttribute('data-field');
         const value = cell.textContent.replace(/,/g, '').replace(/원/g, '').replace(/주/g, '').trim();
 
-        if (field === 'note') {
-            const textarea = document.createElement('textarea');
-            textarea.value = cell.getAttribute('title') || '';
-            textarea.maxLength = 500;
-            textarea.setAttribute('data-original-value', textarea.value); // 원본 값 저장
-            cell.innerHTML = '';
-            cell.appendChild(textarea);
-        } else {
-            const input = document.createElement('input');
-            input.type = 'number';
-            input.value = value;
-            input.setAttribute('data-original-value', value); // 원본 값 저장
-            cell.innerHTML = '';
-            cell.appendChild(input);
-        }
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.value = value;
+        input.setAttribute('data-original-value', value);
+        cell.innerHTML = '';
+        cell.appendChild(input);
     });
 
     // 액션 버튼 변경
@@ -5798,11 +5775,7 @@ async function saveSectionWatchers(sectionId, rows) {
                     hasChanges = true;
                 }
 
-                if (field === 'note') {
-                    data[field] = currentValue;
-                } else {
-                    data[field] = parseInt(currentValue) || 0;
-                }
+                data[field] = parseInt(currentValue) || 0;
             }
         });
 

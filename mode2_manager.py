@@ -91,9 +91,9 @@ class Mode2Manager:
             watcher['display_order'] = 9999
             changed = True
 
-        # note 필드
-        if 'note' not in watcher:
-            watcher['note'] = ''
+        # note 필드 마이그레이션 — mode2 watcher note 제거 (종목마스터 note로 통합)
+        if 'note' in watcher:
+            del watcher['note']
             changed = True
 
         # record_id 필드
@@ -168,7 +168,6 @@ class Mode2Manager:
             "record_id": f"{today}-{code}",  # 260426-005930
             "section": data.get("section", "uncategorized"),  # 섹션 ID
             "display_order": data.get("display_order", 9999),  # 섹션 내 순서
-            "note": data.get("note", "")[:500],  # 자유노트 (최대 500자)
             "monitoring_status": "",  # 모니터링 상태 (실시간 업데이트)
             "zone": 0,               # 현재 구역 (1~5)
             "zone_entered_at": None, # 현재 구역 진입 시각
@@ -225,7 +224,7 @@ class Mode2Manager:
             'buy_target_price', 'budget', 'resistance_1_price', 'resistance_1_profit_pct',
             'resistance_2_price', 'resistance_2_profit_pct', 'support_1_price', 'support_1_mode',
             'support_1_loss_pct', 'support_1_add_budget', 'support_2_price', 'support_2_loss_pct',
-            'polling_interval', 'notify_only', 'note', 'auto_paused'
+            'polling_interval', 'notify_only', 'auto_paused'
         ]
 
         has_changes = False
@@ -234,10 +233,6 @@ class Mode2Manager:
             if field in data:
                 old_value = watcher.get(field)
                 new_value = data[field]
-                # note 길이 제한 적용
-                if field == 'note':
-                    new_value = new_value[:500]
-                    data[field] = new_value
                 if old_value != new_value:
                     has_changes = True
                     changed_fields.append((field, old_value, new_value))
