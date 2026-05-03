@@ -8965,16 +8965,19 @@ async function liveCheckStyle3Now() {
     const buyPrice = parseFloat(document.getElementById('liveReBuyPrice').value);
     const exitPrice = parseFloat(document.getElementById('liveReExitPrice').value);
     const exitDate = document.getElementById('liveReExitDate').value.trim();
+    const exitTime = document.getElementById('liveReExitTime')?.value.trim() || '';
     const resultEl = document.getElementById('liveS3CheckResult');
     if (!code || !buyPrice || !exitPrice) {
         showToast('종목코드, 매수가, 익절가 필수', 'error'); return;
     }
     resultEl.innerHTML = '<p style="color:#868e96;font-size:13px;">3분봉 조회 중...</p>';
     try {
+        const body = { stock_code: code, buy_price: buyPrice, exit_price: exitPrice, exit_date: exitDate, backtest_mode: false };
+        if (exitTime) body.exit_time = exitTime;
         const res = await fetch('/api/seeking-signal/reentry-check', {
             method: 'POST', credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ stock_code: code, buy_price: buyPrice, exit_price: exitPrice, exit_date: exitDate, backtest_mode: false }),
+            body: JSON.stringify(body),
         });
         const r = await res.json();
         if (!r.success) { resultEl.innerHTML = `<p style="color:#e74c3c">${r.error}</p>`; return; }
