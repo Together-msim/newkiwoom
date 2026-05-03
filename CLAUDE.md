@@ -462,10 +462,11 @@ check_mode2_conditions(code, watcher)
 매수 조건: current_price <= buy_target_price (±1% tolerance)
   ↓
 매도 우선순위 (높은 것부터):
-  resistance_2  → 전량 익절
-  resistance_1  → 부분 익절 (profit_ratio 설정값%)
-  support_2     → 심층 손절
-  support_1     → 1차 손절 (또는 물타기)
+  resistance_2     → 전량 익절
+  resistance_1     → 부분 익절 (profit_ratio 설정값%)
+  trailing_exit    → 잔여 전량 익절 (resistance_1 익절 후 하락 시)
+  support_2        → 심층 손절
+  support_1        → 1차 손절 (또는 물타기)
   ↓
 notify_only=True: 텔레그램 알림만
 notify_only=False: 자동 주문 실행 (kiwoom_client.buy/sell)
@@ -673,6 +674,26 @@ tail -100 ~/newkiwoom/web_app.log | grep -i "error\|warn\|kill\|oom"
    - 종목별 일봉 차트 + 추천 시점 마커 (현재 카드 형태만)
 
 ## Known Issues & Lessons
+
+### Mode2 트레일링 익절 로직 (`price_monitor.py`)
+
+**컨셉**: 1차 저항에서 부분 익절 후 추가 상승이 아닌 하락 전환 시 잔여 포지션 전량 청산.
+
+**트리거 가격 계산**:
+```
+trailing_trigger = resistance_1 - (resistance_1 - buy_target_price) / 4
+예: 매수타점 100, 1차저항 200 → trailing_trigger = 200 - (200-100)/4 = 175원
+예: 매수타점 50,000, 1차저항 60,000 → trailing_trigger = 57,500원
+```
+
+**활성 조건**: `'resistance_1' in sold_history` AND `'trailing_exit' not in sold_history`
+- 1차 저항 익절이 실행된 이후에만 활성화
+- 1차 저항 안 건드리고 바로 하락하면 비활성 (기존 지지/손절 로직만 동작)
+- 비율(50%/25%/75% 등) 무관하게 동일 적용
+
+**sold_history 흐름**: `resistance_1` 기록 → 하락 → `trailing_exit` 기록 → 전량 청산
+
+**수정 시 주의**: 트리거 계산식 변경 시 위 예시와 일치하는지 반드시 확인.
 
 ### 텔레그램 봇 충돌
 같은 TELEGRAM_BOT_TOKEN을 여러 서버에서 동시 실행하면 Conflict 에러 발생. 현재 오라클 1곳에서만 web_app.py 실행 (bot_v3.py는 미사용).
