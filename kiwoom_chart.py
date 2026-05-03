@@ -619,12 +619,18 @@ def get_minute_chart(
 
         result = []
         for bar in bars:
+            raw_vol = bar.get("trde_qty") or bar.get("volume") or 0
+            try:
+                vol = abs(int(str(raw_vol).replace(",", "")))
+            except (ValueError, TypeError):
+                vol = 0
             result.append({
                 "time": hhmmss(bar.get("cntr_tm", "")),
                 "open": parse_price(bar, ["open_pric", "open"]),
                 "high": parse_price(bar, ["high_pric", "high"]),
                 "low": parse_price(bar, ["low_pric", "low"]),
                 "close": parse_price(bar, ["cur_prc", "close"]),
+                "volume": vol,
             })
 
         return result
