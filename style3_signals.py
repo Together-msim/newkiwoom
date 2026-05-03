@@ -78,6 +78,13 @@ def calc_c2_support(daily_bars: List[Dict], exit_date_str: str) -> Optional[floa
     return None
 
 
+def _fmt_time(raw: str) -> str:
+    """HHMMSS → HH:MM 변환."""
+    if not raw or len(raw) < 4:
+        return raw or ''
+    return f"{raw[:2]}:{raw[2:4]}"
+
+
 def scan_style3_signals(
     bars: List[Dict],
     buy_price: float,
@@ -85,8 +92,8 @@ def scan_style3_signals(
     support_price: Optional[float] = None,
 ) -> List[Dict]:
     """3분봉 배열에서 Style3 시그널 탐지.
-    bars: 시간 오름차순 (oldest→newest)
-    반환: 시그널 리스트 [{type, entry_price, support_price, confidence, reason}, ...]
+    bars: 시간 오름차순 (oldest→newest), 각 bar에 'time'(HHMMSS) 필드 있음
+    반환: 시그널 리스트 [{type, signal_time, entry_price, support_price, confidence, reason}, ...]
     """
     if len(bars) < 3:
         return []
@@ -98,12 +105,14 @@ def scan_style3_signals(
     if not close:
         return []
 
+    signal_time = _fmt_time(str(last.get('time', '')))
     found = []
 
     # Type A: 현재가 ≤ 매수가 × 1.03
     if close <= buy_price * 1.03:
         found.append({
             'type': 'A',
+            'signal_time': signal_time,
             'entry_price': close,
             'support_price': 0,
             'confidence': 'M',
@@ -114,18 +123,20 @@ def scan_style3_signals(
     if support_price and abs(close - support_price) / support_price < 0.008:
         found.append({
             'type': 'C2',
+            'signal_time': signal_time,
             'entry_price': close,
             'support_price': support_price,
             'confidence': 'H',
             'reason': f"쌍바닥 지지선({int(support_price):,}원) 터치 확인 — 현재가 {close:,}원",
         })
 
-    # Type C1: 거감봉 진행 중 (일봉 기반 weak_bars, 3분봉에서는 거래량 감소만 체크)
+    # Type C1: 거감봉 진행 중
     is_weak_vol = last['volume'] < vol_avg * 0.50
     is_bearish = close < last.get('open', close)
     if is_weak_vol and is_bearish:
         found.append({
             'type': 'C1',
+            'signal_time': signal_time,
             'entry_price': close,
             'support_price': 0,
             'confidence': 'L',
@@ -138,6 +149,7 @@ def scan_style3_signals(
     if is_vol_up and is_bullish:
         found.append({
             'type': 'C3',
+            'signal_time': signal_time,
             'entry_price': last.get('open', close),
             'support_price': support_price or 0,
             'confidence': 'H' if last['volume'] > vol_avg * 3.0 else 'M',
@@ -148,6 +160,7 @@ def scan_style3_signals(
     if exit_price and close > exit_price * 1.05:
         found.append({
             'type': 'B',
+            'signal_time': signal_time,
             'entry_price': int(exit_price * 1.01),
             'support_price': 0,
             'confidence': 'M',
