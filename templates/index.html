@@ -1570,11 +1570,16 @@
 
                 <!-- 종목마스터 패널 -->
                 <div id="smPane-master" style="display:flex; flex-direction:column; gap:14px; padding:16px 0;">
-                    <div style="display:flex; gap:8px;">
+                    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
                         <input type="text" id="smSearchInput" placeholder="종목명 또는 코드 검색 (예: 삼성, 005930)"
-                            style="flex:1; padding:8px 12px; border:1px solid #dee2e6; border-radius:6px; font-size:14px;"
+                            style="flex:1; min-width:200px; padding:8px 12px; border:1px solid #dee2e6; border-radius:6px; font-size:14px;"
                             oninput="smSearch(this.value)"
                             onkeydown="if(event.key==='Enter') smSearch(document.getElementById('smSearchInput').value)">
+                        <!-- 컬럼 토글 -->
+                        <div style="display:flex; gap:10px; align-items:center; padding:6px 10px; background:#f8f9fa; border-radius:6px; border:1px solid #dee2e6;">
+                            <span style="font-size:11px; color:#868e96; white-space:nowrap;">표시:</span>
+                            <div id="smColToggle" style="display:flex; gap:10px;"></div>
+                        </div>
                     </div>
                     <div id="smSearchResults" style="display:flex; flex-direction:column; gap:8px;"></div>
                     <div id="smEditPanel" style="display:none; border-top:1px solid #dee2e6; padding-top:14px;">

@@ -2712,6 +2712,11 @@ tbody tr.inactive {
     background: var(--bg-primary);
 }
 .sm-result-row:hover { background: var(--bg-secondary); }
+.sm-theme-chip { background:#e7f5ff; color:#1971c2; padding:1px 6px; border-radius:10px; font-size:11px; }
+.sm-finance-row { display:flex; flex-wrap:wrap; gap:4px; margin-top:5px; }
+.sm-fin-chip { background:#f1f3f5; color:#495057; padding:2px 7px; border-radius:4px; font-size:11px; }
+.sm-summary-row { font-size:12px; color:#495057; margin-top:4px; line-height:1.4; }
+.sm-note-preview { font-size:12px; color:#868e96; margin-top:3px; }
 
 /* ─── 노트 에디터 (contenteditable) ─────────────────────── */
 .note-editor {

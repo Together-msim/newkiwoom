@@ -46,7 +46,7 @@ function switchPage(pageName) {
     else if (pageName === 'seeking-signal') loadTradeWatchlist();
     else if (pageName === 'backtest') { loadBacktestSessions(); loadMottos(); }
     else if (pageName === 'test') loadMode2PickList();
-    else if (pageName === 'stock-master') { /* smSwitchTab maintains its own state */ }
+    else if (pageName === 'stock-master') { smRenderColToggle(); }
 }
 
 function toggleSupport1Mode(mode) {
@@ -3471,6 +3471,47 @@ async function saveFullStockNote() {
 
 let _smEditCode = null;
 
+// 컬럼 가시성 설정 (로컬스토리지 저장)
+const SM_COL_DEFAULTS = { themes: true, finance: true, summary: true, note: true };
+function smGetCols() {
+    try { return { ...SM_COL_DEFAULTS, ...JSON.parse(localStorage.getItem('smCols') || '{}') }; }
+    catch { return { ...SM_COL_DEFAULTS }; }
+}
+function smSaveCols(cols) { localStorage.setItem('smCols', JSON.stringify(cols)); }
+
+function smRenderColToggle() {
+    const el = document.getElementById('smColToggle');
+    if (!el) return;
+    const cols = smGetCols();
+    const labels = { themes: '테마', finance: '재무', summary: '요약', note: '노트' };
+    el.innerHTML = Object.entries(labels).map(([k, v]) =>
+        `<label style="display:flex;align-items:center;gap:3px;font-size:12px;cursor:pointer;user-select:none;">
+            <input type="checkbox" ${cols[k] ? 'checked' : ''} onchange="smToggleCol('${k}', this.checked)"> ${v}
+        </label>`
+    ).join('');
+}
+
+function smToggleCol(key, val) {
+    const cols = smGetCols();
+    cols[key] = val;
+    smSaveCols(cols);
+    // 현재 검색 결과 재렌더
+    const q = document.getElementById('smSearchInput')?.value;
+    if (q) _doSmSearch(q);
+}
+
+function _fmtFinance(item) {
+    const mc = item.market_cap_bil ? `시총 ${Math.round(item.market_cap_bil)}억` : null;
+    const per = item.per != null ? `PER ${item.per.toFixed(1)}` : null;
+    const roe = item.roe != null ? `ROE ${item.roe.toFixed(1)}%` : null;
+    const debt = item.debt_ratio != null ? `부채 ${Math.round(item.debt_ratio)}%` : null;
+    const cr = item.current_ratio != null ? `유동 ${Math.round(item.current_ratio)}%` : null;
+    const op = item.op_income_bil != null ? `영업익 ${Math.round(item.op_income_bil)}억` : null;
+    const parts = [mc, per, roe, debt, cr, op].filter(Boolean);
+    if (!parts.length) return '';
+    return `<div class="sm-finance-row">${parts.map(p => `<span class="sm-fin-chip">${p}</span>`).join('')}</div>`;
+}
+
 let _smSearchTimer = null;
 function smSearch(q) {
     clearTimeout(_smSearchTimer);
@@ -3486,17 +3527,23 @@ async function _doSmSearch(q) {
         container.innerHTML = '<div style="color:#adb5bd; font-size:13px; padding:8px;">검색 결과 없음</div>';
         return;
     }
+    const cols = smGetCols();
     container.innerHTML = items.map(item => {
-        const rawNote = (item.note || '').replace(/<[^>]+>/g, '');  // HTML 태그 제거 후 미리보기
-        const notePreview = shortenYear(rawNote.slice(0, 60).replace(/\n/g, ' '));
-        const themes = (item.themes || '').split(',').filter(Boolean).map(t => `<span style="background:#e7f5ff;color:#1971c2;padding:1px 6px;border-radius:10px;font-size:11px;">${t.trim()}</span>`).join(' ');
+        const rawNote = (item.note || '').replace(/<[^>]+>/g, '');
+        const notePreview = shortenYear(rawNote.slice(0, 80).replace(/\n/g, ' '));
+        const themes = (item.themes || '').split(',').filter(Boolean)
+            .map(t => `<span class="sm-theme-chip">${_esc(t.trim())}</span>`).join(' ');
+        const financeHtml = _fmtFinance(item);
+        const summaryText = item.summary_2line || '';
         return `<div class="sm-result-row" onclick="smFetchAndOpenEdit('${item.stock_code}', '${_esc(item.stock_name||'')}')">
             <div style="display:flex; justify-content:space-between; align-items:center;">
-                <span style="font-weight:600;">${item.stock_name || '-'} <span style="color:#868e96; font-size:11px;">${item.stock_code}</span></span>
+                <span style="font-weight:600;">${_esc(item.stock_name || '-')} <span style="color:#868e96; font-size:11px;">${item.stock_code}</span></span>
                 <span style="font-size:10px; color:#adb5bd;">${(item.updated_at||'').slice(0,10)}</span>
             </div>
-            ${themes ? `<div style="margin-top:4px;">${themes}</div>` : ''}
-            ${notePreview ? `<div style="font-size:12px; color:#868e96; margin-top:3px;">${notePreview}${item.note && item.note.length > 60 ? '…' : ''}</div>` : ''}
+            ${cols.themes && themes ? `<div style="margin-top:4px;">${themes}</div>` : ''}
+            ${cols.finance && financeHtml ? financeHtml : ''}
+            ${cols.summary && summaryText ? `<div class="sm-summary-row">${_esc(summaryText)}</div>` : ''}
+            ${cols.note && notePreview ? `<div class="sm-note-preview">${_esc(notePreview)}${rawNote.length > 80 ? '…' : ''}</div>` : ''}
         </div>`;
     }).join('');
 }
@@ -3561,6 +3608,7 @@ function smSwitchTab(tab) {
         pane.style.display = t === tab ? 'flex' : 'none';
     });
     if (tab === 'interest') wlLoadGroups();
+    if (tab === 'master') smRenderColToggle();
 }
 
 let _wlGroups = [];   // cached group list

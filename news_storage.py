@@ -1159,7 +1159,9 @@ class NewsStorage:
         q = f'%{query}%'
         with self._conn() as conn:
             rows = conn.execute(
-                """SELECT stock_code, stock_name, themes, note, summary_2line, updated_at
+                """SELECT stock_code, stock_name, themes, note, summary_2line,
+                          market_cap_bil, per, roe, debt_ratio, current_ratio, op_income_bil,
+                          finance_updated_at, updated_at
                    FROM stock_master
                    WHERE stock_name LIKE ? OR stock_code LIKE ?
                    ORDER BY updated_at DESC LIMIT ?""",
