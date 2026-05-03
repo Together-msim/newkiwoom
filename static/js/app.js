@@ -145,14 +145,7 @@ function setupEventListeners() {
 
     // resistance_1 변경 시 resistance_2 자동계산 제거 — 각각 독립 입력
 
-    if (support1LossPct && support2LossPct) {
-        support1LossPct.addEventListener('change', () => {
-            const s1modeEl = document.querySelector('select[name="support_1_mode"]');
-            if (s1modeEl && s1modeEl.value === '물타기') return; // 물타기는 자동계산 안 함
-            const val1 = parseInt(support1LossPct.value);
-            support2LossPct.value = 100 - val1;
-        });
-    }
+    // support_1 변경 시 support_2 자동계산 제거 — 각각 독립 입력
 
     // Test 페이지
     const testGetInfo = document.getElementById('testGetInfo');
