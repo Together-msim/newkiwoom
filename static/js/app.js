@@ -8397,7 +8397,7 @@ function renderSignalCard(s, compact) {
         <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;flex-wrap:wrap;">
             <span class="reentry-type-badge" style="background:${typeColor[s.type]||'#95a5a6'}">${typeLabel[s.type]||s.type}</span>
             <span class="reentry-confidence">${s.confidence||'M'}</span>
-            ${compact ? `<span style="font-size:12px;color:#adb5bd;">${s.date||''}</span>` : timeLabel}
+            ${compact ? `<span style="font-size:12px;color:#adb5bd;">${s.date||''}${s.signal_time ? ' ⏱ '+s.signal_time : ''}</span>` : timeLabel}
             ${overheatBadge}
         </div>
         <div style="font-size:13px;">${s.desc}</div>
