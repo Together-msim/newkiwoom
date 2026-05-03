@@ -539,15 +539,6 @@ function renderMode2WatcherRow(w, idx) {
             <div class="watcher-cell editable" data-field="resistance_1_price" ondblclick="enableCellEdit(this, '${w.code}')">${formatNumber(w.resistance_1_price)}</div>
             <div class="watcher-cell editable" data-field="resistance_2_price" ondblclick="enableCellEdit(this, '${w.code}')">${formatNumber(w.resistance_2_price)}</div>
             <div class="watcher-cell">
-                <select onchange="updateWatcherField('${w.code}', 'resistance_2_profit_pct', parseInt(this.value))">
-                    <option value="0" ${w.resistance_2_profit_pct == 0 ? 'selected' : ''}>0%</option>
-                    <option value="25" ${w.resistance_2_profit_pct == 25 ? 'selected' : ''}>25%</option>
-                    <option value="50" ${w.resistance_2_profit_pct == 50 ? 'selected' : ''}>50%</option>
-                    <option value="75" ${w.resistance_2_profit_pct == 75 ? 'selected' : ''}>75%</option>
-                    <option value="100" ${w.resistance_2_profit_pct == 100 ? 'selected' : ''}>100%</option>
-                </select>
-            </div>
-            <div class="watcher-cell">
                 <select onchange="updateWatcherField('${w.code}', 'polling_interval', this.value)">
                     <option value="10" ${w.polling_interval == 10 ? 'selected' : ''}>10초</option>
                     <option value="30" ${w.polling_interval == 30 ? 'selected' : ''}>30초</option>
