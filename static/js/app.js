@@ -8267,7 +8267,7 @@ async function liveRegisterMode2(pickId) {
 async function _ensureSection(sectionName) {
     const res = await fetch('/api/mode2/sections', { credentials: 'same-origin' });
     const d = await res.json();
-    const existing = (d.sections || []).find(s => s.name === sectionName);
+    const existing = (d.data || d.sections || []).find(s => s.name === sectionName);
     if (existing) return existing.id;
     const cr = await fetch('/api/mode2/sections', {
         method: 'POST', credentials: 'same-origin',
