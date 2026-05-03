@@ -3,26 +3,32 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>자동매매 시스템</title>
+    <title>{% if is_admin %}어드민 — 자동매매{% else %}자동매매 시스템{% endif %}</title>
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
     <div class="container">
         <!-- 네비게이션 -->
         <nav class="main-nav">
-            <div class="nav-brand">🚀 자동매매 시스템</div>
+            {% if is_admin %}
+            <div class="nav-brand"><a href="/" style="color:inherit;text-decoration:none;">← 실전</a> &nbsp;|&nbsp; 🛠 어드민</div>
             <div class="nav-menu">
-                <button class="nav-item" data-page="watchlist">📊 감시리스트</button>
-                <button class="nav-item" data-page="mode1">📈 Mode1</button>
-                <button class="nav-item active" data-page="mode2">📉 Mode2</button>
-                <button class="nav-item" data-page="tradelog">💰 매매일지</button>
-                <button class="nav-item" data-page="seeking-signal">🍖 발라먹기</button>
-                <button class="nav-item" data-page="siwhang">📊 시황체크</button>
-                <button class="nav-item" data-page="live">⚡ 실전</button>
-                <button class="nav-item" data-page="backtest">🤖 AI슬롯분석</button>
-                <button class="nav-item" data-page="test">🧪 Test</button>
+                <button class="nav-item active" data-page="backtest">🤖 AI슬롯분석</button>
                 <button class="nav-item" data-page="stock-master">📁 종목마스터</button>
+                <button class="nav-item" data-page="test">🧪 Test</button>
             </div>
+            {% else %}
+            <div class="nav-brand">🚀 자동매매 &nbsp;<a href="/adminpage" style="font-size:12px;color:#868e96;text-decoration:none;">어드민 →</a></div>
+            <div class="nav-menu">
+                <button class="nav-item" data-page="live">⚡ 실전</button>
+                <button class="nav-item active" data-page="mode2">📉 Mode2</button>
+                <button class="nav-item" data-page="siwhang">📊 시황체크</button>
+                <button class="nav-item" data-page="seeking-signal">🍖 발라먹기</button>
+                <button class="nav-item" data-page="mode1">📈 Mode1</button>
+                <button class="nav-item" data-page="watchlist">📋 감시리스트</button>
+                <button class="nav-item" data-page="tradelog">💰 매매일지</button>
+            </div>
+            {% endif %}
         </nav>
 
         <!-- 페이지 컨테이너 -->
@@ -1920,6 +1926,20 @@
 
     <!-- 모바일 하단 탭바 -->
     <nav class="mobile-tab-bar">
+        {% if is_admin %}
+        <button class="tab-item" data-page="backtest">
+            <span class="tab-icon">🤖</span>
+            <span class="tab-label">AI슬롯</span>
+        </button>
+        <button class="tab-item" data-page="stock-master">
+            <span class="tab-icon">📁</span>
+            <span class="tab-label">종목마스터</span>
+        </button>
+        <button class="tab-item" data-page="test">
+            <span class="tab-icon">🧪</span>
+            <span class="tab-label">Test</span>
+        </button>
+        {% else %}
         <button class="tab-item" data-page="live">
             <span class="tab-icon">⚡</span>
             <span class="tab-label">실전</span>
@@ -1932,32 +1952,29 @@
             <span class="tab-icon">📊</span>
             <span class="tab-label">시황체크</span>
         </button>
-        <button class="tab-item" data-page="watchlist">
-            <span class="tab-icon">👁️</span>
-            <span class="tab-label">감시리스트</span>
+        <button class="tab-item" data-page="seeking-signal">
+            <span class="tab-icon">🍖</span>
+            <span class="tab-label">발라먹기</span>
         </button>
         <button class="tab-item" data-page="mode1">
             <span class="tab-icon">📈</span>
             <span class="tab-label">Mode1</span>
         </button>
-        <button class="tab-item" data-page="seeking-signal">
-            <span class="tab-icon">🍖</span>
-            <span class="tab-label">발라먹기</span>
+        <button class="tab-item" data-page="watchlist">
+            <span class="tab-icon">👁️</span>
+            <span class="tab-label">감시리스트</span>
         </button>
         <button class="tab-item" data-page="tradelog">
             <span class="tab-icon">💰</span>
             <span class="tab-label">매매일지</span>
         </button>
-        <button class="tab-item" data-page="backtest">
-            <span class="tab-icon">🤖</span>
-            <span class="tab-label">AI슬롯</span>
-        </button>
-        <button class="tab-item" data-page="test">
-            <span class="tab-icon">🧪</span>
-            <span class="tab-label">Test</span>
-        </button>
+        {% endif %}
     </nav>
 
+    <script>
+        window.APP_MODE = '{{ "admin" if is_admin else "live" }}';
+        window.DEFAULT_PAGE = '{{ "backtest" if is_admin else "mode2" }}';
+    </script>
     <script src="/static/js/app.js"></script>
 </body>
 </html>

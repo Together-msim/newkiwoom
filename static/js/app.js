@@ -9,9 +9,9 @@ document.addEventListener('DOMContentLoaded', () => {
         item.addEventListener('click', () => switchPage(item.dataset.page));
     });
 
-    // 초기 페이지: mode2
-    loadMode2List();
-    _syncTabBar('mode2');
+    // 초기 페이지: DEFAULT_PAGE (live=mode2, admin=backtest)
+    const _startPage = (typeof DEFAULT_PAGE !== 'undefined' && DEFAULT_PAGE) ? DEFAULT_PAGE : 'mode2';
+    switchPage(_startPage);
 
     // 이벤트 리스너 등록
     setupEventListeners();

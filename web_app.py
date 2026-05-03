@@ -102,8 +102,15 @@ else:
 @app.route('/')
 @auth.login_required
 def index():
-    """메인 페이지"""
-    return render_template('index.html')
+    """메인 페이지 (장중 전용)"""
+    return render_template('index.html', is_admin=False)
+
+
+@app.route('/adminpage')
+@auth.login_required
+def adminpage():
+    """어드민 페이지 (장마감 후 분석용)"""
+    return render_template('index.html', is_admin=True)
 
 
 # ========== Mode1 API ==========
@@ -3607,9 +3614,54 @@ def seeking_signal_reentry_check():
                 }
             })
         else:
-            # 실시간 모드 — 최근 10봉 기준, 시그널+과열경고 병행
-            recent = analysis_bars[-10:] if len(analysis_bars) >= 10 else analysis_bars
-            signals = _scan_signals(recent, len(recent) - 1) if len(recent) >= 3 else []
+            # 실시간 모드 — 3분봉 기반 즉시 시그널 감지
+            from kiwoom_chart import get_minute_chart
+            from style3_signals import (scan_style3_signals, is_overheat_period,
+                                        calc_c2_support)
+            from zoneinfo import ZoneInfo as _ZI2
+
+            # 단기과열 체크
+            overheat_suppressed = is_overheat_period(exit_date)
+
+            # C2 지지가 — 일봉에서 계산
+            support_price = calc_c2_support(all_bars, exit_date)
+
+            # 3분봉 조회 (최근 20봉)
+            minute_bars = get_minute_chart(token, stock_code, '3분', count=20)
+
+            signals = []
+            last_close = 0
+            signal_time_str = ''
+
+            if overheat_suppressed:
+                signals = [{
+                    'type': 'OVERHEAT',
+                    'desc': f'단기과열 기간 ({exit_date} 익절 후 3거래일 이내) — 시그널 억제',
+                    'confidence': '-',
+                    'signal_time': '',
+                }]
+            elif minute_bars and len(minute_bars) >= 3:
+                raw_sigs = scan_style3_signals(minute_bars, buy_price, exit_price, support_price)
+                last_close = minute_bars[-1].get('close', 0)
+                for s in raw_sigs:
+                    signals.append({
+                        'type': s['type'],
+                        'signal_time': s.get('signal_time', ''),
+                        'desc': s['reason'],
+                        'entry_price': s['entry_price'],
+                        'confidence': s['confidence'],
+                        'note': f"3분봉 기준 {s.get('signal_time','')} 감지" if s.get('signal_time') else '',
+                    })
+            else:
+                # 분봉 조회 실패 시 일봉 fallback
+                recent = analysis_bars[-10:] if len(analysis_bars) >= 10 else analysis_bars
+                if recent:
+                    last_close = recent[-1]['close']
+                fallback_sigs = _scan_signals(recent, len(recent) - 1) if len(recent) >= 3 else []
+                for s in fallback_sigs:
+                    s['note'] = '(일봉 기준 — 분봉 조회 실패)'
+                signals = fallback_sigs
+
             return jsonify({
                 'success': True,
                 'mode': 'realtime',
@@ -3618,9 +3670,11 @@ def seeking_signal_reentry_check():
                     'buy_price': buy_price,
                     'exit_price': exit_price,
                     'signals': signals,
-                    'bars_analyzed': len(recent),
-                    'last_close': recent[-1]['close'] if recent else 0,
+                    'last_close': last_close,
+                    'support_price': support_price,
                     'overheat_date': overheat_date,
+                    'overheat_suppressed': overheat_suppressed,
+                    'chart_source': '3분봉' if minute_bars else '일봉(fallback)',
                 }
             })
     except Exception as e:
