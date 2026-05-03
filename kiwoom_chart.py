@@ -594,16 +594,18 @@ def get_minute_chart(
                 error_out.append(err)
             return None
 
-        # 당일만 필터, 시간순 정렬 (과거 → 최근)
-        bars = [b for b in raw_list if isinstance(b, dict) and (b.get("cntr_tm") or "")[:8] == base_dt]
-        bars.sort(key=lambda b: b.get("cntr_tm", ""))
-
-        if not bars:
-            err = f"당일 분봉 데이터 없음 (base_dt={base_dt})"
+        valid = [b for b in raw_list if isinstance(b, dict) and b.get("cntr_tm")]
+        if not valid:
+            err = f"분봉 데이터 없음 (base_dt={base_dt})"
             print(f"❌ 분봉 {err}: stk_cd={symbol}")
             if error_out is not None:
                 error_out.append(err)
             return None
+
+        # 가장 최근 거래일 기준으로 필터 (휴장일/주말에도 마지막 거래일 데이터 반환)
+        latest_date = max((b.get("cntr_tm") or "")[:8] for b in valid)
+        bars = [b for b in valid if (b.get("cntr_tm") or "")[:8] == latest_date]
+        bars.sort(key=lambda b: b.get("cntr_tm", ""))
 
         def parse_price(bar: Dict[str, Any], keys: List[str]) -> float:
             """분봉 한 개에서 가격 추출"""
