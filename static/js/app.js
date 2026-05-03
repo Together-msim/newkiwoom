@@ -8393,16 +8393,18 @@ function renderSignalCard(s, compact) {
         return `<div style="padding:6px 10px;background:#2d1a1a;border-left:3px solid #e74c3c;margin-bottom:6px;border-radius:4px;font-size:12px;color:#e74c3c;">🚫 ${s.date||''} — ${s.desc}</div>`;
     }
     const overheatBadge = s.overheat_warning ? `<span style="background:#c0392b;color:#fff;font-size:11px;padding:1px 6px;border-radius:3px;font-weight:600;">⚠️ 단기과열</span>` : '';
+    const premiumBadge = s.confidence === 'H+' ? `<span style="background:#f39c12;color:#000;font-size:11px;padding:1px 6px;border-radius:3px;font-weight:700;">★ 익절가 지지</span>` : '';
     const entryLine = s.entry_price ? `<div style="font-size:13px;">추천 진입가: <strong>${s.entry_price.toLocaleString()}원</strong></div>` : '';
     const noteLine = s.note ? `<div style="font-size:12px;color:#868e96;margin-top:2px;">${s.note}</div>` : '';
     const overheatLine = s.overheat_msg ? `<div style="font-size:12px;color:#e74c3c;margin-top:4px;">${s.overheat_msg}</div>` : '';
     const timeLabel = s.signal_time ? `<span style="font-size:12px;color:#adb5bd;">⏱ ${s.signal_time}</span>` : '';
-    return `<div class="reentry-signal-card" style="margin-bottom:8px;">
+    const cardBorder = s.confidence === 'H+' ? 'border-left:3px solid #f39c12;' : '';
+    return `<div class="reentry-signal-card" style="margin-bottom:8px;${cardBorder}">
         <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;flex-wrap:wrap;">
             <span class="reentry-type-badge" style="background:${typeColor[s.type]||'#95a5a6'}">${typeLabel[s.type]||s.type}</span>
             <span class="reentry-confidence">${s.confidence||'M'}</span>
             ${compact ? `<span style="font-size:12px;color:#adb5bd;">${s.date||''}${s.signal_time ? ' ⏱ '+s.signal_time : ''}</span>` : timeLabel}
-            ${overheatBadge}
+            ${premiumBadge}${overheatBadge}
         </div>
         <div style="font-size:13px;">${s.desc}</div>
         ${entryLine}${noteLine}${overheatLine}

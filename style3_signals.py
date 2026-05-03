@@ -121,13 +121,17 @@ def scan_style3_signals(
 
     # Type C2: 쌍바닥 지지 터치 (support_price 미리 계산된 값 사용)
     if support_price and abs(close - support_price) / support_price < 0.008:
+        # 쌍바닥 지지가가 익절가 ±2% 이내이면 "익절가 지지" 프리미엄 시그널
+        near_exit = (exit_price and abs(support_price - exit_price) / exit_price <= 0.02)
+        c2_confidence = 'H+' if near_exit else 'H'
+        near_exit_note = f" ★ 익절가({int(exit_price):,}원) 근처 지지 — 강한 지지선" if near_exit else ""
         found.append({
             'type': 'C2',
             'signal_time': signal_time,
             'entry_price': close,
             'support_price': support_price,
-            'confidence': 'H',
-            'reason': f"쌍바닥 지지선({int(support_price):,}원) 터치 확인 — 현재가 {close:,}원",
+            'confidence': c2_confidence,
+            'reason': f"쌍바닥 지지선({int(support_price):,}원) 터치 확인 — 현재가 {close:,}원{near_exit_note}",
         })
 
     # Type C1: 거감봉 진행 중
