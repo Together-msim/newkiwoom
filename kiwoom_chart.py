@@ -577,15 +577,14 @@ def get_minute_chart(
         resp.raise_for_status()
         data = resp.json() if resp.content else {}
 
-        if not isinstance(data, dict) or data.get("return_code") != 0:
-            rc = data.get("return_code") if isinstance(data, dict) else "?"
-            msg = data.get("return_msg") or data.get("message") or "unknown"
-            err = f"분봉 return_code={rc} {msg}"
+        if not isinstance(data, dict):
+            err = "분봉 API 응답이 dict가 아님"
             print(f"❌ 분봉 조회 실패: {err}")
             if error_out is not None:
                 error_out.append(err)
             return None
 
+        # Kiwoom API는 return_code 없이 stk_min_pole_chart_qry 키를 직접 반환
         raw_list = data.get("stk_min_pole_chart_qry") or []
         if not isinstance(raw_list, list):
             err = "stk_min_pole_chart_qry가 리스트가 아님"

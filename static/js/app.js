@@ -8406,6 +8406,85 @@ function renderSignalCard(s, compact) {
 }
 
 
+// ── 발라먹기 등록폼 종목명 자동완성 ──────────────────────────────────────
+let _liveReSearchTimer = null;
+let _liveReSearchIdx = -1;
+
+function liveReCodeInput(val) {
+    // 코드 직접 입력 시 검색 인풋 초기화
+    const dd = document.getElementById('liveReNameDropdown');
+    if (dd) dd.style.display = 'none';
+}
+
+function liveReNameSearch(q) {
+    clearTimeout(_liveReSearchTimer);
+    const dd = document.getElementById('liveReNameDropdown');
+    if (!q.trim()) { if (dd) dd.style.display = 'none'; return; }
+    _liveReSearchTimer = setTimeout(() => _doLiveReSearch(q), 200);
+}
+
+async function _doLiveReSearch(q) {
+    const dd = document.getElementById('liveReNameDropdown');
+    if (!dd) return;
+    try {
+        const res = await fetch(`/api/stock/search?q=${encodeURIComponent(q)}`, { credentials: 'same-origin' });
+        const r = await res.json();
+        const results = r.results || [];
+        if (!results.length) { dd.style.display = 'none'; return; }
+        _liveReSearchIdx = -1;
+        dd.innerHTML = results.map((item, i) =>
+            `<div class="stock-search-item" data-idx="${i}" data-code="${item.stock_code}" data-name="${item.stock_name}"
+                  onmousedown="_selectLiveReStock('${item.stock_code}','${item.stock_name}')"
+                  onmouseenter="_liveReHighlight(${i})">
+                <span class="ssi-name">${item.stock_name}</span>
+                <span class="ssi-code">${item.stock_code}</span>
+            </div>`
+        ).join('');
+        dd.style.display = 'block';
+    } catch (e) { /* 무시 */ }
+}
+
+function _selectLiveReStock(code, name) {
+    const codeEl = document.getElementById('liveReCode');
+    const nameEl = document.getElementById('liveReName');
+    const searchEl = document.getElementById('liveReNameSearch');
+    if (codeEl) codeEl.value = code;
+    if (nameEl) nameEl.value = name;
+    if (searchEl) searchEl.value = name;
+    const dd = document.getElementById('liveReNameDropdown');
+    if (dd) dd.style.display = 'none';
+}
+
+function _liveReHighlight(idx) {
+    _liveReSearchIdx = idx;
+    document.querySelectorAll('#liveReNameDropdown .stock-search-item').forEach((el, i) =>
+        el.classList.toggle('active', i === idx));
+}
+
+function liveReNameKeyNav(e) {
+    const dd = document.getElementById('liveReNameDropdown');
+    if (!dd || dd.style.display === 'none') return;
+    const items = dd.querySelectorAll('.stock-search-item');
+    if (!items.length) return;
+    if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        _liveReSearchIdx = Math.min(_liveReSearchIdx + 1, items.length - 1);
+        _liveReHighlight(_liveReSearchIdx);
+    } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        _liveReSearchIdx = Math.max(_liveReSearchIdx - 1, 0);
+        _liveReHighlight(_liveReSearchIdx);
+    } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (_liveReSearchIdx >= 0 && items[_liveReSearchIdx]) {
+            const el = items[_liveReSearchIdx];
+            _selectLiveReStock(el.dataset.code, el.dataset.name);
+        }
+    } else if (e.key === 'Escape') {
+        dd.style.display = 'none';
+    }
+}
+
 async function saveTradeWatchlist() {
     const stockCode = document.getElementById('reStockCode').value.trim();
     const stockName = document.getElementById('reStockName').value.trim();
@@ -8858,7 +8937,8 @@ async function _liveLoadS3Signals() {
 
 async function liveRegisterStyle3() {
     const code = document.getElementById('liveReCode').value.trim();
-    const name = document.getElementById('liveReName').value.trim();
+    const name = document.getElementById('liveReName').value.trim()
+              || document.getElementById('liveReNameSearch')?.value.trim();
     const buyPrice = parseFloat(document.getElementById('liveReBuyPrice').value);
     const buyDate = document.getElementById('liveReBuyDate').value.trim();
     const exitPrice = parseFloat(document.getElementById('liveReExitPrice').value);
@@ -8874,7 +8954,8 @@ async function liveRegisterStyle3() {
 
 async function liveCheckStyle3Now() {
     const code = document.getElementById('liveReCode').value.trim();
-    const name = document.getElementById('liveReName').value.trim();
+    const name = document.getElementById('liveReName').value.trim()
+              || document.getElementById('liveReNameSearch')?.value.trim();
     const buyPrice = parseFloat(document.getElementById('liveReBuyPrice').value);
     const exitPrice = parseFloat(document.getElementById('liveReExitPrice').value);
     const exitDate = document.getElementById('liveReExitDate').value.trim();

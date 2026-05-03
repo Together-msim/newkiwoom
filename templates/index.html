@@ -1224,22 +1224,24 @@
                         <p style="font-size:12px;color:#868e96;margin-bottom:10px;">익절 직후 입력 → 실시간 3분봉 감시 + Mode2 등록</p>
                         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
                             <div><label style="font-size:12px;color:#868e96;">종목코드</label>
-                                <input type="text" id="liveReCode" placeholder="054920" style="width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid var(--border-color);border-radius:5px;font-size:13px;background:var(--bg-secondary);color:var(--text-primary);">
+                                <input type="text" id="liveReCode" placeholder="054920" oninput="liveReCodeInput(this.value)" style="width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid var(--border-color);border-radius:5px;font-size:13px;background:var(--bg-secondary);color:var(--text-primary);">
                             </div>
-                            <div><label style="font-size:12px;color:#868e96;">종목명</label>
-                                <input type="text" id="liveReName" placeholder="한컴위드" style="width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid var(--border-color);border-radius:5px;font-size:13px;background:var(--bg-secondary);color:var(--text-primary);">
+                            <div style="position:relative;"><label style="font-size:12px;color:#868e96;">종목명 검색</label>
+                                <input type="text" id="liveReNameSearch" placeholder="한컴위드" oninput="liveReNameSearch(this.value)" onkeydown="liveReNameKeyNav(event)" autocomplete="off" style="width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid var(--border-color);border-radius:5px;font-size:13px;background:var(--bg-secondary);color:var(--text-primary);">
+                                <input type="hidden" id="liveReName">
+                                <div id="liveReNameDropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:5px;z-index:1000;max-height:180px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,0.4);"></div>
                             </div>
                             <div><label style="font-size:12px;color:#868e96;">매수가</label>
                                 <input type="number" id="liveReBuyPrice" placeholder="6190" style="width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid var(--border-color);border-radius:5px;font-size:13px;background:var(--bg-secondary);color:var(--text-primary);">
                             </div>
                             <div><label style="font-size:12px;color:#868e96;">매수일</label>
-                                <input type="text" id="liveReBuyDate" placeholder="2026-04-17" style="width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid var(--border-color);border-radius:5px;font-size:13px;background:var(--bg-secondary);color:var(--text-primary);">
+                                <input type="date" id="liveReBuyDate" style="width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid var(--border-color);border-radius:5px;font-size:13px;background:var(--bg-secondary);color:var(--text-primary);">
                             </div>
                             <div><label style="font-size:12px;color:#868e96;">익절가 (Mode2 resistance_1)</label>
                                 <input type="number" id="liveReExitPrice" placeholder="6760" style="width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid var(--border-color);border-radius:5px;font-size:13px;background:var(--bg-secondary);color:var(--text-primary);">
                             </div>
                             <div><label style="font-size:12px;color:#868e96;">익절일</label>
-                                <input type="text" id="liveReExitDate" placeholder="2026-04-20" style="width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid var(--border-color);border-radius:5px;font-size:13px;background:var(--bg-secondary);color:var(--text-primary);">
+                                <input type="date" id="liveReExitDate" style="width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid var(--border-color);border-radius:5px;font-size:13px;background:var(--bg-secondary);color:var(--text-primary);">
                             </div>
                             <div><label style="font-size:12px;color:#868e96;">손절가 (Mode2 support_1)</label>
                                 <input type="number" id="liveReStopPrice" placeholder="" style="width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid var(--border-color);border-radius:5px;font-size:13px;background:var(--bg-secondary);color:var(--text-primary);">
