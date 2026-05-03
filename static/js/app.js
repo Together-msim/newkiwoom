@@ -565,8 +565,10 @@ function renderMode2WatcherRow(w, idx) {
             </div>
             <div class="watcher-cell"><span class="status-badge status-${w.status}">${getStatusText(w.status)}</span></div>
             <div class="watcher-cell monitoring-status ${getMonitoringStatusClass(w.monitoring_status)}">${renderZoneCell(w)}</div>
-            <div class="watcher-cell sm-note-cell" title="${(w.sm_note || '').replace(/"/g,'&quot;')}"
-                 onclick="smFetchAndOpenEdit('${w.code}','${(w.name||'').replace(/'/g,"\\'")}')">
+            <div class="watcher-cell sm-note-cell"
+                 onclick="openStockNotesModal('${w.code}','${(w.name||'').replace(/'/g,"\\'")}');"
+                 onmouseenter="showStockTooltip(event,'${w.code}','${(w.name||'').replace(/'/g,"\\'")}')"
+                 onmouseleave="hideStockTooltip()">
                 ${w.sm_note ? `<span class="sm-note-preview-inline">${_esc((w.sm_note||'').split('\n')[0].slice(0,40))}${(w.sm_note||'').length > 40 ? '…' : ''}</span>` : '<span style="color:#adb5bd;font-size:11px;">노트없음</span>'}
             </div>
             <div class="watcher-actions">
@@ -3296,6 +3298,7 @@ function _renderTooltip(tooltip, d, history, financeStale) {
                 <span class="sm-fi-value">${d.roe != null ? d.roe + '%' : '-'}</span>
             </div>
         </div>
+        ${d.note ? `<div class="sm-hist-title">📝 자유노트</div><div class="sm-note-tooltip-body">${_esc(d.note)}</div>` : ''}
         <div class="sm-hist-title">📋 시황 히스토리</div>
         <div class="sm-hist-list">${histHtml}</div>
     `;
@@ -3453,6 +3456,8 @@ async function prependStockNote() {
         _noteSetHtml('stockNotesFullText', res.note || '');
         document.getElementById('stockNotePrependContent').value = '';
         showToast('추가됨', 'success');
+        _refreshMode2NoteCell(code, res.note || '');
+        delete _stockTooltipCache[code];
     }
 }
 
@@ -3465,7 +3470,23 @@ async function saveFullStockNote() {
         credentials: 'same-origin',
         body: JSON.stringify({ note }),
     }).then(r => r.json()).catch(() => ({}));
-    if (res.success) showToast('저장됨', 'success');
+    if (res.success) {
+        showToast('저장됨', 'success');
+        _refreshMode2NoteCell(code, note);
+        delete _stockTooltipCache[code];
+    }
+}
+
+function _refreshMode2NoteCell(code, note) {
+    const row = document.querySelector(`.mode2-watcher-row[data-code="${code}"]`);
+    if (!row) return;
+    const cell = row.querySelector('.sm-note-cell');
+    if (!cell) return;
+    const firstLine = (note || '').split('\n')[0].slice(0, 40);
+    const ellipsis = (note || '').length > 40 ? '…' : '';
+    cell.innerHTML = note
+        ? `<span class="sm-note-preview-inline">${_esc(firstLine)}${ellipsis}</span>`
+        : '<span style="color:#adb5bd;font-size:11px;">노트없음</span>';
 }
 
 // ─── 종목 마스터 관리 모달 ─────────────────────────────────────────────────

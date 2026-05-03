@@ -2732,6 +2732,7 @@ tbody tr.inactive {
 .sm-note-cell { cursor:pointer; max-width:160px; }
 .sm-note-cell:hover { background:#e7f5ff; border-radius:4px; }
 .sm-note-preview-inline { font-size:11px; color:#495057; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:block; }
+.sm-note-tooltip-body { font-size:12px; color:#343a40; white-space:pre-wrap; max-height:200px; overflow-y:auto; background:#f8f9fa; border-radius:4px; padding:6px 8px; margin-bottom:6px; line-height:1.5; }
 
 /* ─── 노트 에디터 (contenteditable) ─────────────────────── */
 .note-editor {
