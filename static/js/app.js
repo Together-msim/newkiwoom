@@ -8194,13 +8194,21 @@ function parseBulkReentry() {
                     <td style="padding:6px;border:1px solid #dee2e6;">${it.buyDate}</td>
                     <td style="padding:6px;border:1px solid #dee2e6;text-align:right;">${it.exitPrice.toLocaleString()}원</td>
                     <td style="padding:6px;border:1px solid #dee2e6;">${it.exitDate}</td>
-                    <td style="padding:6px;border:1px solid #dee2e6;">
+                    <td style="padding:6px;border:1px solid #dee2e6;display:flex;gap:4px;">
+                        <button class="btn btn-sm btn-secondary" onclick="bulkBacktestItem(${i})">📊 백테스트</button>
                         <button class="btn btn-sm btn-primary" onclick="registerBulkItem(${i})">감시 등록</button>
                     </td>
                 </tr>
+                <tr id="bulkRowResult${i}" style="display:none;">
+                    <td colspan="6" style="padding:8px 12px;border:1px solid #dee2e6;background:#1a1a2e;" id="bulkRowResultCell${i}"></td>
+                </tr>
             `).join('')}</tbody>
         </table>
-        <button class="btn btn-primary" onclick="registerAllBulkItems()">📋 전체 등록</button>
+        <div style="display:flex;gap:8px;">
+            <button class="btn btn-primary" onclick="bulkBacktestAll()">📊 전체 백테스트</button>
+            <button class="btn btn-secondary" onclick="registerAllBulkItems()">💾 전체 감시 등록</button>
+        </div>
+        <div id="reBulkBacktestResult" style="margin-top:16px;"></div>
     `;
     window._reBulkItems = items;
 }
@@ -8215,6 +8223,81 @@ async function registerBulkItem(idx) {
         if (row) row.style.opacity = '0.4';
         loadTradeWatchlist();
     }
+}
+
+async function bulkBacktestItem(idx) {
+    const items = window._reBulkItems || [];
+    const it = items[idx];
+    if (!it) return;
+    const resultRow = document.getElementById('bulkRowResult' + idx);
+    const cell = document.getElementById('bulkRowResultCell' + idx);
+    resultRow.style.display = '';
+    cell.innerHTML = '<span style="color:#868e96;font-size:12px;">분석 중...</span>';
+    try {
+        const res = await fetch('/api/seeking-signal/reentry-check', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ stock_code: it.code, buy_price: it.buyPrice, exit_price: it.exitPrice, exit_date: it.exitDate, backtest_mode: true }),
+        });
+        const r = await res.json();
+        cell.innerHTML = _renderBulkBacktestResult(it, r);
+    } catch (e) {
+        cell.innerHTML = `<span style="color:#e74c3c;font-size:12px;">오류: ${e.message}</span>`;
+    }
+}
+
+async function bulkBacktestAll() {
+    const items = window._reBulkItems || [];
+    if (!items.length) return;
+    const resultEl = document.getElementById('reBulkBacktestResult');
+    resultEl.innerHTML = `<p style="color:#868e96;font-size:13px;">⏳ ${items.length}건 백테스트 중...</p>`;
+    const results = [];
+    for (const it of items) {
+        try {
+            const res = await fetch('/api/seeking-signal/reentry-check', {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ stock_code: it.code, buy_price: it.buyPrice, exit_price: it.exitPrice, exit_date: it.exitDate, backtest_mode: true }),
+            });
+            const r = await res.json();
+            results.push({ it, r });
+        } catch (e) {
+            results.push({ it, r: { success: false, error: e.message } });
+        }
+    }
+    resultEl.innerHTML = results.map(({ it, r }) => _renderBulkBacktestResult(it, r, true)).join('');
+}
+
+function _renderBulkBacktestResult(it, r, showHeader) {
+    const typeColor = { A: '#3498db', B: '#f39c12', C1: '#2ecc71', C2: '#27ae60', C3: '#1a8a4a', OVERHEAT: '#e74c3c' };
+    const typeLabel = { A: 'A', B: 'B', C1: 'C1', C2: 'C2', C3: 'C3', OVERHEAT: '🚫' };
+    if (!r.success) {
+        const hdr = showHeader ? `<strong style="color:#fff">${it.name}</strong> ` : '';
+        return `<div style="padding:8px;font-size:12px;color:#e74c3c;">${hdr}${r.error || '오류'}</div>`;
+    }
+    const d = r.data;
+    const signals = (d.signals || []).filter(s => s.type !== 'OVERHEAT');
+    const overheat = (d.signals || []).filter(s => s.type === 'OVERHEAT');
+    const header = showHeader ? `<div style="font-size:13px;font-weight:600;color:#fff;margin-bottom:6px;">
+        ${it.name} <small style="color:#868e96">${it.code}</small>
+        <span style="font-size:12px;color:#868e96;margin-left:8px;">매수 ${it.buyPrice.toLocaleString()} → 익절 ${it.exitPrice.toLocaleString()} (${it.exitDate})</span>
+    </div>` : '';
+    if (!signals.length) {
+        return `<div style="padding:8px;border-left:3px solid #495057;margin-bottom:8px;background:#1e1e2e;">${header}<span style="color:#868e96;font-size:12px;">시그널 없음 (${d.bars_analyzed || 0}봉 분석)</span></div>`;
+    }
+    const chips = signals.map(s => {
+        const col = typeColor[s.type] || '#95a5a6';
+        const lbl = typeLabel[s.type] || s.type;
+        const dt = s.date ? s.date.replace(/(\d{4})(\d{2})(\d{2})/, '$2/$3') : '';
+        const ep = s.entry_price ? ` ${s.entry_price.toLocaleString()}원` : '';
+        return `<span style="background:${col};color:#fff;font-size:11px;padding:2px 6px;border-radius:3px;white-space:nowrap;">${lbl} ${dt}${ep}</span>`;
+    }).join(' ');
+    const overheatNote = overheat.length ? `<span style="color:#e74c3c;font-size:11px;margin-left:6px;">⚠️ 과열${overheat.length}일</span>` : '';
+    return `<div style="padding:8px;border-left:3px solid #27ae60;margin-bottom:8px;background:#1e1e2e;">
+        ${header}
+        <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;">${chips}${overheatNote}</div>
+        <div style="font-size:11px;color:#868e96;margin-top:4px;">${d.bars_analyzed || 0}봉 분석 | C2: ${signals.filter(s=>s.type==='C2').length}회 | C3: ${signals.filter(s=>s.type==='C3').length}회</div>
+    </div>`;
 }
 
 async function registerAllBulkItems() {
