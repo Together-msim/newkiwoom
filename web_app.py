@@ -3273,6 +3273,7 @@ def seeking_signal_reentry_check():
     buy_price = float(data.get('buy_price', 0))
     exit_price = float(data.get('exit_price', 0))
     exit_date = data.get('exit_date', '')   # YYYY-MM-DD
+    exit_time = data.get('exit_time', '')   # HH:MM (익절 시간 — 당일 이 시각 이후 봉부터 분석)
     backtest_mode = bool(data.get('backtest_mode', False))
 
     if not stock_code or not buy_price or not exit_price:
@@ -3550,28 +3551,44 @@ def seeking_signal_reentry_check():
 
         if backtest_mode:
             # ── 3분봉 기반 발라먹기 백테스트 ──────────────────────────────
-            # 익절일 다음 거래일부터 최대 5거래일치 3분봉을 날짜별로 조회,
-            # 각 봉에서 Style3 시그널 감지 → 날짜+시각 타점 반환
             from kiwoom_chart import get_minute_chart
             from style3_signals import scan_style3_signals, calc_c2_support
 
-            # 분석 대상 거래일 목록: 과열기간 제외 후 최대 5거래일
-            # (과열 3일을 포함해서 5일 자르면 실질 분석일이 2일뿐이므로 과열 이후 기준)
+            # 분석 대상 거래일 목록
+            # - exit_time이 있으면: 익절 당일도 포함 (해당 시각 이후 봉만 분석)
+            # - 과열기간(3거래일) 이후 5거래일 분석
             all_after_exit = [b['date'] for b in analysis_bars]
             if overheat_date:
-                # 과열일 이후 봉부터 5개
                 overheat_idx = next((i for i, d in enumerate(all_after_exit) if d > overheat_date), 0)
-                # 과열 3거래일 이후 시작 (최소 overheat_idx+3)
                 start_idx = overheat_idx + 3
                 trading_dates = all_after_exit[start_idx:start_idx + 5]
             else:
                 trading_dates = all_after_exit[:5]
 
-            # C2 지지가 — 일봉에서 미리 계산 (exit_date 이후 8봉)
-            support_price = calc_c2_support(all_bars, exit_date)
+            # exit_time이 있으면 익절 당일도 분석 대상에 앞에 추가
+            exit_date_compact = exit_date.replace('-', '') if exit_date else ''
+            # exit_time: "HH:MM" → "HHMM" (4자리)
+            exit_time_hhmm = exit_time.replace(':', '') if exit_time else ''
+            if exit_date_compact and exit_time_hhmm:
+                trading_dates = [exit_date_compact] + trading_dates
+
+            # C2 지지가 — 과열기간 이후 일봉에서 계산
+            # 과열기간(3거래일) 봉을 제외해야 실제 재진입 구간의 지지가 나옴
+            _c2_base_date = overheat_date if overheat_date else (exit_date_compact or '')
+            # 과열 3거래일 이후 봉부터 쌍바닥 탐색
+            _c2_after_bars = [b for b in all_bars if b['date'] > _c2_base_date]
+            _c2_after_idx = next((i for i, b in enumerate(all_bars) if b['date'] > _c2_base_date), None)
+            if _c2_after_idx is not None and _c2_after_idx + 3 <= len(all_bars):
+                _c2_start_idx = _c2_after_idx + 3  # 과열 3거래일 제외
+                _c2_bars_for_support = all_bars[_c2_start_idx:]
+            else:
+                _c2_bars_for_support = _c2_after_bars
+            from style3_signals import find_double_bottom
+            _db = find_double_bottom(_c2_bars_for_support[-8:], tolerance=0.04) if len(_c2_bars_for_support) >= 2 else None
+            support_price = int(_db[0] * 1.005) if _db else None
 
             all_signals = []
-            seen_key = set()  # (type, date, hhmm) 중복 방지
+            seen_key = set()
             total_bars = 0
 
             for day_date in trading_dates:
@@ -3656,6 +3673,11 @@ def seeking_signal_reentry_check():
                     }
 
                 minute_bars = [_parse_min_bar(b) for b in day_bars]
+
+                # 익절 당일: exit_time 이후 봉만 분석 (그 이전은 익절 전 구간)
+                if day_date == exit_date_compact and exit_time_hhmm:
+                    minute_bars = [b for b in minute_bars if b.get('hhmm', '') >= exit_time_hhmm]
+
                 total_bars += len(minute_bars)
 
                 # 봉 단위 롤링 시그널 감지 (최소 3봉 필요)
@@ -3699,7 +3721,9 @@ def seeking_signal_reentry_check():
                     'bars_analyzed': total_bars,
                     'trading_days': len(trading_dates),
                     'overheat_date': overheat_date,
-                    'signals': exit_day_signals + all_signals,
+                    'support_price': support_price,
+                    # exit_time이 있으면 당일 3분봉 분석이 all_signals에 포함됨
+                    'signals': ([] if exit_time_hhmm else exit_day_signals) + all_signals,
                     'chart_source': '3분봉',
                 }
             })

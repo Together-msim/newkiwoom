@@ -757,7 +757,7 @@
                                 </div>
                                 <div>
                                     <label style="font-size:13px;color:#868e96;">매수일</label>
-                                    <input type="text" id="btBuyDate" placeholder="2026-04-17">
+                                    <input type="date" id="btBuyDate">
                                 </div>
                                 <div>
                                     <label style="font-size:13px;color:#868e96;">익절가</label>
@@ -765,7 +765,11 @@
                                 </div>
                                 <div>
                                     <label style="font-size:13px;color:#868e96;">익절일</label>
-                                    <input type="text" id="btExitDate" placeholder="2026-04-20">
+                                    <input type="date" id="btExitDate">
+                                </div>
+                                <div>
+                                    <label style="font-size:13px;color:#868e96;">익절 시간 <span style="color:#6c757d;font-size:11px;">(당일 시그널 포함)</span></label>
+                                    <input type="time" id="btExitTime" placeholder="13:15" step="60">
                                 </div>
                             </div>
                             <button class="btn btn-primary" onclick="checkReentryBacktest()">📊 백테스트 실행</button>

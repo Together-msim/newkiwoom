@@ -8361,14 +8361,17 @@ async function checkReentryBacktest() {
     const buyPrice = parseFloat(document.getElementById('btBuyPrice').value);
     const exitPrice = parseFloat(document.getElementById('btExitPrice').value);
     const exitDate = document.getElementById('btExitDate').value.trim();
+    const exitTime = (document.getElementById('btExitTime')?.value || '').trim();
     const resultEl = document.getElementById('reentryResult');
     if (!stockCode || !buyPrice || !exitPrice) { showToast('종목코드, 매수가, 익절가 필수', 'error'); return; }
     resultEl.innerHTML = '<p style="color:#868e96">히스토리컬 백테스트 분석 중...</p>';
     try {
+        const body = { stock_code: stockCode, buy_price: buyPrice, exit_price: exitPrice, exit_date: exitDate, backtest_mode: true };
+        if (exitTime) body.exit_time = exitTime;
         const res = await fetch('/api/seeking-signal/reentry-check', {
             method: 'POST', credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ stock_code: stockCode, buy_price: buyPrice, exit_price: exitPrice, exit_date: exitDate, backtest_mode: true }),
+            body: JSON.stringify(body),
         });
         const r = await res.json();
         if (!r.success) { resultEl.innerHTML = `<p style="color:#e74c3c">${r.error}</p>`; return; }
@@ -8377,7 +8380,8 @@ async function checkReentryBacktest() {
         if (!signals.length) { resultEl.innerHTML = `<p style="color:#868e96;padding:8px 0;">백테스트 기간 내 시그널 없음 (${d.bars_analyzed||'-'}봉 분석)</p>`; return; }
         const realSignals = signals.filter(s => s.type !== 'OVERHEAT');
         const overheatDayStr = d.overheat_date ? ` | 폭등일: ${d.overheat_date}` : '';
-        const summary = `<div style="font-size:13px;color:#868e96;margin-bottom:12px;">📊 실시그널 <strong style="color:#fff">${realSignals.length}개</strong> (${d.bars_analyzed||'-'}봉 분석${overheatDayStr})</div>`;
+        const supportStr = d.support_price ? ` | C2지지: <strong style="color:#27ae60">${d.support_price.toLocaleString()}원</strong>` : '';
+        const summary = `<div style="font-size:13px;color:#868e96;margin-bottom:12px;">📊 실시그널 <strong style="color:#fff">${realSignals.length}개</strong> (${d.bars_analyzed||'-'}봉 분석${overheatDayStr}${supportStr})</div>`;
         resultEl.innerHTML = summary + signals.map(s => renderSignalCard(s, true)).join('');
     } catch (e) { resultEl.innerHTML = `<p style="color:#e74c3c">오류: ${e.message}</p>`; }
 }
