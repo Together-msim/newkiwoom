@@ -153,9 +153,10 @@ function setupEventListeners() {
 
     if (support1LossPct && support2LossPct) {
         support1LossPct.addEventListener('change', () => {
+            const s1modeEl = document.querySelector('select[name="support_1_mode"]');
+            if (s1modeEl && s1modeEl.value === '물타기') return; // 물타기는 자동계산 안 함
             const val1 = parseInt(support1LossPct.value);
-            const val2 = 100 - val1;
-            support2LossPct.value = val2;
+            support2LossPct.value = 100 - val1;
         });
     }
 
@@ -5419,7 +5420,9 @@ function fillMode2Form(watcher) {
     document.querySelector('select[name="support_1_loss_pct"]').value = watcher.support_1_loss_pct || 50;
     document.getElementById('support1AddBudget').value = watcher.support_1_add_budget ? Math.round(watcher.support_1_add_budget / 10000) : '';
     document.querySelector('input[name="support_2_price"]').value = watcher.support_2_price || '';
-    document.querySelector('select[name="support_2_loss_pct"]').value = watcher.support_2_loss_pct || 50;
+    // 물타기 모드면 저장된 값 그대로, 손절 모드면 저장된 값 or 50
+    const s2Default = s1mode === '물타기' ? 100 : 50;
+    document.querySelector('select[name="support_2_loss_pct"]').value = watcher.support_2_loss_pct || s2Default;
 }
 
 // 종목 편집 취소
