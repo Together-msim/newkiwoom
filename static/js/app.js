@@ -3599,7 +3599,7 @@ async function smSyncWatchlist() {
     if (res.success) showToast(`감시종목 ${res.synced}개 동기화됨`, 'success');
 }
 
-// ── 관심종목 그룹 탭 ────────────────────────────────────────────────────────
+// ── 관심종목 탭 전환 ─────────────────────────────────────────────────────────
 
 function smSwitchTab(tab) {
     ['master', 'interest'].forEach(t => {
@@ -3611,120 +3611,444 @@ function smSwitchTab(tab) {
     if (tab === 'master') smRenderColToggle();
 }
 
-let _wlGroups = [];   // cached group list
+// ── 관심종목 상태 ──────────────────────────────────────────────────────────
+
+let _wlGroups = [];
+let _wlActiveIds = new Set();      // 탭바에서 선택된 그룹 id
+let _wlItemsCache = {};            // groupId → items[]
+let _wlNoteOpen = null;            // {groupId, itemId} 현재 열린 노트 패널
+const WL_ACTIVE_KEY = 'wlActiveIds';
+
+function _wlSaveActive() {
+    localStorage.setItem(WL_ACTIVE_KEY, JSON.stringify([..._wlActiveIds]));
+}
+function _wlRestoreActive() {
+    try {
+        const saved = JSON.parse(localStorage.getItem(WL_ACTIVE_KEY) || '[]');
+        _wlActiveIds = new Set(saved.map(Number));
+    } catch { _wlActiveIds = new Set(); }
+}
+
+// ── 로드 & 탭바 렌더 ──────────────────────────────────────────────────────
 
 async function wlLoadGroups() {
-    const pinnedOnly = document.getElementById('wlPinnedOnly')?.checked ? '1' : '0';
-    const res = await fetch('/api/watchlist-groups?pinned=' + pinnedOnly, { credentials: 'same-origin' })
+    const res = await fetch('/api/watchlist-groups', { credentials: 'same-origin' })
         .then(r => r.json()).catch(() => ({ groups: [] }));
     _wlGroups = res.groups || [];
-    _wlRenderGroups(_wlGroups);
+    _wlRestoreActive();
+    // 저장된 active 중 실존하는 것만 유지
+    const validIds = new Set(_wlGroups.map(g => g.id));
+    _wlActiveIds = new Set([..._wlActiveIds].filter(id => validIds.has(id)));
+    // active 없으면 첫 번째 선택
+    if (_wlActiveIds.size === 0 && _wlGroups.length > 0) _wlActiveIds.add(_wlGroups[0].id);
+    _wlRenderTabbar();
+    await _wlRenderCards();
 }
 
-function _wlRenderGroups(groups) {
-    const container = document.getElementById('wlGroupList');
-    if (!container) return;
-    if (!groups.length) {
-        container.innerHTML = '<div style="color:#868e96;font-size:13px;padding:8px;">그룹이 없습니다.</div>';
-        return;
-    }
-    container.innerHTML = groups.map(g => `
-        <div class="wl-group-card" id="wlGroup-${g.id}">
-            <div class="wl-group-header" onclick="wlToggleGroup(${g.id})">
-                <button class="wl-pin-btn ${g.pinned ? 'pinned' : ''}" title="${g.pinned ? '활성' : '비활성'}"
-                    onclick="event.stopPropagation(); wlTogglePin(${g.id}, ${g.pinned ? 0 : 1})">
-                    ${g.pinned ? '📌' : '📍'}
-                </button>
-                <span class="wl-group-title">${_esc(g.name)}</span>
-                <span class="wl-group-meta" id="wlGroupMeta-${g.id}">▶</span>
-            </div>
-            <div class="wl-group-body" id="wlGroupBody-${g.id}"></div>
-        </div>
-    `).join('');
-}
-
-async function wlToggleGroup(groupId) {
-    const body = document.getElementById('wlGroupBody-' + groupId);
-    const meta = document.getElementById('wlGroupMeta-' + groupId);
-    if (!body) return;
-    const expanded = body.classList.contains('expanded');
-    if (expanded) {
-        body.classList.remove('expanded');
-        meta.textContent = '▶';
-        return;
-    }
-    // Load items if not yet loaded
-    if (!body._loaded) {
-        body.innerHTML = '<div style="padding:8px 14px;color:#868e96;font-size:13px;">로딩 중...</div>';
-        const res = await fetch('/api/watchlist-groups/' + groupId + '/items', { credentials: 'same-origin' })
-            .then(r => r.json()).catch(() => ({ items: [] }));
-        const items = res.items || [];
-        body.innerHTML = _wlRenderItems(items);
-        body._loaded = true;
-        meta.textContent = `▼ (${items.filter(i => i.item_type === 'stock').length}종목)`;
-    }
-    body.classList.add('expanded');
-    if (!body._loaded || meta.textContent === '▶') {
-        meta.textContent = '▼';
-    }
-}
-
-function _wlRenderItems(items) {
-    if (!items.length) return '<div style="padding:8px 14px;color:#868e96;font-size:13px;">종목 없음</div>';
-    return items.map(it => {
-        if (it.item_type === 'subheader') {
-            return `<div class="wl-subheader-row">${_esc(it.subgroup_label || '')}</div>`;
-        }
-        const code = it.stock_code || '';
-        const name = it.stock_name || '';
-        const memo = it.memo ? it.memo.replace(/<[^>]*>/g, '').slice(0, 80) : '';
-        return `<div class="wl-stock-row">
-            <span class="wl-stock-code">${_esc(code)}</span>
-            <span class="wl-stock-name" onclick="openStockNotesModal('${_esc(code)}', '${_esc(name)}')">${_esc(name)}</span>
-            ${memo ? `<span class="wl-stock-memo" title="${_esc(memo)}">${_esc(memo)}</span>` : ''}
-        </div>`;
+function _wlRenderTabbar() {
+    const bar = document.getElementById('wlCardTabbar');
+    if (!bar) return;
+    bar.innerHTML = _wlGroups.map(g => {
+        const active = _wlActiveIds.has(g.id);
+        return `<button class="wl-tab-chip ${active ? 'active' : ''}" onclick="wlToggleTab(${g.id})">${_esc(g.name)}</button>`;
     }).join('');
 }
 
-async function wlTogglePin(groupId, newPinned) {
-    await fetch('/api/watchlist-groups/' + groupId, {
-        method: 'PUT',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pinned: newPinned }),
-    });
-    wlLoadGroups();
+async function wlToggleTab(groupId) {
+    if (_wlActiveIds.has(groupId)) {
+        if (_wlActiveIds.size === 1) return; // 최소 1개 유지
+        _wlActiveIds.delete(groupId);
+    } else {
+        _wlActiveIds.add(groupId);
+    }
+    _wlSaveActive();
+    _wlRenderTabbar();
+    await _wlRenderCards();
 }
+
+// ── 카드 렌더 ─────────────────────────────────────────────────────────────
+
+async function _wlRenderCards() {
+    const vp = document.getElementById('wlCardsViewport');
+    if (!vp) return;
+
+    // 필요한 그룹 items 로드
+    const toLoad = [..._wlActiveIds].filter(id => !_wlItemsCache[id]);
+    await Promise.all(toLoad.map(async id => {
+        const res = await fetch(`/api/watchlist-groups/${id}/items`, { credentials: 'same-origin' })
+            .then(r => r.json()).catch(() => ({ items: [] }));
+        _wlItemsCache[id] = res.items || [];
+    }));
+
+    const activeGroups = _wlGroups.filter(g => _wlActiveIds.has(g.id));
+    vp.innerHTML = activeGroups.map(g => _wlBuildCard(g, _wlItemsCache[g.id] || [])).join('');
+}
+
+function _wlBuildCard(group, items) {
+    const stockCount = items.filter(i => i.item_type === 'stock').length;
+    const rows = items.map(it => _wlBuildRow(group.id, it)).join('');
+    return `<div class="wl-card" id="wlCard-${group.id}">
+        <div class="wl-card-head">
+            <span class="wl-card-head-title" title="${_esc(group.name)}">${_esc(group.name)}</span>
+            <small style="color:var(--text-secondary);font-size:11px;white-space:nowrap;">${stockCount}종목</small>
+            <button class="wl-row-btn" title="서브섹션 추가" onclick="wlAddSubheader(${group.id})">+섹션</button>
+            <button class="wl-row-btn" title="그룹명 편집" onclick="wlEditGroupName(${group.id})">✎</button>
+            <button class="wl-row-btn danger" title="카드 삭제" onclick="wlDeleteGroup(${group.id})">✕</button>
+        </div>
+        <div class="wl-card-body" id="wlCardBody-${group.id}"
+             tabindex="0"
+             onkeydown="wlCardKeydown(event, ${group.id})">${rows}</div>
+        <div class="wl-card-footer">
+            <input class="wl-add-input" id="wlAddInput-${group.id}"
+                placeholder="종목코드 또는 이름 (Enter 추가 / Delete 삭제)"
+                onkeydown="wlInputKeydown(event, ${group.id})">
+        </div>
+    </div>`;
+}
+
+function _wlBuildRow(groupId, it) {
+    if (it.item_type === 'subheader') {
+        return `<div class="wl-sub-row" id="wlRow-${it.id}" data-item-id="${it.id}" data-group="${groupId}" data-type="subheader">
+            <span style="flex:1;">${_esc(it.subgroup_label || '')}</span>
+            <div class="wl-row-actions">
+                <button class="wl-row-btn" onclick="wlEditSubheader(${it.id}, ${groupId})">✎</button>
+                <button class="wl-row-btn danger" onclick="wlDeleteItem(${it.id}, ${groupId})">✕</button>
+            </div>
+        </div>`;
+    }
+    const code = it.stock_code || '';
+    const name = it.stock_name || '';
+    const hasMasterNote = it.master_note_snippet && it.master_note_snippet.trim().length > 0;
+    const noteToday = it.note_updated_today;
+    const dotClass = hasMasterNote ? 'has-note' : '';
+    const dotColor = noteToday ? '#f39c12' : '#12b886';
+    return `<div class="wl-item-row" id="wlRow-${it.id}" data-item-id="${it.id}" data-group="${groupId}" data-code="${_esc(code)}" data-name="${_esc(name)}" data-type="stock"
+             onclick="wlSelectRow(event, ${it.id}, ${groupId})">
+        <span class="wl-item-note-dot ${dotClass}" style="background:${dotColor}" title="${hasMasterNote ? '노트 있음' : ''}"></span>
+        <span class="wl-item-code">${_esc(code)}</span>
+        <span class="wl-item-name">${_esc(name)}</span>
+        <div class="wl-row-actions">
+            <button class="wl-row-btn" onclick="event.stopPropagation(); wlOpenNote(${it.id}, ${groupId})">노트</button>
+            <select class="wl-move-select" onchange="wlMoveItem(${it.id}, this.value, ${groupId})" onclick="event.stopPropagation()">
+                <option value="">이동→</option>
+                ${_wlGroups.filter(g => g.id !== groupId).map(g =>
+                    `<option value="${g.id}">${_esc(g.name.slice(0,14))}</option>`).join('')}
+            </select>
+            <button class="wl-row-btn danger" onclick="event.stopPropagation(); wlDeleteItem(${it.id}, ${groupId})">✕</button>
+        </div>
+    </div>`;
+}
+
+// ── 키보드 입력 ───────────────────────────────────────────────────────────
+
+function wlInputKeydown(event, groupId) {
+    if (event.key === 'Enter') {
+        event.preventDefault();
+        wlAddItemFromInput(groupId);
+    }
+}
+
+function wlCardKeydown(event, groupId) {
+    const selected = document.querySelector(`#wlCard-${groupId} .wl-item-row.selected`);
+    if (event.key === 'Delete' && selected) {
+        event.preventDefault();
+        const itemId = parseInt(selected.dataset.itemId);
+        wlDeleteItem(itemId, groupId);
+    } else if (event.key === 'Insert') {
+        event.preventDefault();
+        document.getElementById('wlAddInput-' + groupId)?.focus();
+    }
+}
+
+async function wlAddItemFromInput(groupId) {
+    const input = document.getElementById('wlAddInput-' + groupId);
+    if (!input) return;
+    const raw = input.value.trim();
+    if (!raw) return;
+
+    // 숫자면 종목코드, 아니면 종목명으로 검색
+    let code = '', name = raw;
+    if (/^\d+$/.test(raw)) {
+        code = raw.padStart(6, '0');
+        // stock_master에서 이름 찾기
+        try {
+            const r = await fetch(`/api/stock/search?q=${encodeURIComponent(code)}`, { credentials: 'same-origin' }).then(r => r.json());
+            if (r.results && r.results.length) { code = r.results[0].stock_code; name = r.results[0].stock_name; }
+        } catch {}
+    } else {
+        // 이름으로 검색해서 첫번째 매치
+        try {
+            const r = await fetch(`/api/stock/search?q=${encodeURIComponent(raw)}`, { credentials: 'same-origin' }).then(r => r.json());
+            if (r.results && r.results.length) { code = r.results[0].stock_code; name = r.results[0].stock_name; }
+        } catch {}
+    }
+
+    // 현재 선택된 행 다음 subheader 찾기 (삽입 위치 파악)
+    const items = _wlItemsCache[groupId] || [];
+    const maxOrder = items.length ? Math.max(...items.map(i => i.display_order)) + 1 : 0;
+
+    const res = await fetch(`/api/watchlist-groups/${groupId}/items`, {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_type: 'stock', stock_code: code, stock_name: name, display_order: maxOrder }),
+    }).then(r => r.json());
+
+    if (res.success) {
+        input.value = '';
+        delete _wlItemsCache[groupId];
+        await _wlRefreshCard(groupId);
+    }
+}
+
+function wlSelectRow(event, itemId, groupId) {
+    // 행 클릭 시 선택 토글
+    const row = document.getElementById('wlRow-' + itemId);
+    if (!row) return;
+    const wasSelected = row.classList.contains('selected');
+    // 같은 카드 내 다른 선택 해제
+    document.querySelectorAll(`#wlCard-${groupId} .wl-item-row.selected`).forEach(r => r.classList.remove('selected'));
+    if (!wasSelected) row.classList.add('selected');
+}
+
+// ── 노트 패널 ─────────────────────────────────────────────────────────────
+
+async function wlOpenNote(itemId, groupId) {
+    // 이미 같은 노트 열려있으면 닫기
+    const existing = document.getElementById('wlNotePanel-' + itemId);
+    if (existing) { existing.remove(); _wlNoteOpen = null; return; }
+
+    // 다른 노트 닫기
+    document.querySelectorAll('[id^="wlNotePanel-"]').forEach(el => el.remove());
+
+    const items = _wlItemsCache[groupId] || [];
+    const item = items.find(i => i.id === itemId);
+    if (!item) return;
+    const code = item.stock_code;
+
+    // stock_master에서 note 조회
+    let noteText = item.master_note_snippet || '';
+    try {
+        const r = await fetch(`/api/stock-master/${code}`, { credentials: 'same-origin' }).then(r => r.json());
+        noteText = r.note || '';
+    } catch {}
+
+    const panel = document.createElement('div');
+    panel.className = 'wl-note-panel';
+    panel.id = 'wlNotePanel-' + itemId;
+    const today = new Date().toISOString().slice(0, 10);
+    panel.innerHTML = `
+        <div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px;font-weight:600;">${_esc(item.stock_name || '')} (${_esc(code)}) 노트</div>
+        <textarea class="wl-note-editor" id="wlNoteText-${itemId}" placeholder="[${today}]&#10;분석 내용을 입력...">${_esc(noteText)}</textarea>
+        <div class="wl-note-actions">
+            <button class="btn btn-sm btn-primary" onclick="wlSaveNote(${itemId}, ${groupId}, '${_esc(code)}')">💾 저장</button>
+            <button class="btn btn-sm btn-secondary" onclick="wlAppendDate(${itemId})">📅 날짜 추가</button>
+            <button class="btn btn-sm btn-secondary" onclick="document.getElementById('wlNotePanel-${itemId}').remove()">닫기</button>
+            <span class="wl-note-updated" id="wlNoteSaved-${itemId}"></span>
+        </div>`;
+
+    const row = document.getElementById('wlRow-' + itemId);
+    if (row) row.insertAdjacentElement('afterend', panel);
+    document.getElementById('wlNoteText-' + itemId)?.focus();
+}
+
+function wlAppendDate(itemId) {
+    const ta = document.getElementById('wlNoteText-' + itemId);
+    if (!ta) return;
+    const today = new Date().toISOString().slice(0, 10);
+    const prefix = ta.value.trim() ? '\n\n' : '';
+    ta.value += `${prefix}[${today}]\n`;
+    ta.focus();
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+}
+
+async function wlSaveNote(itemId, groupId, code) {
+    const ta = document.getElementById('wlNoteText-' + itemId);
+    if (!ta) return;
+    const note = ta.value;
+    const res = await fetch(`/api/stock-master/${code}`, {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note }),
+    }).then(r => r.json());
+    const statusEl = document.getElementById('wlNoteSaved-' + itemId);
+    if (res.success || res.ok) {
+        if (statusEl) statusEl.textContent = '✓ 저장됨 ' + new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+        // 캐시 갱신 — note_dot 표시용
+        const items = _wlItemsCache[groupId] || [];
+        const item = items.find(i => i.id === itemId);
+        if (item) { item.master_note_snippet = note.slice(0, 120); item.note_updated_today = true; }
+        // dot 갱신
+        const dot = document.querySelector(`#wlRow-${itemId} .wl-item-note-dot`);
+        if (dot) { dot.classList.add('has-note'); dot.style.background = '#f39c12'; dot.title = '오늘 수정'; }
+    } else {
+        if (statusEl) statusEl.textContent = '저장 실패';
+    }
+}
+
+// ── 그룹/아이템 CRUD ─────────────────────────────────────────────────────
+
+async function wlAddGroup() {
+    const name = await _wlPrompt('새 카드(그룹) 이름');
+    if (!name) return;
+    const maxOrder = _wlGroups.length ? Math.max(..._wlGroups.map(g => g.display_order || 0)) + 1 : 0;
+    const res = await fetch('/api/watchlist-groups', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, pinned: 1, display_order: maxOrder }),
+    }).then(r => r.json());
+    if (res.success) { await wlLoadGroups(); }
+}
+
+async function wlEditGroupName(groupId) {
+    const g = _wlGroups.find(g => g.id === groupId);
+    if (!g) return;
+    const name = await _wlPrompt('그룹 이름 변경', g.name);
+    if (!name || name === g.name) return;
+    await fetch(`/api/watchlist-groups/${groupId}`, {
+        method: 'PUT', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+    });
+    await wlLoadGroups();
+}
+
+async function wlDeleteGroup(groupId) {
+    const g = _wlGroups.find(g => g.id === groupId);
+    if (!g) return;
+    if (!confirm(`"${g.name}" 카드를 삭제할까요?\n(${_wlItemsCache[groupId]?.length || '?'}개 종목 모두 삭제)`)) return;
+    await fetch(`/api/watchlist-groups/${groupId}`, { method: 'DELETE', credentials: 'same-origin' });
+    _wlActiveIds.delete(groupId);
+    delete _wlItemsCache[groupId];
+    _wlSaveActive();
+    await wlLoadGroups();
+}
+
+async function wlAddSubheader(groupId) {
+    const label = await _wlPrompt('서브섹션 이름');
+    if (!label) return;
+    const items = _wlItemsCache[groupId] || [];
+    const maxOrder = items.length ? Math.max(...items.map(i => i.display_order)) + 1 : 0;
+    await fetch(`/api/watchlist-groups/${groupId}/items`, {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_type: 'subheader', subgroup_label: label, display_order: maxOrder }),
+    });
+    delete _wlItemsCache[groupId];
+    await _wlRefreshCard(groupId);
+}
+
+async function wlEditSubheader(itemId, groupId) {
+    const items = _wlItemsCache[groupId] || [];
+    const item = items.find(i => i.id === itemId);
+    const label = await _wlPrompt('서브섹션 이름 변경', item?.subgroup_label || '');
+    if (!label) return;
+    await fetch(`/api/watchlist-items/${itemId}`, {
+        method: 'PUT', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subgroup_label: label }),
+    });
+    delete _wlItemsCache[groupId];
+    await _wlRefreshCard(groupId);
+}
+
+async function wlDeleteItem(itemId, groupId) {
+    await fetch(`/api/watchlist-items/${itemId}`, { method: 'DELETE', credentials: 'same-origin' });
+    delete _wlItemsCache[groupId];
+    await _wlRefreshCard(groupId);
+}
+
+async function wlMoveItem(itemId, targetGroupId, sourceGroupId) {
+    if (!targetGroupId) return;
+    await fetch(`/api/watchlist-items/${itemId}/move`, {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target_group_id: parseInt(targetGroupId) }),
+    });
+    delete _wlItemsCache[sourceGroupId];
+    delete _wlItemsCache[parseInt(targetGroupId)];
+    await _wlRenderCards();
+}
+
+// ── 카드 새로고침 ─────────────────────────────────────────────────────────
+
+async function _wlRefreshCard(groupId) {
+    const res = await fetch(`/api/watchlist-groups/${groupId}/items`, { credentials: 'same-origin' })
+        .then(r => r.json()).catch(() => ({ items: [] }));
+    _wlItemsCache[groupId] = res.items || [];
+    const body = document.getElementById('wlCardBody-' + groupId);
+    if (body) {
+        body.innerHTML = (_wlItemsCache[groupId]).map(it => _wlBuildRow(groupId, it)).join('');
+    }
+    // 헤더 종목 수 갱신
+    const head = document.querySelector(`#wlCard-${groupId} .wl-card-head small`);
+    if (head) head.textContent = `${_wlItemsCache[groupId].filter(i => i.item_type === 'stock').length}종목`;
+}
+
+// ── 검색 ─────────────────────────────────────────────────────────────────
 
 let _wlSearchTimer = null;
 function wlSearch(q) {
     clearTimeout(_wlSearchTimer);
     const resultsEl = document.getElementById('wlSearchResults');
+    const viewport = document.getElementById('wlCardsViewport');
+    const tabbar = document.getElementById('wlCardTabbar');
     if (!q || q.length < 1) {
         resultsEl.style.display = 'none';
-        resultsEl.innerHTML = '';
-        document.getElementById('wlGroupList').style.display = 'flex';
+        if (viewport) viewport.style.display = 'flex';
+        if (tabbar) tabbar.style.display = 'flex';
         return;
     }
+    if (viewport) viewport.style.display = 'none';
+    if (tabbar) tabbar.style.display = 'none';
+    resultsEl.style.display = 'flex';
     _wlSearchTimer = setTimeout(async () => {
         const res = await fetch('/api/watchlist-groups/search?q=' + encodeURIComponent(q), { credentials: 'same-origin' })
             .then(r => r.json()).catch(() => ({ results: [] }));
         const hits = res.results || [];
-        document.getElementById('wlGroupList').style.display = 'none';
-        resultsEl.style.display = 'flex';
-        if (!hits.length) {
-            resultsEl.innerHTML = '<div style="color:#868e96;font-size:13px;padding:8px;">검색 결과 없음</div>';
-            return;
-        }
+        if (!hits.length) { resultsEl.innerHTML = '<div style="color:#868e96;font-size:13px;padding:8px;">검색 결과 없음</div>'; return; }
         resultsEl.innerHTML = hits.map(h => `
-            <div class="wl-search-hit" onclick="openStockNotesModal('${_esc(h.stock_code || '')}', '${_esc(h.stock_name || '')}')">
-                <span class="wl-stock-code">${_esc(h.stock_code || '')}</span>
-                <span style="font-weight:500;flex:1;">${_esc(h.stock_name || '')}</span>
-                <span class="wl-search-group-tag">${_esc(h.group_name || '')}</span>
-                ${h.memo ? `<span class="wl-stock-memo">${_esc(h.memo.slice(0, 60))}</span>` : ''}
-            </div>
-        `).join('');
+            <div class="wl-search-hit" onclick="openStockNotesModal('${_esc(h.stock_code||'')}','${_esc(h.stock_name||'')}')">
+                <span class="wl-item-code">${_esc(h.stock_code||'')}</span>
+                <span style="font-weight:500;flex:1;">${_esc(h.stock_name||'')}</span>
+                <span class="wl-search-group-tag">${_esc(h.group_name||'')}</span>
+                ${h.memo?`<span class="wl-stock-memo">${_esc(h.memo.slice(0,60))}</span>`:''}
+            </div>`).join('');
     }, 280);
+}
+
+// ── CSV 내보내기 ─────────────────────────────────────────────────────────
+
+function wlExportCsv() {
+    const today = new Date().toISOString().slice(0, 10);
+    const url = `/api/watchlist-groups/export-csv?date=${today}`;
+    const a = document.createElement('a');
+    a.href = url; a.download = `watchlist_notes_${today}.csv`;
+    a.click();
+}
+
+// ── 유틸: 모달 프롬프트 ──────────────────────────────────────────────────
+
+function _wlPrompt(title, defaultVal = '') {
+    return new Promise(resolve => {
+        const backdrop = document.createElement('div');
+        backdrop.className = 'wl-modal-backdrop';
+        backdrop.innerHTML = `<div class="wl-modal">
+            <h4>${_esc(title)}</h4>
+            <input type="text" id="_wlPromptInput" value="${_esc(defaultVal)}" autofocus>
+            <div class="wl-modal-btns">
+                <button class="btn btn-secondary btn-sm" id="_wlPromptCancel">취소</button>
+                <button class="btn btn-primary btn-sm" id="_wlPromptOk">확인</button>
+            </div>
+        </div>`;
+        document.body.appendChild(backdrop);
+        const input = backdrop.querySelector('#_wlPromptInput');
+        input.focus(); input.select();
+        const done = val => { backdrop.remove(); resolve(val); };
+        backdrop.querySelector('#_wlPromptOk').onclick = () => done(input.value.trim() || null);
+        backdrop.querySelector('#_wlPromptCancel').onclick = () => done(null);
+        input.onkeydown = e => { if (e.key === 'Enter') done(input.value.trim() || null); if (e.key === 'Escape') done(null); };
+        backdrop.onclick = e => { if (e.target === backdrop) done(null); };
+    });
 }
 
 function _esc(s) {

@@ -1280,7 +1280,7 @@ class NewsStorage:
             return cur.lastrowid
 
     def update_watchlist_item(self, item_id: int, **fields) -> bool:
-        allowed = {'memo', 'display_order', 'stock_name', 'subgroup_label', 'pinned'}
+        allowed = {'memo', 'display_order', 'stock_name', 'subgroup_label', 'group_id'}
         updates = {k: v for k, v in fields.items() if k in allowed}
         if not updates:
             return False
@@ -1304,6 +1304,50 @@ class NewsStorage:
         except Exception as e:
             logger.error(f"delete_watchlist_item 실패: {e}")
             return False
+
+    def move_watchlist_item(self, item_id: int, target_group_id: int, target_order: int = 9999) -> bool:
+        """종목을 다른 그룹으로 이동."""
+        try:
+            with self._conn() as conn:
+                conn.execute(
+                    "UPDATE watchlist_items SET group_id=?, display_order=? WHERE id=?",
+                    (target_group_id, target_order, item_id)
+                )
+            return True
+        except Exception as e:
+            logger.error(f"move_watchlist_item 실패: {e}")
+            return False
+
+    def reorder_watchlist_items(self, group_id: int, ordered_ids: List[int]) -> bool:
+        """ordered_ids 순서대로 display_order 재설정."""
+        try:
+            with self._conn() as conn:
+                for i, iid in enumerate(ordered_ids):
+                    conn.execute(
+                        "UPDATE watchlist_items SET display_order=? WHERE id=? AND group_id=?",
+                        (i, iid, group_id)
+                    )
+            return True
+        except Exception as e:
+            logger.error(f"reorder_watchlist_items 실패: {e}")
+            return False
+
+    def get_note_updated_items(self, since_date: str) -> List[Dict]:
+        """since_date(YYYY-MM-DD) 이후 stock_master.note가 수정된 관심종목."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                """SELECT wi.id, wi.stock_code, wi.stock_name, wi.group_id,
+                          wg.name as group_name,
+                          sm.note, sm.summary_2line, sm.updated_at as note_updated_at
+                   FROM watchlist_items wi
+                   JOIN watchlist_groups wg ON wi.group_id = wg.id
+                   LEFT JOIN stock_master sm ON wi.stock_code = sm.stock_code
+                   WHERE wi.item_type = 'stock'
+                     AND sm.updated_at >= ?
+                   ORDER BY sm.updated_at DESC""",
+                (since_date,)
+            ).fetchall()
+            return [dict(r) for r in rows]
 
     def bulk_insert_watchlist_items(self, group_id: int, items: List[Dict]) -> int:
         """items: [{item_type, stock_code, stock_name, subgroup_label, memo, display_order}]"""

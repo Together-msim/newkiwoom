@@ -2852,3 +2852,247 @@ tbody tr.inactive {
 }
 .wl-search-hit:hover { background: var(--bg-secondary); }
 .wl-search-group-tag { font-size: 11px; color: var(--text-secondary); background: #f1f3f5; border-radius: 3px; padding: 2px 6px; }
+
+/* ── 관심종목 새 UI ─────────────────────────────────────── */
+.wl-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 0 8px;
+    flex-wrap: wrap;
+}
+.wl-search-box {
+    flex: 1;
+    min-width: 140px;
+    padding: 7px 11px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    font-size: 13px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+}
+.wl-search-overlay {
+    flex-direction: column;
+    gap: 4px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 8px;
+    max-height: 300px;
+    overflow-y: auto;
+    margin-bottom: 8px;
+}
+
+/* 탭 바 */
+.wl-card-tabbar {
+    display: flex;
+    gap: 4px;
+    padding: 4px 0 8px;
+    flex-wrap: wrap;
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 8px;
+}
+.wl-tab-chip {
+    padding: 4px 10px;
+    font-size: 12px;
+    border-radius: 14px;
+    border: 1px solid var(--border-color);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.15s, color 0.15s;
+    white-space: nowrap;
+}
+.wl-tab-chip.active {
+    background: var(--primary);
+    color: #fff;
+    border-color: var(--primary);
+}
+.wl-tab-chip:hover:not(.active) { background: var(--border-color); }
+
+/* 카드 분할 뷰 */
+.wl-cards-viewport {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    min-height: 300px;
+    overflow-x: auto;
+}
+.wl-card {
+    flex: 1;
+    min-width: 280px;
+    max-width: 480px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100vh - 240px);
+}
+.wl-card-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 12px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+    user-select: none;
+    flex-shrink: 0;
+}
+.wl-card-head-title {
+    flex: 1;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.wl-card-body {
+    flex: 1;
+    overflow-y: auto;
+    font-size: 13px;
+}
+.wl-card-body:focus { outline: none; }
+
+/* 서브헤더 행 */
+.wl-sub-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px 3px;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border-color);
+    cursor: default;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+.wl-sub-row .wl-row-actions { opacity: 0; }
+.wl-sub-row:hover .wl-row-actions { opacity: 1; }
+
+/* 종목 행 */
+.wl-item-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    border-bottom: 1px solid #f1f3f5;
+    cursor: pointer;
+    position: relative;
+}
+.wl-item-row:hover { background: var(--bg-secondary); }
+.wl-item-row.selected { background: #e8f4ff; }
+.wl-item-row .wl-row-actions { opacity: 0; }
+.wl-item-row:hover .wl-row-actions { opacity: 1; }
+.wl-item-code { font-family: monospace; font-size: 11px; color: var(--text-secondary); min-width: 50px; }
+.wl-item-name { flex: 1; font-weight: 500; font-size: 13px; }
+.wl-item-note-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: #12b886;
+    flex-shrink: 0;
+    display: none;
+}
+.wl-item-note-dot.has-note { display: block; }
+
+/* 행 액션 버튼 */
+.wl-row-actions {
+    display: flex;
+    gap: 3px;
+    transition: opacity 0.1s;
+}
+.wl-row-btn {
+    padding: 2px 6px;
+    font-size: 11px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+    cursor: pointer;
+    white-space: nowrap;
+}
+.wl-row-btn:hover { background: var(--bg-secondary); color: var(--text-primary); }
+.wl-row-btn.danger:hover { background: #fff0f0; color: #e74c3c; border-color: #e74c3c; }
+
+/* 카드 하단 입력 바 */
+.wl-card-footer {
+    border-top: 1px solid var(--border-color);
+    padding: 6px 10px;
+    background: var(--bg-secondary);
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+}
+.wl-add-input {
+    flex: 1;
+    padding: 5px 8px;
+    font-size: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 5px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+}
+.wl-add-input::placeholder { color: var(--text-secondary); opacity: 0.7; }
+
+/* 노트 패널 (인라인 슬라이드) */
+.wl-note-panel {
+    border-top: 2px solid var(--primary);
+    padding: 10px 12px;
+    background: var(--bg-primary);
+}
+.wl-note-editor {
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 90px;
+    padding: 7px 10px;
+    font-size: 13px;
+    border: 1px solid var(--border-color);
+    border-radius: 5px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    resize: vertical;
+    font-family: inherit;
+}
+.wl-note-actions { display: flex; gap: 6px; margin-top: 6px; align-items: center; }
+.wl-note-updated { font-size: 11px; color: var(--text-secondary); flex: 1; }
+
+/* 이동 드롭다운 */
+.wl-move-select {
+    font-size: 12px;
+    padding: 3px 6px;
+    border: 1px solid var(--border-color);
+    border-radius: 5px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    max-width: 160px;
+}
+
+/* 모달: 그룹/서브헤더 편집 */
+.wl-modal-backdrop {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.45);
+    z-index: 2000;
+    display: flex; align-items: center; justify-content: center;
+}
+.wl-modal {
+    background: var(--bg-primary);
+    border-radius: 10px;
+    padding: 20px;
+    width: 92%;
+    max-width: 360px;
+    box-shadow: 0 4px 24px rgba(0,0,0,.3);
+}
+.wl-modal h4 { margin: 0 0 14px; font-size: 15px; }
+.wl-modal input[type=text] {
+    width: 100%; box-sizing: border-box;
+    padding: 8px 10px; border: 1px solid var(--border-color);
+    border-radius: 6px; font-size: 14px;
+    background: var(--bg-secondary); color: var(--text-primary);
+    margin-bottom: 12px;
+}
+.wl-modal-btns { display: flex; gap: 8px; justify-content: flex-end; }

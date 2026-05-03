@@ -1649,18 +1649,25 @@
                 </div>
 
                 <!-- 관심종목 패널 -->
-                <div id="smPane-interest" style="display:none; flex-direction:column; gap:12px; padding:16px 0;">
-                    <div style="display:flex; gap:8px; align-items:center;">
-                        <input type="text" id="wlSearchInput" placeholder="종목명/코드/메모 검색"
-                            style="flex:1; padding:8px 12px; border:1px solid #dee2e6; border-radius:6px; font-size:14px;"
-                            oninput="wlSearch(this.value)">
-                        <label style="font-size:13px; display:flex; align-items:center; gap:4px; cursor:pointer; white-space:nowrap;">
-                            <input type="checkbox" id="wlPinnedOnly" onchange="wlLoadGroups()"> 활성만
-                        </label>
-                        <button class="btn btn-secondary" style="font-size:12px; padding:6px 10px;" onclick="wlLoadGroups()">새로고침</button>
+                <div id="smPane-interest" style="display:none; flex-direction:column; gap:0; padding:0;">
+
+                    <!-- 상단 툴바 -->
+                    <div class="wl-toolbar">
+                        <input type="text" id="wlSearchInput" placeholder="종목명/코드 검색"
+                            class="wl-search-box" oninput="wlSearch(this.value)">
+                        <button class="btn btn-sm btn-secondary" onclick="wlAddGroup()">+ 카드 추가</button>
+                        <button class="btn btn-sm btn-secondary" onclick="wlExportCsv()">📥 CSV</button>
+                        <button class="btn btn-sm btn-secondary" onclick="wlLoadGroups()">🔄</button>
                     </div>
-                    <div id="wlSearchResults" style="display:none; flex-direction:column; gap:6px;"></div>
-                    <div id="wlGroupList" style="display:flex; flex-direction:column; gap:10px;"></div>
+
+                    <!-- 검색 결과 (검색 시 오버레이) -->
+                    <div id="wlSearchResults" style="display:none;" class="wl-search-overlay"></div>
+
+                    <!-- 카드 탭 바 -->
+                    <div class="wl-card-tabbar" id="wlCardTabbar"></div>
+
+                    <!-- 카드 분할 뷰 -->
+                    <div class="wl-cards-viewport" id="wlCardsViewport"></div>
                 </div>
             </div>
         </div>

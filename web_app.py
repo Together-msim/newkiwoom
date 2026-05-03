@@ -3042,6 +3042,67 @@ def delete_watchlist_item(item_id):
     return jsonify({'success': ok})
 
 
+@app.route('/api/watchlist-items/<int:item_id>/move', methods=['POST'])
+@auth.login_required
+def move_watchlist_item(item_id):
+    data = request.json or {}
+    target_group_id = data.get('target_group_id')
+    if not target_group_id:
+        return jsonify({'success': False, 'error': 'target_group_id 필요'}), 400
+    ns = _get_news_storage()
+    ok = ns.move_watchlist_item(item_id, int(target_group_id), data.get('target_order', 9999))
+    return jsonify({'success': ok})
+
+
+@app.route('/api/watchlist-groups/<int:group_id>/reorder', methods=['POST'])
+@auth.login_required
+def reorder_watchlist_items(group_id):
+    data = request.json or {}
+    ordered_ids = data.get('ordered_ids', [])
+    ns = _get_news_storage()
+    ok = ns.reorder_watchlist_items(group_id, ordered_ids)
+    return jsonify({'success': ok})
+
+
+@app.route('/api/watchlist-groups/reorder-groups', methods=['POST'])
+@auth.login_required
+def reorder_watchlist_groups():
+    data = request.json or {}
+    ordered_ids = data.get('ordered_ids', [])
+    ns = _get_news_storage()
+    with ns._conn() as conn:
+        for i, gid in enumerate(ordered_ids):
+            conn.execute("UPDATE watchlist_groups SET display_order=? WHERE id=?", (i, gid))
+    return jsonify({'success': True})
+
+
+@app.route('/api/watchlist-groups/export-csv', methods=['GET'])
+@auth.login_required
+def export_watchlist_notes_csv():
+    """당일(또는 since 날짜 이후) 노트 수정 종목을 CSV로 반환."""
+    since = request.args.get('date', date.today().isoformat())
+    ns = _get_news_storage()
+    items = ns.get_note_updated_items(since)
+    import io, csv as _csv
+    buf = io.StringIO()
+    w = _csv.writer(buf)
+    w.writerow(['종목코드', '종목명', '그룹', '노트요약', '수정시각'])
+    for it in items:
+        summary = (it.get('summary_2line') or '').replace('\n', ' ')
+        note_raw = (it.get('note') or '')
+        note_snippet = note_raw.replace('\n', ' ')[:200]
+        w.writerow([it.get('stock_code',''), it.get('stock_name',''),
+                    it.get('group_name',''), summary or note_snippet,
+                    it.get('note_updated_at','')])
+    csv_bytes = buf.getvalue().encode('utf-8-sig')
+    from flask import Response
+    return Response(
+        csv_bytes,
+        mimetype='text/csv',
+        headers={'Content-Disposition': f'attachment; filename="watchlist_notes_{since}.csv"'}
+    )
+
+
 @app.route('/api/watchlist-groups/search', methods=['GET'])
 @auth.login_required
 def search_watchlist_items():
