@@ -3650,17 +3650,23 @@ def seeking_signal_reentry_check():
                 total_bars += len(minute_bars)
 
                 # 봉 단위 롤링 시그널 감지 (최소 3봉 필요)
+                # 같은 날 같은 타입은 첫 감지 1개만 (C2는 지지가 다를 수 있어 예외)
                 for idx in range(3, len(minute_bars) + 1):
                     window = minute_bars[:idx]
                     raw_sigs = scan_style3_signals(window, buy_price, exit_price, support_price)
                     for s in raw_sigs:
                         sig_time = s.get('signal_time', '')  # HH:MM
-                        key = (s['type'], day_date, sig_time)
+                        sig_type = s['type']
+                        # C2는 지지가 기준 dedup, 나머지는 날짜+타입 기준 (첫 감지만)
+                        if sig_type == 'C2':
+                            key = (sig_type, day_date, int(s.get('support_price', 0) or 0) // 100)
+                        else:
+                            key = (sig_type, day_date)
                         if key in seen_key:
                             continue
                         seen_key.add(key)
                         all_signals.append({
-                            'type': s['type'],
+                            'type': sig_type,
                             'date': day_date,
                             'signal_time': sig_time,
                             'desc': s['reason'],
