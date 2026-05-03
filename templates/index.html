@@ -16,10 +16,10 @@
                 <button class="nav-item" data-page="mode1">📈 Mode1</button>
                 <button class="nav-item active" data-page="mode2">📉 Mode2</button>
                 <button class="nav-item" data-page="tradelog">💰 매매일지</button>
-                <button class="nav-item" data-page="seeking-signal">📡 Seeking Signal</button>
+                <button class="nav-item" data-page="seeking-signal">🍖 발라먹기</button>
                 <button class="nav-item" data-page="siwhang">📊 시황체크</button>
                 <button class="nav-item" data-page="live">⚡ 실전</button>
-                <button class="nav-item" data-page="backtest">📋 백테스트</button>
+                <button class="nav-item" data-page="backtest">🤖 AI슬롯분석</button>
                 <button class="nav-item" data-page="test">🧪 Test</button>
                 <button class="nav-item" data-page="stock-master">📁 종목마스터</button>
             </div>
@@ -521,10 +521,10 @@
                 </div>
             </div>
 
-            <!-- Seeking Signal 페이지 -->
+            <!-- 발라먹기 페이지 -->
             <div id="seeking-signalPage" class="page">
                 <div class="page-header">
-                    <h2>📡 Seeking Signal - 종목 분석 테스트</h2>
+                    <h2>🍖 발라먹기 (Style 3)</h2>
                 </div>
 
                 <!-- 분석 설정 -->
@@ -678,78 +678,117 @@
                     </div>
                 </div>
 
-                <!-- 재진입 체크 (Style 3) -->
+                <!-- Style 3 카드 — 등록 / 백테스트 탭 분리 -->
                 <div class="card" id="ssReentryCard">
-                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-                        <h3 style="margin:0;">🔄 재진입 체크 (Style 3)</h3>
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+                        <h3 style="margin:0;">🍖 Style 3 발라먹기</h3>
                         <div style="display:flex;gap:6px;">
-                            <button class="btn btn-secondary" style="font-size:12px;" onclick="switchReentryTab('single')" id="reTabSingle">단건 입력</button>
-                            <button class="btn btn-secondary" style="font-size:12px;" onclick="switchReentryTab('bulk')" id="reTabBulk">벌크 등록</button>
+                            <button class="btn btn-primary" style="font-size:12px;" onclick="switchReentryMode('register')" id="reModeRegister">📡 실전 등록</button>
+                            <button class="btn btn-secondary" style="font-size:12px;" onclick="switchReentryMode('backtest')" id="reModeBacktest">📊 백테스트</button>
                         </div>
                     </div>
 
-                    <!-- 단건 입력 탭 -->
-                    <div id="reTabSingleContent">
-                        <p style="font-size: 13px; color: #868e96; margin-bottom: 16px;">익절 이력이 있는 종목의 거감음봉→재상승 패턴 분석</p>
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+                    <!-- ── 실전 등록 모드 ── -->
+                    <div id="reModeRegisterContent">
+                        <p style="font-size:13px;color:#868e96;margin-bottom:14px;">익절 직후 입력 → 실시간 재진입 알림 감시 시작</p>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
                             <div>
-                                <label style="font-size: 13px; color: #868e96;">종목코드</label>
+                                <label style="font-size:13px;color:#868e96;">종목코드</label>
                                 <input type="text" id="reStockCode" placeholder="054920">
                             </div>
                             <div>
-                                <label style="font-size: 13px; color: #868e96;">종목명</label>
+                                <label style="font-size:13px;color:#868e96;">종목명</label>
                                 <input type="text" id="reStockName" placeholder="한컴위드">
                             </div>
                             <div>
-                                <label style="font-size: 13px; color: #868e96;">내 매수가</label>
+                                <label style="font-size:13px;color:#868e96;">내 매수가</label>
                                 <input type="number" id="reBuyPrice" placeholder="6190">
                             </div>
                             <div>
-                                <label style="font-size: 13px; color: #868e96;">매수일 (YYYY-MM-DD)</label>
+                                <label style="font-size:13px;color:#868e96;">매수일</label>
                                 <input type="text" id="reBuyDate" placeholder="2026-04-17">
                             </div>
                             <div>
-                                <label style="font-size: 13px; color: #868e96;">내 익절가</label>
+                                <label style="font-size:13px;color:#868e96;">내 익절가</label>
                                 <input type="number" id="reExitPrice" placeholder="6760">
                             </div>
                             <div>
-                                <label style="font-size: 13px; color: #868e96;">익절일 (YYYY-MM-DD)</label>
+                                <label style="font-size:13px;color:#868e96;">익절일</label>
                                 <input type="text" id="reExitDate" placeholder="2026-04-20">
                             </div>
                         </div>
-                        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-                            <button class="btn btn-primary" onclick="checkReentry()">🔍 재진입 시그널 체크</button>
-                            <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#868e96;cursor:pointer;">
-                                <input type="checkbox" id="reBacktestMode"> 히스토리컬 백테스트
-                            </label>
-                            <button class="btn btn-secondary" onclick="saveTradeWatchlist()">💾 감시 등록</button>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                            <button class="btn btn-primary" onclick="saveTradeWatchlist()">💾 감시 등록</button>
+                            <button class="btn btn-secondary" onclick="checkReentryLive()">🔍 현재 시그널 확인</button>
                         </div>
+                        <div id="reentryResultLive" style="margin-top:14px;"></div>
                     </div>
 
-                    <!-- 벌크 등록 탭 -->
-                    <div id="reTabBulkContent" style="display:none;">
-                        <p style="font-size: 13px; color: #868e96; margin-bottom: 8px;">
-                            형식: <code style="background:#f1f3f5;padding:2px 6px;border-radius:4px;">종목코드,종목명,매수날짜,매수가,매도날짜,매도가</code> (한 줄에 하나)
-                        </p>
-                        <p style="font-size: 12px; color: #adb5bd; margin-bottom: 12px;">예: 054920,한컴위드,2026-04-17,6190,2026-04-20,6760</p>
-                        <textarea id="reBulkInput" style="width:100%;height:120px;padding:10px;border:1px solid #dee2e6;border-radius:6px;font-size:13px;font-family:monospace;resize:vertical;" placeholder="054920,한컴위드,2026-04-17,6190,2026-04-20,6760&#10;005930,삼성전자,2026-05-01,75000,2026-05-02,78000"></textarea>
-                        <div style="display:flex;gap:8px;margin-top:8px;align-items:center;">
-                            <button class="btn btn-primary" onclick="parseBulkReentry()">📋 파싱 미리보기</button>
-                        </div>
-                        <div id="reBulkPreview" style="margin-top:12px;"></div>
-                    </div>
+                    <!-- ── 백테스트 모드 ── -->
+                    <div id="reModeBacktestContent" style="display:none;">
+                        <p style="font-size:13px;color:#868e96;margin-bottom:8px;">익절 이력 입력 → 그 이후 언제 재진입 타점이 나왔는지 확인</p>
 
-                    <div id="reentryResult" style="margin-top: 16px;"></div>
+                        <!-- 단건 / 벌크 서브탭 -->
+                        <div style="display:flex;gap:6px;margin-bottom:14px;">
+                            <button class="btn btn-primary" style="font-size:12px;" onclick="switchBtSubTab('single')" id="btSubSingle">단건</button>
+                            <button class="btn btn-secondary" style="font-size:12px;" onclick="switchBtSubTab('bulk')" id="btSubBulk">벌크</button>
+                        </div>
+
+                        <!-- 단건 -->
+                        <div id="btSubSingleContent">
+                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+                                <div>
+                                    <label style="font-size:13px;color:#868e96;">종목코드</label>
+                                    <input type="text" id="btStockCode" placeholder="054920">
+                                </div>
+                                <div>
+                                    <label style="font-size:13px;color:#868e96;">종목명</label>
+                                    <input type="text" id="btStockName" placeholder="한컴위드">
+                                </div>
+                                <div>
+                                    <label style="font-size:13px;color:#868e96;">매수가</label>
+                                    <input type="number" id="btBuyPrice" placeholder="6190">
+                                </div>
+                                <div>
+                                    <label style="font-size:13px;color:#868e96;">매수일</label>
+                                    <input type="text" id="btBuyDate" placeholder="2026-04-17">
+                                </div>
+                                <div>
+                                    <label style="font-size:13px;color:#868e96;">익절가</label>
+                                    <input type="number" id="btExitPrice" placeholder="6760">
+                                </div>
+                                <div>
+                                    <label style="font-size:13px;color:#868e96;">익절일</label>
+                                    <input type="text" id="btExitDate" placeholder="2026-04-20">
+                                </div>
+                            </div>
+                            <button class="btn btn-primary" onclick="checkReentryBacktest()">📊 백테스트 실행</button>
+                            <div id="reentryResult" style="margin-top:14px;"></div>
+                        </div>
+
+                        <!-- 벌크 -->
+                        <div id="btSubBulkContent" style="display:none;">
+                            <p style="font-size:13px;color:#868e96;margin-bottom:6px;">
+                                형식: <code style="background:#2a2a3e;padding:2px 6px;border-radius:4px;">종목코드,종목명,매수날짜,매수가,매도날짜,매도가</code>
+                            </p>
+                            <p style="font-size:12px;color:#adb5bd;margin-bottom:10px;">예: 054920,한컴위드,2026-04-17,6190,2026-04-20,6760</p>
+                            <textarea id="reBulkInput" style="width:100%;height:120px;padding:10px;border:1px solid #dee2e6;border-radius:6px;font-size:13px;font-family:monospace;resize:vertical;" placeholder="054920,한컴위드,2026-04-17,6190,2026-04-20,6760"></textarea>
+                            <div style="display:flex;gap:8px;margin-top:8px;">
+                                <button class="btn btn-primary" onclick="parseBulkReentry()">📋 파싱 미리보기</button>
+                            </div>
+                            <div id="reBulkPreview" style="margin-top:12px;"></div>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- 감시 목록 -->
                 <div class="card">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                        <h3 style="margin: 0;">👁 재진입 감시 목록</h3>
-                        <button class="btn btn-secondary" style="font-size: 13px;" onclick="loadTradeWatchlist()">🔄 새로고침</button>
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                        <h3 style="margin:0;">👁 재진입 감시 목록</h3>
+                        <button class="btn btn-secondary" style="font-size:13px;" onclick="loadTradeWatchlist()">🔄 새로고침</button>
                     </div>
                     <div id="tradeWatchlistContainer">
-                        <p style="color: #868e96; font-size: 14px;">로딩 중...</p>
+                        <p style="color:#868e96;font-size:14px;">로딩 중...</p>
                     </div>
                 </div>
             </div>
@@ -1175,10 +1214,10 @@
                 </div>
             </div>
 
-            <!-- 백테스트 페이지 -->
+            <!-- AI슬롯분석 페이지 -->
             <div id="backtestPage" class="page">
                 <div class="page-header">
-                    <h2>📋 백테스트</h2>
+                    <h2>🤖 AI슬롯분석</h2>
                     <div class="page-controls">
                         <select id="backtestSessionSelect" onchange="loadBacktestSession()">
                             <option value="">-- 세션 선택 --</option>
@@ -1844,16 +1883,16 @@
             <span class="tab-label">Mode1</span>
         </button>
         <button class="tab-item" data-page="seeking-signal">
-            <span class="tab-icon">📡</span>
-            <span class="tab-label">시그널</span>
+            <span class="tab-icon">🍖</span>
+            <span class="tab-label">발라먹기</span>
         </button>
         <button class="tab-item" data-page="tradelog">
             <span class="tab-icon">💰</span>
             <span class="tab-label">매매일지</span>
         </button>
         <button class="tab-item" data-page="backtest">
-            <span class="tab-icon">📋</span>
-            <span class="tab-label">백테스트</span>
+            <span class="tab-icon">🤖</span>
+            <span class="tab-label">AI슬롯</span>
         </button>
         <button class="tab-item" data-page="test">
             <span class="tab-icon">🧪</span>
