@@ -8001,7 +8001,7 @@ async function loadLive() {
         _liveCarouselIdx = 0;
         Object.keys(_liveChartLoaded).forEach(k => delete _liveChartLoaded[k]);
         _renderLive();
-        loadReentrySignals();
+        liveStyle3SwitchTab('signals');
     } catch (e) {
         showToast('로드 실패', 'error');
         console.error(e);
@@ -8347,17 +8347,18 @@ function renderSignalCard(s, compact) {
     const typeColor = { A: '#3498db', B: '#f39c12', C1: '#2ecc71', C2: '#27ae60', C3: '#1a8a4a', OVERHEAT: '#e74c3c' };
     const typeLabel = { A: 'Type A', B: 'Type B', C1: 'Type C1', C2: 'Type C2', C3: 'Type C3', OVERHEAT: '🚫 과열' };
     if (s.type === 'OVERHEAT') {
-        return `<div style="padding:6px 10px;background:#2d1a1a;border-left:3px solid #e74c3c;margin-bottom:6px;border-radius:4px;font-size:12px;color:#e74c3c;">🚫 ${s.date} — ${s.desc}</div>`;
+        return `<div style="padding:6px 10px;background:#2d1a1a;border-left:3px solid #e74c3c;margin-bottom:6px;border-radius:4px;font-size:12px;color:#e74c3c;">🚫 ${s.date||''} — ${s.desc}</div>`;
     }
     const overheatBadge = s.overheat_warning ? `<span style="background:#c0392b;color:#fff;font-size:11px;padding:1px 6px;border-radius:3px;font-weight:600;">⚠️ 단기과열</span>` : '';
     const entryLine = s.entry_price ? `<div style="font-size:13px;">추천 진입가: <strong>${s.entry_price.toLocaleString()}원</strong></div>` : '';
     const noteLine = s.note ? `<div style="font-size:12px;color:#868e96;margin-top:2px;">${s.note}</div>` : '';
     const overheatLine = s.overheat_msg ? `<div style="font-size:12px;color:#e74c3c;margin-top:4px;">${s.overheat_msg}</div>` : '';
+    const timeLabel = s.signal_time ? `<span style="font-size:12px;color:#adb5bd;">⏱ ${s.signal_time}</span>` : '';
     return `<div class="reentry-signal-card" style="margin-bottom:8px;">
         <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;flex-wrap:wrap;">
             <span class="reentry-type-badge" style="background:${typeColor[s.type]||'#95a5a6'}">${typeLabel[s.type]||s.type}</span>
             <span class="reentry-confidence">${s.confidence||'M'}</span>
-            ${compact ? `<span style="font-size:12px;color:#adb5bd;">${s.date||''}</span>` : ''}
+            ${compact ? `<span style="font-size:12px;color:#adb5bd;">${s.date||''}</span>` : timeLabel}
             ${overheatBadge}
         </div>
         <div style="font-size:13px;">${s.desc}</div>
@@ -8737,6 +8738,131 @@ async function liveRegisterMode2FromReentry(signal) {
     } catch (e) {
         showToast('오류: ' + e.message, 'error');
     }
+}
+
+// ─── 실전페이지 Style3 발라먹기 섹션 ───────────────────────────────────
+
+function liveStyle3SwitchTab(tab) {
+    ['register', 'watchlist', 'signals'].forEach(t => {
+        const content = document.getElementById('liveS3' + t.charAt(0).toUpperCase() + t.slice(1));
+        const btn = document.getElementById('liveS3Tab' + t.charAt(0).toUpperCase() + t.slice(1));
+        if (content) content.style.display = t === tab ? '' : 'none';
+        if (btn) {
+            btn.classList.toggle('btn-primary', t === tab);
+            btn.classList.toggle('btn-secondary', t !== tab);
+        }
+    });
+    if (tab === 'watchlist') _liveLoadS3Watchlist();
+    if (tab === 'signals') _liveLoadS3Signals();
+}
+
+async function _liveLoadS3Watchlist() {
+    const container = document.getElementById('liveS3WatchlistContainer');
+    if (!container) return;
+    try {
+        const res = await fetch('/api/trade-watchlist', { credentials: 'same-origin' });
+        const r = await res.json();
+        const items = r.data || [];
+        if (!items.length) {
+            container.innerHTML = '<p style="color:#868e96;font-size:14px;text-align:center;padding:16px;">등록된 감시 종목 없음</p>';
+            return;
+        }
+        const today = new Date();
+        container.innerHTML = `<table class="reentry-watchlist-table">
+            <thead><tr><th>종목</th><th>매수가</th><th>익절가</th><th>익절일</th><th>등록</th><th>상태</th><th></th></tr></thead>
+            <tbody>${items.map(w => {
+                const createdAt = w.created_at ? new Date(w.created_at) : null;
+                const daysSince = createdAt ? Math.floor((today - createdAt) / 86400000) + 1 : '-';
+                const dayLabel = typeof daysSince === 'number' ? `등록 ${daysSince}일차` : '-';
+                return `<tr>
+                    <td><strong>${w.stock_name}</strong><br><small style="color:#868e96">${w.stock_code}</small></td>
+                    <td>${(w.buy_price||0).toLocaleString()}원</td>
+                    <td>${(w.exit_price||0).toLocaleString()}원</td>
+                    <td>${w.exit_date||'-'}</td>
+                    <td style="font-size:12px;color:#868e96;">${dayLabel}</td>
+                    <td><span class="reentry-status-${w.status}">${w.status}</span></td>
+                    <td><button class="btn btn-sm btn-secondary" onclick="deleteTradeWatchlist(${w.id})">삭제</button></td>
+                </tr>`;
+            }).join('')}</tbody>
+        </table>`;
+    } catch (e) {
+        container.innerHTML = '<p style="color:#e74c3c">로드 실패</p>';
+    }
+}
+
+async function _liveLoadS3Signals() {
+    const container = document.getElementById('liveReentryList');
+    if (!container) return;
+    const today = new Date().toISOString().slice(0, 10);
+    try {
+        const res = await fetch(`/api/reentry/signals?date=${today}`, { credentials: 'same-origin' });
+        const r = await res.json();
+        const signals = r.data || [];
+        if (!signals.length) {
+            container.innerHTML = '<p style="color:#868e96;font-size:13px;text-align:center;padding:12px;">오늘 재진입 시그널 없음</p>';
+            return;
+        }
+        const typeColor = { A: '#3498db', B: '#f39c12', C1: '#2ecc71', C2: '#27ae60', C3: '#1a8a4a' };
+        container.innerHTML = signals.map(s => `
+            <div class="reentry-signal-card" style="margin-bottom:10px;">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap;">
+                    <strong>${s.stock_name}</strong>
+                    <span class="reentry-type-badge" style="background:${typeColor[s.signal_type]||'#95a5a6'}">Type ${s.signal_type}</span>
+                    <span class="reentry-confidence">${s.confidence||'M'}</span>
+                    ${s.signal_time ? `<span style="font-size:12px;color:#adb5bd;">⏱ ${s.signal_time}</span>` : ''}
+                </div>
+                <div style="font-size:13px;color:#495057;">${s.reason||''}</div>
+                <div style="font-size:13px;margin-top:4px;">
+                    진입가: <strong>${(s.entry_price||0).toLocaleString()}원</strong>
+                    &nbsp;|&nbsp; 매수가: ${(s.buy_price||0).toLocaleString()}원
+                    &nbsp;|&nbsp; 익절가: ${(s.exit_price||0).toLocaleString()}원
+                </div>
+            </div>
+        `).join('');
+    } catch (e) {
+        container.innerHTML = '<p style="color:#e74c3c">로드 실패</p>';
+    }
+}
+
+async function liveRegisterStyle3() {
+    const code = document.getElementById('liveReCode').value.trim();
+    const name = document.getElementById('liveReName').value.trim();
+    const buyPrice = parseFloat(document.getElementById('liveReBuyPrice').value);
+    const buyDate = document.getElementById('liveReBuyDate').value.trim();
+    const exitPrice = parseFloat(document.getElementById('liveReExitPrice').value);
+    const exitDate = document.getElementById('liveReExitDate').value.trim();
+    if (!code || !name || !buyPrice || !exitPrice) {
+        showToast('종목코드, 종목명, 매수가, 익절가 필수', 'error'); return;
+    }
+    const ok = await _registerStyle3Item({ code, name, buyPrice, buyDate, exitPrice, exitDate });
+    if (ok) liveStyle3SwitchTab('watchlist');
+}
+
+async function liveCheckStyle3Now() {
+    const code = document.getElementById('liveReCode').value.trim();
+    const buyPrice = parseFloat(document.getElementById('liveReBuyPrice').value);
+    const exitPrice = parseFloat(document.getElementById('liveReExitPrice').value);
+    const exitDate = document.getElementById('liveReExitDate').value.trim();
+    const resultEl = document.getElementById('liveS3CheckResult');
+    if (!code || !buyPrice || !exitPrice) {
+        showToast('종목코드, 매수가, 익절가 필수', 'error'); return;
+    }
+    resultEl.innerHTML = '<p style="color:#868e96;font-size:13px;">3분봉 조회 중...</p>';
+    try {
+        const res = await fetch('/api/seeking-signal/reentry-check', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ stock_code: code, buy_price: buyPrice, exit_price: exitPrice, exit_date: exitDate, backtest_mode: false }),
+        });
+        const r = await res.json();
+        if (!r.success) { resultEl.innerHTML = `<p style="color:#e74c3c">${r.error}</p>`; return; }
+        const signals = r.data.signals || [];
+        const src = r.data.chart_source ? `<div style="font-size:11px;color:#868e96;margin-bottom:6px;">차트 소스: ${r.data.chart_source}</div>` : '';
+        if (!signals.length) {
+            resultEl.innerHTML = src + '<p style="color:#868e96;padding:6px 0;font-size:13px;">현재 시그널 없음 — 계속 모니터링</p>'; return;
+        }
+        resultEl.innerHTML = src + signals.map(s => renderSignalCard(s, false)).join('');
+    } catch (e) { resultEl.innerHTML = `<p style="color:#e74c3c">오류: ${e.message}</p>`; }
 }
 
 // 캐로셀 터치 스와이프
