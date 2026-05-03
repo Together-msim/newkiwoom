@@ -2408,7 +2408,7 @@ tbody tr.inactive {
     padding: 12px 14px;
     min-width: 280px;
     max-width: 360px;
-    font-size: 12px;
+    font-size: 13px;
     color: #212529;
     pointer-events: auto;
 }
@@ -2445,8 +2445,8 @@ tbody tr.inactive {
     background: #e7f5ff;
     color: #1971c2;
     border-radius: 4px;
-    padding: 2px 6px;
-    font-size: 11px;
+    padding: 3px 8px;
+    font-size: 13px;
     font-weight: 600;
 }
 .sm-finance-grid {
@@ -2470,7 +2470,7 @@ tbody tr.inactive {
 .sm-fi-up { color: #e03131; font-size: 10px; }
 .sm-fi-down { color: #2f9e44; font-size: 10px; }
 .sm-hist-title {
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 700;
     color: var(--text-secondary);
     margin-bottom: 6px;
@@ -2732,7 +2732,7 @@ tbody tr.inactive {
 .sm-note-cell { cursor:pointer; max-width:160px; }
 .sm-note-cell:hover { background:#e7f5ff; border-radius:4px; }
 .sm-note-preview-inline { font-size:11px; color:#495057; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:block; }
-.sm-note-tooltip-body { font-size:12px; color:#343a40; white-space:pre-wrap; max-height:200px; overflow-y:auto; background:#f8f9fa; border-radius:4px; padding:6px 8px; margin-bottom:6px; line-height:1.5; }
+.sm-note-tooltip-body { font-size:13px; color:#343a40; white-space:pre-wrap; max-height:200px; overflow-y:auto; background:#f8f9fa; border-radius:4px; padding:6px 8px; margin-bottom:6px; line-height:1.6; }
 
 /* ─── 노트 에디터 (contenteditable) ─────────────────────── */
 .note-editor {
