@@ -1025,7 +1025,7 @@ def get_mode2_watchers():
         # stock_master note/summary 병합
         codes = [w['code'] for w in watchers if w.get('code')]
         if codes:
-            sm_map = news_storage.get_stock_master_notes(codes)
+            sm_map = _get_news_storage().get_stock_master_notes(codes)
             for w in watchers:
                 sm = sm_map.get(w.get('code'), {})
                 w['sm_note'] = sm.get('note', '')
