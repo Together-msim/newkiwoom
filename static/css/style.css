@@ -2401,15 +2401,15 @@ tbody tr.inactive {
 .sm-tooltip {
     position: fixed;
     z-index: 9999;
-    background: var(--bg-primary);
-    border: 1px solid var(--border-color);
+    background: #ffffff;
+    border: 1px solid #dee2e6;
     border-radius: 10px;
-    box-shadow: 0 6px 24px rgba(0,0,0,0.18);
+    box-shadow: 0 6px 24px rgba(0,0,0,0.22);
     padding: 12px 14px;
     min-width: 280px;
     max-width: 360px;
     font-size: 12px;
-    color: var(--text-primary);
+    color: #212529;
     pointer-events: auto;
 }
 .sm-tooltip-loading {
