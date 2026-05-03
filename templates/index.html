@@ -21,7 +21,7 @@
                 <button class="nav-item" data-page="live">⚡ 실전</button>
                 <button class="nav-item" data-page="backtest">📋 백테스트</button>
                 <button class="nav-item" data-page="test">🧪 Test</button>
-                <button class="nav-item" onclick="document.getElementById('stockMasterModal').style.display='flex'">📁 종목마스터</button>
+                <button class="nav-item" data-page="stock-master">📁 종목마스터</button>
             </div>
         </nav>
 
@@ -1553,6 +1553,72 @@
                     </div>
                 </div>
             </div>
+
+            <!-- 종목마스터 페이지 -->
+            <div id="stock-masterPage" class="page">
+                <div class="page-header" style="flex-wrap:wrap; gap:10px;">
+                    <h2>📁 종목마스터</h2>
+                    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                        <!-- 탭 -->
+                        <div style="display:flex; border:1px solid var(--border-color); border-radius:6px; overflow:hidden;">
+                            <button class="sm-tab-btn active" id="smTab-master" onclick="smSwitchTab('master')" style="border-radius:0;">종목마스터</button>
+                            <button class="sm-tab-btn" id="smTab-interest" onclick="smSwitchTab('interest')" style="border-radius:0;">관심종목</button>
+                        </div>
+                        <button class="btn btn-secondary" style="font-size:13px;" onclick="smSyncWatchlist()">🔄 감시종목 동기화</button>
+                    </div>
+                </div>
+
+                <!-- 종목마스터 패널 -->
+                <div id="smPane-master" style="display:flex; flex-direction:column; gap:14px; padding:16px 0;">
+                    <div style="display:flex; gap:8px;">
+                        <input type="text" id="smSearchInput" placeholder="종목명 또는 코드 검색 (예: 삼성, 005930)"
+                            style="flex:1; padding:8px 12px; border:1px solid #dee2e6; border-radius:6px; font-size:14px;"
+                            oninput="smSearch(this.value)"
+                            onkeydown="if(event.key==='Enter') smSearch(document.getElementById('smSearchInput').value)">
+                    </div>
+                    <div id="smSearchResults" style="display:flex; flex-direction:column; gap:8px;"></div>
+                    <div id="smEditPanel" style="display:none; border-top:1px solid #dee2e6; padding-top:14px;">
+                        <div style="font-size:13px; font-weight:600; margin-bottom:10px;" id="smEditTitle"></div>
+                        <div style="display:grid; gap:10px;">
+                            <div>
+                                <label style="font-size:12px; color:#868e96; display:block; margin-bottom:4px;">테마 (쉼표 구분)</label>
+                                <input type="text" id="smEditThemes" placeholder="예: 반도체, AI, 배터리"
+                                    style="width:100%; padding:7px 10px; border:1px solid #dee2e6; border-radius:5px; font-size:13px; box-sizing:border-box;">
+                            </div>
+                            <div>
+                                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                                    <label style="font-size:12px; color:#868e96;">노트 (날짜 태그 포함 자유 입력)</label>
+                                    <div style="display:flex; gap:5px;">
+                                        <button class="note-fmt-btn" title="굵게 (Ctrl+B)" onclick="noteExecCmd('bold')"><b>B</b></button>
+                                        <button class="note-fmt-btn note-fmt-hl" title="형광펜 (Ctrl+H)" onclick="noteExecCmd('hilite')">H</button>
+                                    </div>
+                                </div>
+                                <div id="smEditNote" contenteditable="true" class="note-editor" style="min-height:150px;"></div>
+                            </div>
+                            <div style="display:flex; gap:8px;">
+                                <button class="btn btn-primary" style="font-size:13px;" onclick="smSaveEdit()">💾 저장</button>
+                                <button class="btn btn-secondary" style="font-size:13px;" onclick="document.getElementById('smEditPanel').style.display='none'">취소</button>
+                                <span id="smSaveStatus" style="font-size:12px; color:#868e96; align-self:center;"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 관심종목 패널 -->
+                <div id="smPane-interest" style="display:none; flex-direction:column; gap:12px; padding:16px 0;">
+                    <div style="display:flex; gap:8px; align-items:center;">
+                        <input type="text" id="wlSearchInput" placeholder="종목명/코드/메모 검색"
+                            style="flex:1; padding:8px 12px; border:1px solid #dee2e6; border-radius:6px; font-size:14px;"
+                            oninput="wlSearch(this.value)">
+                        <label style="font-size:13px; display:flex; align-items:center; gap:4px; cursor:pointer; white-space:nowrap;">
+                            <input type="checkbox" id="wlPinnedOnly" onchange="wlLoadGroups()"> 활성만
+                        </label>
+                        <button class="btn btn-secondary" style="font-size:12px; padding:6px 10px;" onclick="wlLoadGroups()">새로고침</button>
+                    </div>
+                    <div id="wlSearchResults" style="display:none; flex-direction:column; gap:6px;"></div>
+                    <div id="wlGroupList" style="display:flex; flex-direction:column; gap:10px;"></div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -1745,50 +1811,6 @@
                          contenteditable="true"
                          class="note-editor"
                          data-placeholder="노트 없음. 위에서 항목 추가하거나 직접 편집하세요."></div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- 종목 마스터 관리 모달 -->
-    <div id="stockMasterModal" class="note-modal">
-        <div class="note-modal-content" style="max-width: 760px; max-height: 90vh; display: flex; flex-direction: column;">
-            <div class="note-modal-header">
-                <h3>종목 마스터 관리</h3>
-                <span class="note-modal-close" onclick="document.getElementById('stockMasterModal').style.display='none'">&times;</span>
-            </div>
-            <div class="note-modal-body" style="flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:14px;">
-                <!-- 검색 -->
-                <div style="display:flex; gap:8px;">
-                    <input type="text" id="smSearchInput" placeholder="종목명 또는 코드 검색 (예: 삼성, 005930)" style="flex:1; padding:8px 12px; border:1px solid #dee2e6; border-radius:6px; font-size:14px;" oninput="smSearch(this.value)" onkeydown="if(event.key==='Enter') smSearch(document.getElementById('smSearchInput').value)">
-                    <button class="btn btn-secondary" style="font-size:13px;" onclick="smSyncWatchlist()">🔄 감시종목 동기화</button>
-                </div>
-                <!-- 결과 목록 -->
-                <div id="smSearchResults" style="display:flex; flex-direction:column; gap:8px;"></div>
-                <!-- 편집 패널 -->
-                <div id="smEditPanel" style="display:none; border-top:1px solid #dee2e6; padding-top:14px;">
-                    <div style="font-size:13px; font-weight:600; margin-bottom:10px;" id="smEditTitle"></div>
-                    <div style="display:grid; gap:10px;">
-                        <div>
-                            <label style="font-size:12px; color:#868e96; display:block; margin-bottom:4px;">테마 (쉼표 구분)</label>
-                            <input type="text" id="smEditThemes" placeholder="예: 반도체, AI, 배터리" style="width:100%; padding:7px 10px; border:1px solid #dee2e6; border-radius:5px; font-size:13px; box-sizing:border-box;">
-                        </div>
-                        <div>
-                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                                <label style="font-size:12px; color:#868e96;">노트 (날짜 태그 포함 자유 입력)</label>
-                                <div style="display:flex; gap:5px;">
-                                    <button class="note-fmt-btn" title="굵게 (Ctrl+B)" onclick="noteExecCmd('bold')"><b>B</b></button>
-                                    <button class="note-fmt-btn note-fmt-hl" title="형광펜 (Ctrl+H)" onclick="noteExecCmd('hilite')">H</button>
-                                </div>
-                            </div>
-                            <div id="smEditNote" contenteditable="true" class="note-editor" style="min-height:150px;"></div>
-                        </div>
-                        <div style="display:flex; gap:8px;">
-                            <button class="btn btn-primary" style="font-size:13px;" onclick="smSaveEdit()">💾 저장</button>
-                            <button class="btn btn-secondary" style="font-size:13px;" onclick="document.getElementById('smEditPanel').style.display='none'">취소</button>
-                            <span id="smSaveStatus" style="font-size:12px; color:#868e96; align-self:center;"></span>
-                        </div>
-                    </div>
                 </div>
             </div>
         </div>

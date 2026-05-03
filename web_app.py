@@ -2938,6 +2938,121 @@ def sync_watchlist_to_master():
     return jsonify({'success': True, 'synced': synced})
 
 
+# ─── 관심종목 그룹 (watchlist_groups) ─────────────────────────────────────────
+
+@app.route('/api/watchlist-groups', methods=['GET'])
+@auth.login_required
+def get_watchlist_groups():
+    ns = _get_news_storage()
+    pinned_only = request.args.get('pinned') == '1'
+    groups = ns.get_watchlist_groups(pinned_only=pinned_only)
+    return jsonify({'success': True, 'groups': groups})
+
+
+@app.route('/api/watchlist-groups', methods=['POST'])
+@auth.login_required
+def add_watchlist_group():
+    data = request.json or {}
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({'success': False, 'error': 'name 필요'}), 400
+    ns = _get_news_storage()
+    gid = ns.add_watchlist_group(
+        name=name,
+        file_origin=data.get('file_origin'),
+        pinned=data.get('pinned', True),
+        display_order=data.get('display_order', 0),
+    )
+    return jsonify({'success': True, 'id': gid})
+
+
+@app.route('/api/watchlist-groups/<int:group_id>', methods=['PUT'])
+@auth.login_required
+def update_watchlist_group(group_id):
+    data = request.json or {}
+    ns = _get_news_storage()
+    ok = ns.update_watchlist_group(group_id, **data)
+    return jsonify({'success': ok})
+
+
+@app.route('/api/watchlist-groups/<int:group_id>', methods=['DELETE'])
+@auth.login_required
+def delete_watchlist_group(group_id):
+    ns = _get_news_storage()
+    ok = ns.delete_watchlist_group(group_id)
+    return jsonify({'success': ok})
+
+
+@app.route('/api/watchlist-groups/<int:group_id>/items', methods=['GET'])
+@auth.login_required
+def get_watchlist_group_items(group_id):
+    ns = _get_news_storage()
+    items = ns.get_watchlist_items(group_id)
+    # Enrich with stock_master note/themes
+    codes = [it['stock_code'] for it in items if it.get('stock_code')]
+    master_map = {}
+    if codes:
+        with ns._conn() as conn:
+            placeholders = ','.join('?' * len(codes))
+            rows = conn.execute(
+                f"SELECT stock_code, stock_name, themes, note FROM stock_master WHERE stock_code IN ({placeholders})",
+                codes
+            ).fetchall()
+            for r in rows:
+                master_map[r['stock_code']] = dict(r)
+    for it in items:
+        if it.get('stock_code') and it['stock_code'] in master_map:
+            m = master_map[it['stock_code']]
+            it['master_themes'] = m.get('themes')
+            it['master_note_snippet'] = (m.get('note') or '')[:120]
+    return jsonify({'success': True, 'items': items})
+
+
+@app.route('/api/watchlist-groups/<int:group_id>/items', methods=['POST'])
+@auth.login_required
+def add_watchlist_item(group_id):
+    data = request.json or {}
+    ns = _get_news_storage()
+    iid = ns.add_watchlist_item(
+        group_id=group_id,
+        item_type=data.get('item_type', 'stock'),
+        stock_code=data.get('stock_code'),
+        stock_name=data.get('stock_name'),
+        subgroup_label=data.get('subgroup_label'),
+        memo=data.get('memo'),
+        display_order=data.get('display_order', 9999),
+    )
+    return jsonify({'success': True, 'id': iid})
+
+
+@app.route('/api/watchlist-items/<int:item_id>', methods=['PUT'])
+@auth.login_required
+def update_watchlist_item(item_id):
+    data = request.json or {}
+    ns = _get_news_storage()
+    ok = ns.update_watchlist_item(item_id, **data)
+    return jsonify({'success': ok})
+
+
+@app.route('/api/watchlist-items/<int:item_id>', methods=['DELETE'])
+@auth.login_required
+def delete_watchlist_item(item_id):
+    ns = _get_news_storage()
+    ok = ns.delete_watchlist_item(item_id)
+    return jsonify({'success': ok})
+
+
+@app.route('/api/watchlist-groups/search', methods=['GET'])
+@auth.login_required
+def search_watchlist_items():
+    q = (request.args.get('q') or '').strip()
+    if not q:
+        return jsonify({'success': False, 'error': 'q 필요'}), 400
+    ns = _get_news_storage()
+    results = ns.search_watchlist(q, limit=50)
+    return jsonify({'success': True, 'results': results})
+
+
 # ─── 格言(Trading Mottos) ──────────────────────────────────────────────────
 
 @app.route('/api/mottos', methods=['GET'])

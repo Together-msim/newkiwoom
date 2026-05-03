@@ -232,6 +232,30 @@ class NewsStorage:
 
                 CREATE INDEX IF NOT EXISTS idx_stock_notes_code ON stock_notes(stock_code);
                 CREATE INDEX IF NOT EXISTS idx_stock_notes_date ON stock_notes(note_date);
+
+                CREATE TABLE IF NOT EXISTS watchlist_groups (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    file_origin TEXT,
+                    pinned INTEGER NOT NULL DEFAULT 1,
+                    display_order INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS watchlist_items (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    group_id INTEGER NOT NULL REFERENCES watchlist_groups(id),
+                    item_type TEXT NOT NULL DEFAULT 'stock',
+                    stock_code TEXT,
+                    stock_name TEXT,
+                    subgroup_label TEXT,
+                    memo TEXT,
+                    display_order INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_watchlist_items_group ON watchlist_items(group_id);
+                CREATE INDEX IF NOT EXISTS idx_watchlist_items_code ON watchlist_items(stock_code);
             """)
             # 기존 DB 마이그레이션 (컬럼 없으면 추가)
             for col, definition in [
@@ -1152,3 +1176,151 @@ class NewsStorage:
                 (limit, offset)
             ).fetchall()
             return [dict(r) for r in rows]
+
+    # ─── 관심종목 그룹 (watchlist_groups / watchlist_items) ────────
+
+    def get_watchlist_groups(self, pinned_only: bool = False) -> List[Dict]:
+        with self._conn() as conn:
+            if pinned_only:
+                rows = conn.execute(
+                    "SELECT * FROM watchlist_groups WHERE pinned=1 ORDER BY display_order, id"
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM watchlist_groups ORDER BY display_order, id"
+                ).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_watchlist_items(self, group_id: int) -> List[Dict]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """SELECT * FROM watchlist_items WHERE group_id=?
+                   ORDER BY display_order, id""",
+                (group_id,)
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_watchlist_item_by_code(self, stock_code: str) -> List[Dict]:
+        """종목코드로 전체 그룹에서 검색."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                """SELECT wi.*, wg.name as group_name
+                   FROM watchlist_items wi
+                   JOIN watchlist_groups wg ON wi.group_id = wg.id
+                   WHERE wi.stock_code=? AND wi.item_type='stock'""",
+                (stock_code,)
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def search_watchlist(self, query: str, limit: int = 50) -> List[Dict]:
+        """종목명/코드/메모 전체 검색."""
+        q = f"%{query}%"
+        with self._conn() as conn:
+            rows = conn.execute(
+                """SELECT wi.*, wg.name as group_name
+                   FROM watchlist_items wi
+                   JOIN watchlist_groups wg ON wi.group_id = wg.id
+                   WHERE wi.item_type='stock'
+                     AND (wi.stock_name LIKE ? OR wi.stock_code LIKE ? OR wi.memo LIKE ?)
+                   ORDER BY wg.display_order, wi.display_order
+                   LIMIT ?""",
+                (q, q, q, limit)
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def add_watchlist_group(self, name: str, file_origin: str = None, pinned: bool = True,
+                            display_order: int = 0) -> int:
+        with self._conn() as conn:
+            cur = conn.execute(
+                """INSERT INTO watchlist_groups (name, file_origin, pinned, display_order)
+                   VALUES (?, ?, ?, ?)""",
+                (name, file_origin, 1 if pinned else 0, display_order)
+            )
+            return cur.lastrowid
+
+    def update_watchlist_group(self, group_id: int, **fields) -> bool:
+        allowed = {'name', 'pinned', 'display_order'}
+        updates = {k: v for k, v in fields.items() if k in allowed}
+        if not updates:
+            return False
+        set_clause = ', '.join(f"{k}=?" for k in updates)
+        try:
+            with self._conn() as conn:
+                conn.execute(
+                    f"UPDATE watchlist_groups SET {set_clause} WHERE id=?",
+                    (*updates.values(), group_id)
+                )
+            return True
+        except Exception as e:
+            logger.error(f"update_watchlist_group 실패: {e}")
+            return False
+
+    def delete_watchlist_group(self, group_id: int) -> bool:
+        try:
+            with self._conn() as conn:
+                conn.execute("DELETE FROM watchlist_items WHERE group_id=?", (group_id,))
+                conn.execute("DELETE FROM watchlist_groups WHERE id=?", (group_id,))
+            return True
+        except Exception as e:
+            logger.error(f"delete_watchlist_group 실패: {e}")
+            return False
+
+    def add_watchlist_item(self, group_id: int, item_type: str, stock_code: str = None,
+                           stock_name: str = None, subgroup_label: str = None,
+                           memo: str = None, display_order: int = 0) -> int:
+        with self._conn() as conn:
+            cur = conn.execute(
+                """INSERT INTO watchlist_items
+                   (group_id, item_type, stock_code, stock_name, subgroup_label, memo, display_order)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (group_id, item_type, stock_code, stock_name, subgroup_label, memo, display_order)
+            )
+            return cur.lastrowid
+
+    def update_watchlist_item(self, item_id: int, **fields) -> bool:
+        allowed = {'memo', 'display_order', 'stock_name', 'subgroup_label', 'pinned'}
+        updates = {k: v for k, v in fields.items() if k in allowed}
+        if not updates:
+            return False
+        set_clause = ', '.join(f"{k}=?" for k in updates)
+        try:
+            with self._conn() as conn:
+                conn.execute(
+                    f"UPDATE watchlist_items SET {set_clause} WHERE id=?",
+                    (*updates.values(), item_id)
+                )
+            return True
+        except Exception as e:
+            logger.error(f"update_watchlist_item 실패: {e}")
+            return False
+
+    def delete_watchlist_item(self, item_id: int) -> bool:
+        try:
+            with self._conn() as conn:
+                conn.execute("DELETE FROM watchlist_items WHERE id=?", (item_id,))
+            return True
+        except Exception as e:
+            logger.error(f"delete_watchlist_item 실패: {e}")
+            return False
+
+    def bulk_insert_watchlist_items(self, group_id: int, items: List[Dict]) -> int:
+        """items: [{item_type, stock_code, stock_name, subgroup_label, memo, display_order}]"""
+        count = 0
+        with self._conn() as conn:
+            for item in items:
+                conn.execute(
+                    """INSERT INTO watchlist_items
+                       (group_id, item_type, stock_code, stock_name, subgroup_label, memo, display_order)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        group_id,
+                        item.get('item_type', 'stock'),
+                        item.get('stock_code'),
+                        item.get('stock_name'),
+                        item.get('subgroup_label'),
+                        item.get('memo'),
+                        item.get('display_order', count),
+                    )
+                )
+                count += 1
+        return count

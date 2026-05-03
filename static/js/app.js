@@ -46,6 +46,7 @@ function switchPage(pageName) {
     else if (pageName === 'seeking-signal') loadTradeWatchlist();
     else if (pageName === 'backtest') { loadBacktestSessions(); loadMottos(); }
     else if (pageName === 'test') loadMode2PickList();
+    else if (pageName === 'stock-master') { /* smSwitchTab maintains its own state */ }
 }
 
 function toggleSupport1Mode(mode) {
@@ -3549,6 +3550,137 @@ async function smSyncWatchlist() {
         credentials: 'same-origin',
     }).then(r => r.json()).catch(() => ({}));
     if (res.success) showToast(`감시종목 ${res.synced}개 동기화됨`, 'success');
+}
+
+// ── 관심종목 그룹 탭 ────────────────────────────────────────────────────────
+
+function smSwitchTab(tab) {
+    ['master', 'interest'].forEach(t => {
+        document.getElementById('smTab-' + t).classList.toggle('active', t === tab);
+        const pane = document.getElementById('smPane-' + t);
+        pane.style.display = t === tab ? 'flex' : 'none';
+    });
+    if (tab === 'interest') wlLoadGroups();
+}
+
+let _wlGroups = [];   // cached group list
+
+async function wlLoadGroups() {
+    const pinnedOnly = document.getElementById('wlPinnedOnly')?.checked ? '1' : '0';
+    const res = await fetch('/api/watchlist-groups?pinned=' + pinnedOnly, { credentials: 'same-origin' })
+        .then(r => r.json()).catch(() => ({ groups: [] }));
+    _wlGroups = res.groups || [];
+    _wlRenderGroups(_wlGroups);
+}
+
+function _wlRenderGroups(groups) {
+    const container = document.getElementById('wlGroupList');
+    if (!container) return;
+    if (!groups.length) {
+        container.innerHTML = '<div style="color:#868e96;font-size:13px;padding:8px;">그룹이 없습니다.</div>';
+        return;
+    }
+    container.innerHTML = groups.map(g => `
+        <div class="wl-group-card" id="wlGroup-${g.id}">
+            <div class="wl-group-header" onclick="wlToggleGroup(${g.id})">
+                <button class="wl-pin-btn ${g.pinned ? 'pinned' : ''}" title="${g.pinned ? '활성' : '비활성'}"
+                    onclick="event.stopPropagation(); wlTogglePin(${g.id}, ${g.pinned ? 0 : 1})">
+                    ${g.pinned ? '📌' : '📍'}
+                </button>
+                <span class="wl-group-title">${_esc(g.name)}</span>
+                <span class="wl-group-meta" id="wlGroupMeta-${g.id}">▶</span>
+            </div>
+            <div class="wl-group-body" id="wlGroupBody-${g.id}"></div>
+        </div>
+    `).join('');
+}
+
+async function wlToggleGroup(groupId) {
+    const body = document.getElementById('wlGroupBody-' + groupId);
+    const meta = document.getElementById('wlGroupMeta-' + groupId);
+    if (!body) return;
+    const expanded = body.classList.contains('expanded');
+    if (expanded) {
+        body.classList.remove('expanded');
+        meta.textContent = '▶';
+        return;
+    }
+    // Load items if not yet loaded
+    if (!body._loaded) {
+        body.innerHTML = '<div style="padding:8px 14px;color:#868e96;font-size:13px;">로딩 중...</div>';
+        const res = await fetch('/api/watchlist-groups/' + groupId + '/items', { credentials: 'same-origin' })
+            .then(r => r.json()).catch(() => ({ items: [] }));
+        const items = res.items || [];
+        body.innerHTML = _wlRenderItems(items);
+        body._loaded = true;
+        meta.textContent = `▼ (${items.filter(i => i.item_type === 'stock').length}종목)`;
+    }
+    body.classList.add('expanded');
+    if (!body._loaded || meta.textContent === '▶') {
+        meta.textContent = '▼';
+    }
+}
+
+function _wlRenderItems(items) {
+    if (!items.length) return '<div style="padding:8px 14px;color:#868e96;font-size:13px;">종목 없음</div>';
+    return items.map(it => {
+        if (it.item_type === 'subheader') {
+            return `<div class="wl-subheader-row">${_esc(it.subgroup_label || '')}</div>`;
+        }
+        const code = it.stock_code || '';
+        const name = it.stock_name || '';
+        const memo = it.memo ? it.memo.replace(/<[^>]*>/g, '').slice(0, 80) : '';
+        return `<div class="wl-stock-row">
+            <span class="wl-stock-code">${_esc(code)}</span>
+            <span class="wl-stock-name" onclick="openStockNotesModal('${_esc(code)}', '${_esc(name)}')">${_esc(name)}</span>
+            ${memo ? `<span class="wl-stock-memo" title="${_esc(memo)}">${_esc(memo)}</span>` : ''}
+        </div>`;
+    }).join('');
+}
+
+async function wlTogglePin(groupId, newPinned) {
+    await fetch('/api/watchlist-groups/' + groupId, {
+        method: 'PUT',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pinned: newPinned }),
+    });
+    wlLoadGroups();
+}
+
+let _wlSearchTimer = null;
+function wlSearch(q) {
+    clearTimeout(_wlSearchTimer);
+    const resultsEl = document.getElementById('wlSearchResults');
+    if (!q || q.length < 1) {
+        resultsEl.style.display = 'none';
+        resultsEl.innerHTML = '';
+        document.getElementById('wlGroupList').style.display = 'flex';
+        return;
+    }
+    _wlSearchTimer = setTimeout(async () => {
+        const res = await fetch('/api/watchlist-groups/search?q=' + encodeURIComponent(q), { credentials: 'same-origin' })
+            .then(r => r.json()).catch(() => ({ results: [] }));
+        const hits = res.results || [];
+        document.getElementById('wlGroupList').style.display = 'none';
+        resultsEl.style.display = 'flex';
+        if (!hits.length) {
+            resultsEl.innerHTML = '<div style="color:#868e96;font-size:13px;padding:8px;">검색 결과 없음</div>';
+            return;
+        }
+        resultsEl.innerHTML = hits.map(h => `
+            <div class="wl-search-hit" onclick="openStockNotesModal('${_esc(h.stock_code || '')}', '${_esc(h.stock_name || '')}')">
+                <span class="wl-stock-code">${_esc(h.stock_code || '')}</span>
+                <span style="font-weight:500;flex:1;">${_esc(h.stock_name || '')}</span>
+                <span class="wl-search-group-tag">${_esc(h.group_name || '')}</span>
+                ${h.memo ? `<span class="wl-stock-memo">${_esc(h.memo.slice(0, 60))}</span>` : ''}
+            </div>
+        `).join('');
+    }, 280);
+}
+
+function _esc(s) {
+    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
 function showNoteModal(stockName, stockCode, noteText) {
