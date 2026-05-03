@@ -3555,8 +3555,17 @@ def seeking_signal_reentry_check():
             from kiwoom_chart import get_minute_chart
             from style3_signals import scan_style3_signals, calc_c2_support
 
-            # 분석 대상 거래일 목록 (analysis_bars 기준, 최대 5일)
-            trading_dates = [b['date'] for b in analysis_bars][:5]
+            # 분석 대상 거래일 목록: 과열기간 제외 후 최대 5거래일
+            # (과열 3일을 포함해서 5일 자르면 실질 분석일이 2일뿐이므로 과열 이후 기준)
+            all_after_exit = [b['date'] for b in analysis_bars]
+            if overheat_date:
+                # 과열일 이후 봉부터 5개
+                overheat_idx = next((i for i, d in enumerate(all_after_exit) if d > overheat_date), 0)
+                # 과열 3거래일 이후 시작 (최소 overheat_idx+3)
+                start_idx = overheat_idx + 3
+                trading_dates = all_after_exit[start_idx:start_idx + 5]
+            else:
+                trading_dates = all_after_exit[:5]
 
             # C2 지지가 — 일봉에서 미리 계산 (exit_date 이후 8봉)
             support_price = calc_c2_support(all_bars, exit_date)
@@ -3724,14 +3733,18 @@ def seeking_signal_reentry_check():
             elif minute_bars and len(minute_bars) >= 3:
                 raw_sigs = scan_style3_signals(minute_bars, buy_price, exit_price, support_price)
                 last_close = minute_bars[-1].get('close', 0)
+                from datetime import date as _date
+                today_str = _date.today().strftime('%Y-%m-%d')
                 for s in raw_sigs:
+                    st = s.get('signal_time', '')
                     signals.append({
                         'type': s['type'],
-                        'signal_time': s.get('signal_time', ''),
+                        'signal_time': st,
+                        'date': today_str,
                         'desc': s['reason'],
                         'entry_price': s['entry_price'],
                         'confidence': s['confidence'],
-                        'note': f"3분봉 기준 {s.get('signal_time','')} 감지" if s.get('signal_time') else '',
+                        'note': f"3분봉 기준 {today_str} {st} 감지" if st else f"3분봉 기준 {today_str}",
                     })
             else:
                 # 분봉 조회 실패 시 일봉 fallback
