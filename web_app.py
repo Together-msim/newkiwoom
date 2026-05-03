@@ -1194,6 +1194,31 @@ def toggle_mode2_active(code):
         }), 500
 
 
+@app.route('/api/mode2/watchers/<code>/reset', methods=['POST'])
+def reset_mode2_watcher(code):
+    """새 매매 리셋 — status/sold_history/bought 초기화"""
+    try:
+        code = normalize_stock_code(code)
+        watcher = mode2_mgr.reset_for_new_trade(code)
+        if not watcher:
+            return jsonify({"success": False, "error": "종목을 찾을 수 없습니다"}), 404
+
+        name = watcher.get('name', code)
+        asyncio.run_coroutine_threadsafe(
+            price_monitor.send_notification(
+                f"🔄 Mode2 새 매매 시작\n\n"
+                f"종목: {name} ({code})\n"
+                f"매수타점: {watcher.get('buy_target_price', 0):,}원\n"
+                f"sold_history 초기화 → 모니터링 재개"
+            ),
+            price_monitor.loop
+        )
+        return jsonify({"success": True, "message": f"{name} 새 매매 리셋 완료", "data": watcher})
+    except Exception as e:
+        logger.error(f"Mode2 리셋 실패: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/mode2/watchers/<code>/status', methods=['PATCH'])
 def update_mode2_status(code):
     """종목 상태 업데이트"""

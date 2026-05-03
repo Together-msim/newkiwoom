@@ -513,10 +513,10 @@ function renderMode2SectionWatchers(sectionId, watchers) {
 function renderMode2WatcherRow(w, idx) {
     const notifyOnly = w.notify_only || false;
     const autoPaused = w.auto_paused || false;
-    const editMode = false; // 초기값
+    const isClosed = w.status === 'auto_sold' || w.status === 'manual_sold';
 
     return `
-        <div class="mode2-watcher-row ${autoPaused ? 'auto-paused' : ''}" data-code="${w.code}" data-section="${w.section}" data-edit-mode="false"
+        <div class="mode2-watcher-row ${autoPaused ? 'auto-paused' : ''} ${isClosed ? 'trade-closed' : ''}" data-code="${w.code}" data-section="${w.section}" data-edit-mode="false"
              draggable="true" ondragstart="handleWatcherDragStart(event)" ondragend="handleWatcherDragEnd(event)"
              ondragover="handleWatcherDragOver(event)" ondrop="handleWatcherDrop(event)">
             <div class="watcher-cell">
@@ -570,6 +570,7 @@ function renderMode2WatcherRow(w, idx) {
                 <div class="active-toggle ${w.active ? 'on' : 'off'}" onclick="toggleActive('${w.code}', ${!w.active})">
                     ${w.active ? 'ON' : 'OFF'}
                 </div>
+                ${isClosed ? `<button class="watcher-action-btn" onclick="resetMode2NewTrade('${w.code}', '${(w.name||'').replace(/'/g,"\\'")}')\" title="새 매매 시작">🔄</button>` : ''}
                 <button class="watcher-action-btn" onclick="editWatcherRow('${w.code}')" title="수정">✏️</button>
                 <button class="watcher-action-btn" onclick="deleteMode2('${w.code}')" title="삭제">🗑️</button>
             </div>
@@ -1570,7 +1571,7 @@ async function handleTestPlaceSell() {
     }
 }
 
-function showToast(message, type = 'success') {
+function showToast(message, type = 'success', duration = 2500) {
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
     toast.textContent = message;
@@ -1579,7 +1580,7 @@ function showToast(message, type = 'success') {
     setTimeout(() => {
         toast.style.opacity = '0';
         setTimeout(() => toast.remove(), 300);
-    }, 2500);
+    }, duration);
 }
 
 // ========== Mode2 전용 함수 ==========
@@ -5550,7 +5551,15 @@ async function saveWatcherRow(code) {
 
 // 단일 필드 즉시 업데이트
 async function updateWatcherField(code, field, value) {
+    const priceFields = new Set(['buy_target_price','resistance_1_price','resistance_2_price','support_1_price','support_2_price']);
     try {
+        // 청산 완료 상태에서 가격 수정 시 자동 리셋 안내
+        const rows = document.querySelectorAll('.mode2-watcher-row.trade-closed');
+        const isClosedRow = Array.from(rows).some(r => r.dataset.code === code);
+        if (isClosedRow && priceFields.has(field)) {
+            showToast('🔄 청산 완료 종목 — 가격 수정 감지, 새 매매로 리셋됩니다', 'info', 3000);
+        }
+
         const data = {};
         data[field] = field === 'polling_interval' ? parseInt(value) : value;
 
@@ -5567,6 +5576,24 @@ async function updateWatcherField(code, field, value) {
         }
     } catch (error) {
         console.error('업데이트 실패:', error);
+    }
+}
+
+async function resetMode2NewTrade(code, name) {
+    if (!confirm(`${name}(${code})\n새 매매로 리셋합니다.\nsold_history 초기화 → waiting_buy 상태로 모니터링 재개`)) return;
+    try {
+        const res = await fetch(`/api/mode2/watchers/${code}/reset`, {
+            credentials: 'same-origin', method: 'POST'
+        });
+        const result = await res.json();
+        if (result.success) {
+            showToast(`🔄 ${name} — 새 매매 시작, 모니터링 재개`, 'success', 3000);
+            loadMode2List();
+        } else {
+            showToast('리셋 실패: ' + result.error, 'error');
+        }
+    } catch(e) {
+        showToast('리셋 요청 실패', 'error');
     }
 }
 

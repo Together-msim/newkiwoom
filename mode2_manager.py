@@ -257,9 +257,20 @@ class Mode2Manager:
         if s1_mode == "물타기" and "support_2_loss_pct" not in data:
             data["support_2_loss_pct"] = 100
 
+        # 청산 완료 상태에서 핵심 가격 변경 시 자동 새 매매 리셋
+        price_fields = {'buy_target_price', 'resistance_1_price', 'resistance_2_price', 'support_1_price', 'support_2_price'}
+        is_closed = watcher.get('status') in ('auto_sold', 'manual_sold')
+        price_changed = any(f in data for f in price_fields if data.get(f, watcher.get(f)) != watcher.get(f))
+        auto_reset = is_closed and any(f for f, _, _ in changed_fields if f in price_fields)
+
         # 필드 업데이트
         watcher.update(data)
         watcher["updated_at"] = datetime.now().isoformat()
+
+        # 자동 리셋 처리
+        if auto_reset:
+            self._do_reset(code, watcher)
+            logger.info(f"Mode2 자동 리셋 (새 매매): {code} ({watcher.get('name', '')}) — 청산 상태에서 가격 수정 감지")
 
         # record_id 갱신 (실제 변경사항이 있고 날짜가 바뀐 경우에만)
         if has_changes:
@@ -281,6 +292,29 @@ class Mode2Manager:
 
         self._save_watchers()
         return watcher
+
+    def reset_for_new_trade(self, code: str) -> Optional[Dict]:
+        """명시적 새 매매 리셋 (버튼 클릭)"""
+        if code not in self.watchers:
+            return None
+        watcher = self.watchers[code]
+        self._do_reset(code, watcher)
+        kst_now = datetime.now(ZoneInfo("Asia/Seoul")).strftime('%Y-%m-%d %H:%M:%S KST')
+        logger.info(f"Mode2 수동 리셋 (새 매매): {code} ({watcher.get('name', '')}) [{kst_now}]")
+        self._save_watchers()
+        return watcher
+
+    def _do_reset(self, code: str, watcher: dict):
+        """status/sold_history/bought 필드 초기화 (공통)"""
+        today = datetime.now().strftime('%y%m%d')
+        watcher.update({
+            "status": "waiting_buy",
+            "sold_history": [],
+            "bought_price": None,
+            "bought_quantity": 0,
+            "record_id": f"{today}-{code}",
+            "updated_at": datetime.now().isoformat(),
+        })
 
     def delete_watcher(self, code: str) -> bool:
         """

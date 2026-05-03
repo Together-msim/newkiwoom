@@ -438,6 +438,7 @@ tbody tr.inactive {
 
 .toast.success { border-left: 4px solid #51cf66; color: #2b8a3e; }
 .toast.error { border-left: 4px solid #ff6b6b; color: #c92a2a; }
+.toast.info { border-left: 4px solid #228be6; color: #1971c2; }
 
 @keyframes slideIn {
     from { transform: translateX(400px); opacity: 0; }
@@ -969,6 +970,17 @@ tbody tr.inactive {
 
 .mode2-watcher-row.editing {
     background: #fff3bf;
+}
+
+.mode2-watcher-row.trade-closed {
+    background: #f1f3f5;
+    opacity: 0.6;
+    border-left: 4px solid #adb5bd;
+}
+
+.mode2-watcher-row.trade-closed:hover {
+    opacity: 0.85;
+    background: #e9ecef;
 }
 
 .mode2-watcher-row.auto-paused {
