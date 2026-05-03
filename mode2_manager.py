@@ -185,8 +185,8 @@ class Mode2Manager:
             "support_1_loss_pct": data.get("support_1_loss_pct", 0),
             "support_1_add_budget": data.get("support_1_add_budget", 0),  # 물타기 추가 예산 (원)
             "support_2_price": data.get("support_2_price", 0),
-            # 물타기 모드면 2차 지지는 무조건 100% 전량 손절
-            "support_2_loss_pct": 100 if data.get("support_1_mode") == "물타기" else data.get("support_2_loss_pct", 0),
+            # 물타기 모드면 2차 지지 기본값 100%, 명시적으로 입력 시 override 가능
+            "support_2_loss_pct": data.get("support_2_loss_pct", 100 if data.get("support_1_mode") == "물타기" else 0),
             "polling_interval": data.get("polling_interval", 30 if not data.get("notify_only") else 180),  # 자동:30초, 알림:3분
             "notify_only": data.get("notify_only", False),  # True: 알림만, False: 자동매매
             "status": "waiting_buy",  # waiting_buy, waiting_sell, auto_sold, manual_sold
@@ -252,9 +252,9 @@ class Mode2Manager:
         if "notify_only" in data and "polling_interval" not in data:
             data["polling_interval"] = 180 if data["notify_only"] else 30
 
-        # 물타기 모드면 2차 지지는 무조건 100% 전량 손절
+        # 물타기 모드로 전환 시 support_2_loss_pct 미입력이면 100% 기본값 적용
         s1_mode = data.get("support_1_mode", watcher.get("support_1_mode", "손절"))
-        if s1_mode == "물타기":
+        if s1_mode == "물타기" and "support_2_loss_pct" not in data:
             data["support_2_loss_pct"] = 100
 
         # 필드 업데이트

@@ -275,9 +275,6 @@ class PriceMonitor:
                 # 2차 지지 (손절)
                 support_2 = watcher.get('support_2_price', 0)
                 support_2_pct = watcher.get('support_2_loss_pct', 0)
-                # 물타기 모드면 2차 지지는 무조건 100% 전량 손절
-                if watcher.get('support_1_mode') == '물타기':
-                    support_2_pct = 100
 
                 # 이미 매도한 레벨은 건너뛰기
                 if support_2 > 0 and support_2_pct > 0 and current_price <= support_2 and 'support_2' not in sold_history:
