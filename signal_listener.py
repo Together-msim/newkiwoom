@@ -151,6 +151,58 @@ def extract_themes(text: str) -> list[str]:
     return list(dict.fromkeys(themes))  # 순서 유지 중복 제거
 
 
+_HS_STOCK_NAME_PATTERN = re.compile(
+    r'^\[(?:SS⬆️?|SS⬆|VI|SS)\]\s*(.+?)(?:\s+현재가\s*:|$)',
+    re.MULTILINE
+)
+_HS_PRICE_STRIP = re.compile(r'\s+현재가.*$')
+
+
+def extract_hotstock_stock_name(text: str) -> str | None:
+    """급등주 메시지 첫 줄에서 종목명 추출."""
+    first_line = text.split('\n')[0].strip()
+    m = re.match(r'^\[(?:SS[⬆️⬆]*|VI|SS)\]\s*(.+)', first_line)
+    if not m:
+        return None
+    name = m.group(1).strip()
+    # 현재가 부분 제거: "종목명 현재가 : ..." → "종목명"
+    name = re.sub(r'\s+현재가.*$', '', name).strip()
+    return name if name else None
+
+
+def update_stock_master_themes(text: str) -> None:
+    """급등주 메시지에서 종목명+테마를 파싱해 stock_master에 반영."""
+    themes = extract_themes(text)
+    if not themes:
+        return
+    stock_name = extract_hotstock_stock_name(text)
+    if not stock_name:
+        return
+    themes_str = ', '.join(themes)
+
+    # stock_master에서 종목명으로 코드 찾기
+    try:
+        with news_storage._conn() as conn:
+            row = conn.execute(
+                "SELECT stock_code, themes FROM stock_master WHERE stock_name=? LIMIT 1",
+                (stock_name,)
+            ).fetchone()
+            if not row:
+                return
+            existing = (row['themes'] or '').strip()
+            # 기존 테마와 새 테마 병합 (중복 제거, 최신 우선)
+            existing_list = [t.strip() for t in existing.split(',') if t.strip()] if existing else []
+            merged = list(dict.fromkeys(themes + existing_list))  # 새 테마 앞에
+            merged_str = ', '.join(merged[:10])  # 최대 10개
+            conn.execute(
+                "UPDATE stock_master SET themes=?, updated_at=CURRENT_TIMESTAMP WHERE stock_code=?",
+                (merged_str, row['stock_code'])
+            )
+        logger.debug(f"📌 테마 업데이트: {stock_name} → {themes_str}")
+    except Exception as e:
+        logger.error(f"update_stock_master_themes 실패: {e}")
+
+
 # ─── 유틸리티 ────────────────────────────────────────────────
 
 def build_match_text(message) -> str:
@@ -233,12 +285,13 @@ async def handle_message(client, message):
         # ── 1. 전체 메시지 아카이빙 (필터 통과 여부 무관) ──────
         msg_db_id = news_storage.save_message(chat_id, message.id, match_text)
 
-        # ── 2. 급등주 채널이면 테마 자동 추출 ──────────────────
+        # ── 2. 급등주 채널이면 테마 자동 추출 + stock_master 업데이트 ──
         if _get_source_type(chat_id) == "hot_stock":
             themes = extract_themes(match_text)
             for theme in themes:
                 news_storage.upsert_theme(theme)
                 logger.debug(f"🏷️  테마 누적: {theme}")
+            update_stock_master_themes(match_text)
 
         # ── 3. 키워드 필터링 & 전달 ─────────────────────────────
         kf = _get_keyword_filter(chat_id)
