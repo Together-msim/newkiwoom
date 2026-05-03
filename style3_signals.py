@@ -160,15 +160,15 @@ def scan_style3_signals(
             'reason': f"거래량 급증 양봉 ({last['volume']:,} / 평균대비 {last['volume']/vol_avg:.1f}배) — 재상승 시작",
         })
 
-    # Type B: 익절가 5%+ 돌파 (기록용)
-    if exit_price and close > exit_price * 1.05:
+    # Type B: 익절가 2%+ 돌파 (재상승 확인)
+    if exit_price and close > exit_price * 1.02:
         found.append({
             'type': 'B',
             'signal_time': signal_time,
             'entry_price': int(exit_price * 1.01),
             'support_price': 0,
             'confidence': 'M',
-            'reason': f"익절가({int(exit_price):,}원) +{(close/exit_price-1)*100:.0f}% 돌파 — 기록용",
+            'reason': f"익절가({int(exit_price):,}원) +{(close/exit_price-1)*100:.0f}% 돌파 — 재상승 확인",
         })
 
     return found
