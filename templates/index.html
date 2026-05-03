@@ -1734,10 +1734,17 @@
                 <!-- 전체 노트 편집 영역 -->
                 <div style="flex: 1; display: flex; flex-direction: column; gap: 6px;">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span style="font-size: 12px; color: #868e96;">전체 노트 (직접 편집 가능)</span>
+                        <div style="display:flex; gap:6px; align-items:center;">
+                            <span style="font-size: 12px; color: #868e96;">전체 노트</span>
+                            <button class="note-fmt-btn" title="굵게 (Ctrl+B)" onclick="noteExecCmd('bold')"><b>B</b></button>
+                            <button class="note-fmt-btn note-fmt-hl" title="형광펜 (Ctrl+H)" onclick="noteExecCmd('hilite')">H</button>
+                        </div>
                         <button class="btn btn-primary" style="font-size: 12px; padding: 4px 12px;" onclick="saveFullStockNote()">💾 저장</button>
                     </div>
-                    <textarea id="stockNotesFullText" style="width: 100%; min-height: 300px; padding: 12px; border: 1px solid #dee2e6; border-radius: 8px; font-size: 13px; line-height: 1.7; resize: vertical; box-sizing: border-box; font-family: inherit;" placeholder="노트 없음. 위에서 항목 추가하거나 직접 편집하세요."></textarea>
+                    <div id="stockNotesFullText"
+                         contenteditable="true"
+                         class="note-editor"
+                         data-placeholder="노트 없음. 위에서 항목 추가하거나 직접 편집하세요."></div>
                 </div>
             </div>
         </div>
@@ -1767,8 +1774,14 @@
                             <input type="text" id="smEditThemes" placeholder="예: 반도체, AI, 배터리" style="width:100%; padding:7px 10px; border:1px solid #dee2e6; border-radius:5px; font-size:13px; box-sizing:border-box;">
                         </div>
                         <div>
-                            <label style="font-size:12px; color:#868e96; display:block; margin-bottom:4px;">노트 (날짜 태그 포함 자유 입력)</label>
-                            <textarea id="smEditNote" style="width:100%; min-height:150px; padding:8px 10px; border:1px solid #dee2e6; border-radius:5px; font-size:13px; resize:vertical; box-sizing:border-box; line-height:1.65;"></textarea>
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                                <label style="font-size:12px; color:#868e96;">노트 (날짜 태그 포함 자유 입력)</label>
+                                <div style="display:flex; gap:5px;">
+                                    <button class="note-fmt-btn" title="굵게 (Ctrl+B)" onclick="noteExecCmd('bold')"><b>B</b></button>
+                                    <button class="note-fmt-btn note-fmt-hl" title="형광펜 (Ctrl+H)" onclick="noteExecCmd('hilite')">H</button>
+                                </div>
+                            </div>
+                            <div id="smEditNote" contenteditable="true" class="note-editor" style="min-height:150px;"></div>
                         </div>
                         <div style="display:flex; gap:8px;">
                             <button class="btn btn-primary" style="font-size:13px;" onclick="smSaveEdit()">💾 저장</button>

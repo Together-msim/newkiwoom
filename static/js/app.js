@@ -3347,6 +3347,12 @@ async function openStockNotesModal(stockCode, stockName) {
     document.getElementById('stockNotePrependContent').value = '';
     document.getElementById('stockNotesModal').style.display = 'flex';
     await _reloadStockNote();
+    // 키 핸들러 (중복 방지: 플래그)
+    const editor = document.getElementById('stockNotesFullText');
+    if (!editor._noteKeyAttached) {
+        _attachNoteKeyHandlers(editor);
+        editor._noteKeyAttached = true;
+    }
     setTimeout(() => document.getElementById('stockNotePrependContent').focus(), 100);
 }
 
@@ -3361,19 +3367,75 @@ function _fmtNoteDate(dateObj) {
     return `'${yy}/${dateObj.getMonth()+1}/${dateObj.getDate()}`;
 }
 
+// contenteditable helpers
+function _noteGetHtml(id) {
+    return document.getElementById(id)?.innerHTML || '';
+}
+function _noteSetHtml(id, html) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    // plain text (no tags) → 줄바꿈을 <br>로
+    if (!/<[a-z]/i.test(html)) {
+        el.innerHTML = html
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/\n/g, '<br>');
+    } else {
+        el.innerHTML = html;
+    }
+}
+function _noteGetText(id) {
+    // innerHTML → 저장용: <br> → \n, 나머지 태그 보존
+    return _noteGetHtml(id);
+}
+
+// Ctrl+B / Ctrl+H 처리 (두 에디터 공통)
+function noteExecCmd(cmd) {
+    if (cmd === 'bold') {
+        document.execCommand('bold', false, null);
+    } else if (cmd === 'hilite') {
+        // 현재 하이라이트 여부 확인 → 토글
+        const sel = window.getSelection();
+        if (!sel || sel.isCollapsed) return;
+        const range = sel.getRangeAt(0);
+        const span = document.createElement('span');
+        span.className = 'note-hl';
+        // 이미 하이라이트된 경우 해제 (부모가 note-hl이면 unwrap)
+        const parent = sel.anchorNode?.parentElement;
+        if (parent && parent.classList.contains('note-hl')) {
+            const txt = document.createTextNode(parent.textContent);
+            parent.replaceWith(txt);
+        } else {
+            range.surroundContents(span);
+        }
+    }
+}
+
+// Ctrl+B / Ctrl+H 키 이벤트 — 모달 열릴 때 한 번 등록
+function _attachNoteKeyHandlers(el) {
+    el.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+            e.preventDefault();
+            noteExecCmd('bold');
+        }
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'h') {
+            e.preventDefault();
+            noteExecCmd('hilite');
+        }
+    });
+}
+
 async function _reloadStockNote() {
     const code = _stockNotesCurrentCode;
     if (!code) return;
     const res = await fetch(`/api/stock-master/${code}/note`, { credentials: 'same-origin' }).then(r => r.json()).catch(() => ({}));
-    document.getElementById('stockNotesFullText').value = res.note || '';
+    _noteSetHtml('stockNotesFullText', res.note || '');
 }
 
 async function prependStockNote() {
     const code = _stockNotesCurrentCode;
-    const rawDate = document.getElementById('stockNotePrependDate').value; // YYYY-MM-DD
+    const rawDate = document.getElementById('stockNotePrependDate').value;
     const content = document.getElementById('stockNotePrependContent').value.trim();
     if (!content) return;
-    // 날짜 표시 포맷: 'YY/M/D
     let dateStr = '';
     if (rawDate) {
         const d = new Date(rawDate + 'T00:00:00');
@@ -3386,7 +3448,7 @@ async function prependStockNote() {
         body: JSON.stringify({ date_str: dateStr, content }),
     }).then(r => r.json()).catch(() => ({}));
     if (res.success) {
-        document.getElementById('stockNotesFullText').value = res.note || '';
+        _noteSetHtml('stockNotesFullText', res.note || '');
         document.getElementById('stockNotePrependContent').value = '';
         showToast('추가됨', 'success');
     }
@@ -3394,7 +3456,7 @@ async function prependStockNote() {
 
 async function saveFullStockNote() {
     const code = _stockNotesCurrentCode;
-    const note = document.getElementById('stockNotesFullText').value;
+    const note = _noteGetText('stockNotesFullText');
     const res = await fetch(`/api/stock-master/${code}/note`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -3424,9 +3486,10 @@ async function _doSmSearch(q) {
         return;
     }
     container.innerHTML = items.map(item => {
-        const notePreview = shortenYear((item.note || '').slice(0, 60).replace(/\n/g, ' '));
+        const rawNote = (item.note || '').replace(/<[^>]+>/g, '');  // HTML 태그 제거 후 미리보기
+        const notePreview = shortenYear(rawNote.slice(0, 60).replace(/\n/g, ' '));
         const themes = (item.themes || '').split(',').filter(Boolean).map(t => `<span style="background:#e7f5ff;color:#1971c2;padding:1px 6px;border-radius:10px;font-size:11px;">${t.trim()}</span>`).join(' ');
-        return `<div class="sm-result-row" onclick="smOpenEdit('${item.stock_code}', '${(item.stock_name||'').replace(/'/g,"\\'")}', '${(item.themes||'').replace(/'/g,"\\'")}', \`${(item.note||'').replace(/`/g,'\\`')}\`)">
+        return `<div class="sm-result-row" onclick="smFetchAndOpenEdit('${item.stock_code}', '${(item.stock_name||\'\').replace(/\'/g,"\\\\'")}')"
             <div style="display:flex; justify-content:space-between; align-items:center;">
                 <span style="font-weight:600;">${item.stock_name || '-'} <span style="color:#868e96; font-size:11px;">${item.stock_code}</span></span>
                 <span style="font-size:10px; color:#adb5bd;">${(item.updated_at||'').slice(0,10)}</span>
@@ -3437,20 +3500,31 @@ async function _doSmSearch(q) {
     }).join('');
 }
 
+async function smFetchAndOpenEdit(code, name) {
+    const res = await fetch(`/api/stock-master/${code}`, { credentials: 'same-origin' }).then(r => r.json()).catch(() => ({}));
+    const d = res.data || {};
+    smOpenEdit(code, name, d.themes || '', d.note || '');
+}
+
 function smOpenEdit(code, name, themes, note) {
     _smEditCode = code;
     document.getElementById('smEditTitle').textContent = `✏️ ${name} (${code})`;
     document.getElementById('smEditThemes').value = themes || '';
-    document.getElementById('smEditNote').value = note || '';
+    _noteSetHtml('smEditNote', note || '');
     document.getElementById('smSaveStatus').textContent = '';
     document.getElementById('smEditPanel').style.display = 'block';
     document.getElementById('smEditPanel').scrollIntoView({ behavior: 'smooth' });
+    const editor = document.getElementById('smEditNote');
+    if (!editor._noteKeyAttached) {
+        _attachNoteKeyHandlers(editor);
+        editor._noteKeyAttached = true;
+    }
 }
 
 async function smSaveEdit() {
     if (!_smEditCode) return;
     const themes = document.getElementById('smEditThemes').value.trim();
-    const note = document.getElementById('smEditNote').value;
+    const note = _noteGetText('smEditNote');
     const status = document.getElementById('smSaveStatus');
     const res = await fetch(`/api/stock-master/${_smEditCode}`, {
         method: 'POST',

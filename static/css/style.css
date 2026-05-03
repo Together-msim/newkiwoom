@@ -2712,3 +2712,52 @@ tbody tr.inactive {
     background: var(--bg-primary);
 }
 .sm-result-row:hover { background: var(--bg-secondary); }
+
+/* ─── 노트 에디터 (contenteditable) ─────────────────────── */
+.note-editor {
+    width: 100%;
+    min-height: 300px;
+    padding: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    font-size: 13px;
+    line-height: 1.7;
+    outline: none;
+    box-sizing: border-box;
+    font-family: inherit;
+    color: var(--text-primary);
+    background: var(--bg-primary);
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-y: auto;
+}
+.note-editor:focus { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(99,102,241,.15); }
+.note-editor:empty::before {
+    content: attr(data-placeholder);
+    color: #adb5bd;
+    pointer-events: none;
+}
+/* 굵게 */
+.note-editor b, .note-editor strong { font-weight: 700; }
+/* 형광펜 */
+.note-hl {
+    background: #fff3bf;
+    color: inherit;
+    border-radius: 2px;
+    padding: 0 2px;
+}
+/* 포맷 버튼 */
+.note-fmt-btn {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    padding: 2px 8px;
+    color: var(--text-primary);
+    line-height: 1.4;
+    transition: background 0.1s;
+}
+.note-fmt-btn:hover { background: var(--border-color); }
+.note-fmt-hl { background: #fff3bf; border-color: #ffd43b; }
+.note-fmt-hl:hover { background: #ffd43b; }
