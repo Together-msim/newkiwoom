@@ -143,9 +143,33 @@ function setupEventListeners() {
     const support1LossPct = document.getElementById('support1LossPct');
     const support2LossPct = document.querySelector('select[name="support_2_loss_pct"]');
 
-    // resistance_1 변경 시 resistance_2 자동계산 제거 — 각각 독립 입력
+    // resistance_1 변경 시 resistance_2 자동계산 (합=100)
+    if (resistance1ProfitPct && resistance2ProfitPct) {
+        resistance1ProfitPct.addEventListener('change', function () {
+            const v = parseInt(this.value) || 0;
+            resistance2ProfitPct.value = String(100 - v);
+        });
+        resistance2ProfitPct.addEventListener('change', function () {
+            const v = parseInt(this.value) || 0;
+            resistance1ProfitPct.value = String(100 - v);
+        });
+    }
 
-    // support_1 변경 시 support_2 자동계산 제거 — 각각 독립 입력
+    // support_1 변경 시 support_2 자동계산 (합=100) — 물타기 모드면 자유 입력
+    if (support1LossPct && support2LossPct) {
+        support1LossPct.addEventListener('change', function () {
+            const s1mode = document.querySelector('select[name="support_1_mode"]');
+            if (s1mode && s1mode.value === '물타기') return;
+            const v = parseInt(this.value) || 0;
+            support2LossPct.value = String(100 - v);
+        });
+        support2LossPct.addEventListener('change', function () {
+            const s1mode = document.querySelector('select[name="support_1_mode"]');
+            if (s1mode && s1mode.value === '물타기') return;
+            const v = parseInt(this.value) || 0;
+            support1LossPct.value = String(100 - v);
+        });
+    }
 
     // Test 페이지
     const testGetInfo = document.getElementById('testGetInfo');
