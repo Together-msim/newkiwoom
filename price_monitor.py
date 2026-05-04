@@ -1219,13 +1219,32 @@ class PriceMonitor:
 
                 for sig in signals:
                     sig_type = sig['type']
-                    sig_key = (code, sig_type, today_str)
-                    last_price = self.style3_last_signals.get(sig_key)
 
-                    # 중복 억제: 같은 날 같은 타입, 가격 ±1% 이내
-                    if last_price and abs(sig['entry_price'] - last_price) / last_price < 0.01:
-                        continue
-                    self.style3_last_signals[sig_key] = sig['entry_price']
+                    # DB 기반 중복 억제 (서버 재시작 후에도 유지)
+                    last = self.news_storage.get_latest_signal_today(code, sig_type, today_str)
+                    if last:
+                        last_price = last.get('entry_price_suggestion') or 0
+                        last_time = last.get('signal_time', '00:00')
+
+                        if sig_type == 'A':
+                            # A: 당일 1개만
+                            continue
+                        elif sig_type == 'B':
+                            # B: entry_price가 동일하면 skip (같은 가격대 반복 방지)
+                            if last_price and abs(sig['entry_price'] - last_price) / last_price < 0.02:
+                                continue
+                        elif sig_type in ('C1', 'C3'):
+                            # C1/C3: 마지막 동일 타입 시그널로부터 2시간 경과해야 재발동
+                            try:
+                                from datetime import datetime as _dt
+                                last_h, last_m = map(int, last_time.split(':'))
+                                cur_h, cur_m = map(int, time_str.split(':'))
+                                elapsed = (cur_h * 60 + cur_m) - (last_h * 60 + last_m)
+                                if elapsed < 120:
+                                    continue
+                            except Exception:
+                                pass
+                        # C2: 기존 style3_signals.py dedup 로직(support_price ±100원)이 이미 처리
 
                     # DB 저장
                     try:

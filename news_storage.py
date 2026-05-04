@@ -1086,6 +1086,17 @@ class NewsStorage:
 
     # ─── 재진입 시그널 (reentry_signals) ──────────────────────────
 
+    def get_latest_signal_today(self, stock_code: str, signal_type: str, signal_date: str) -> Optional[Dict]:
+        """오늘 해당 종목+타입의 가장 최근 시그널 1개 반환. dedup 판단용."""
+        with self._conn() as conn:
+            row = conn.execute(
+                """SELECT * FROM reentry_signals
+                   WHERE stock_code=? AND signal_type=? AND signal_date=?
+                   ORDER BY created_at DESC LIMIT 1""",
+                (stock_code, signal_type, signal_date)
+            ).fetchone()
+        return dict(row) if row else None
+
     def save_reentry_signal(self, watchlist_id: int, stock_code: str, stock_name: str,
                              signal_type: str, signal_date: str,
                              entry_price_suggestion: float, confidence: str,

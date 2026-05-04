@@ -8862,24 +8862,38 @@ async function loadReentrySignals() {
             container.innerHTML = '<p style="color:#868e96;font-size:14px;text-align:center;padding:16px;">오늘 재진입 시그널 없음</p>';
             return;
         }
-        const typeColor = { A: '#3498db', B: '#f39c12', C: '#27ae60' };
-        container.innerHTML = signals.map(s => `
-            <div class="reentry-signal-card" style="margin-bottom:12px;">
-                <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
-                    <strong>${s.stock_name}</strong>
-                    <span class="reentry-type-badge" style="background:${typeColor[s.signal_type]||'#95a5a6'}">Type ${s.signal_type}</span>
-                    <span class="reentry-confidence">${s.confidence||'M'}</span>
-                    ${s.ss_matched ? '<span style="font-size:11px;background:#e8f5e9;color:#27ae60;padding:2px 6px;border-radius:4px;">SS감지</span>' : ''}
+        const typeColor = { A: '#3498db', B: '#f39c12', C1: '#2ecc71', C2: '#27ae60', C3: '#1a8a4a' };
+        // 종목별로 그룹핑 (같은 종목 시그널 묶기)
+        const grouped = {};
+        signals.forEach(s => {
+            const key = s.stock_code || s.stock_name;
+            if (!grouped[key]) grouped[key] = { name: s.stock_name, code: s.stock_code, sigs: [] };
+            grouped[key].sigs.push(s);
+        });
+        container.innerHTML = Object.values(grouped).map(g => `
+            <div style="background:#1e1e2e;border-radius:8px;padding:12px;margin-bottom:12px;border:1px solid #2d2d42;">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;border-bottom:1px solid #2d2d42;padding-bottom:8px;">
+                    <strong style="font-size:15px;">${g.name}</strong>
+                    ${g.code ? `<span style="font-size:12px;color:#868e96;">${g.code}</span>` : ''}
+                    <span style="font-size:12px;color:#adb5bd;margin-left:auto;">시그널 ${g.sigs.length}건</span>
                 </div>
-                <div style="font-size:13px;color:#495057;margin-bottom:4px;">${s.reason||''}</div>
-                <div style="font-size:13px;">
-                    추천 진입가: <strong>${(s.entry_price_suggestion||0).toLocaleString()}원</strong>
-                    &nbsp;|&nbsp; 매수가: ${(s.buy_price||0).toLocaleString()}원
-                    &nbsp;|&nbsp; 익절가: ${(s.exit_price||0).toLocaleString()}원
+                ${g.sigs.map(s => `
+                <div style="display:flex;align-items:flex-start;gap:8px;padding:6px 0;border-bottom:1px solid #252535;">
+                    <div style="display:flex;align-items:center;gap:6px;min-width:0;flex:1;">
+                        <span class="reentry-type-badge" style="background:${typeColor[s.signal_type]||'#95a5a6'};flex-shrink:0;">Type ${s.signal_type}</span>
+                        <span class="reentry-confidence" style="flex-shrink:0;">${s.confidence||'M'}</span>
+                        <span style="font-size:13px;color:#dee2e6;min-width:0;">${s.reason||''}</span>
+                    </div>
+                    <div style="text-align:right;flex-shrink:0;">
+                        <div style="font-size:13px;font-weight:600;color:#74c0fc;">${(s.entry_price_suggestion||0).toLocaleString()}원</div>
+                        ${s.signal_time ? `<div style="font-size:12px;color:#74c0fc;font-weight:600;margin-top:2px;">⏱ ${s.signal_time}</div>` : ''}
+                    </div>
+                </div>`).join('')}
+                <div style="margin-top:8px;display:flex;align-items:center;gap:8px;font-size:12px;color:#868e96;">
+                    <span>매수가 ${((g.sigs[0]||{}).buy_price||0).toLocaleString()}원</span>
+                    <span>익절가 ${((g.sigs[0]||{}).exit_price||0).toLocaleString()}원</span>
+                    ${g.code ? `<button class="btn btn-sm btn-success" style="margin-left:auto;padding:3px 10px;font-size:12px;" onclick="liveRegisterMode2FromReentry(${JSON.stringify(g.sigs[0]).replace(/"/g,'&quot;')})">📊 Mode2 등록</button>` : ''}
                 </div>
-                ${s.stock_code ? `<div style="margin-top:8px;">
-                    <button class="btn btn-sm btn-success" onclick="liveRegisterMode2FromReentry(${JSON.stringify(s).replace(/"/g,'&quot;')})">📊 Mode2 등록</button>
-                </div>` : ''}
             </div>
         `).join('');
     } catch (e) {
