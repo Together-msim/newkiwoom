@@ -3304,12 +3304,16 @@ def seeking_signal_reentry_check():
     stock_code = normalize_stock_code(data.get('stock_code', ''))
     buy_price = float(data.get('buy_price', 0))
     exit_price = float(data.get('exit_price', 0))
+    # Mode2 기반 가격 (우선 사용); 없으면 buy_price/exit_price fallback
+    buy_target_price = float(data.get('buy_target_price') or buy_price)
+    resistance_1_price = float(data.get('resistance_1_price') or exit_price)
+    resistance_2_price = float(data.get('resistance_2_price') or 0)
     exit_date = data.get('exit_date', '')   # YYYY-MM-DD
     exit_time = data.get('exit_time', '')   # HH:MM (익절 시간 — 당일 이 시각 이후 봉부터 분석)
     backtest_mode = bool(data.get('backtest_mode', False))
 
-    if not stock_code or not buy_price or not exit_price:
-        return jsonify({'success': False, 'error': 'stock_code, buy_price, exit_price 필요'}), 400
+    if not stock_code or not buy_target_price:
+        return jsonify({'success': False, 'error': 'stock_code, buy_price 필요'}), 400
 
     try:
         token = kiwoom_client.token if kiwoom_client else None
@@ -3716,7 +3720,7 @@ def seeking_signal_reentry_check():
                 # 같은 날 같은 타입은 첫 감지 1개만 (C2는 지지가 다를 수 있어 예외)
                 for idx in range(3, len(minute_bars) + 1):
                     window = minute_bars[:idx]
-                    raw_sigs = scan_style3_signals(window, buy_price, exit_price, support_price)
+                    raw_sigs = scan_style3_signals(window, buy_target_price, resistance_1_price, resistance_2_price, support_price)
                     for s in raw_sigs:
                         sig_time = s.get('signal_time', '')  # HH:MM
                         sig_type = s['type']
@@ -3748,6 +3752,9 @@ def seeking_signal_reentry_check():
                 'data': {
                     'stock_code': stock_code,
                     'buy_price': buy_price,
+                    'buy_target_price': buy_target_price,
+                    'resistance_1_price': resistance_1_price,
+                    'resistance_2_price': resistance_2_price,
                     'exit_price': exit_price,
                     'exit_date': exit_date,
                     'bars_analyzed': total_bars,
@@ -3787,7 +3794,7 @@ def seeking_signal_reentry_check():
                     'signal_time': '',
                 }]
             elif minute_bars and len(minute_bars) >= 3:
-                raw_sigs = scan_style3_signals(minute_bars, buy_price, exit_price, support_price)
+                raw_sigs = scan_style3_signals(minute_bars, buy_target_price, resistance_1_price, resistance_2_price, support_price)
                 last_close = minute_bars[-1].get('close', 0)
                 from datetime import date as _date
                 today_str = _date.today().strftime('%Y-%m-%d')
@@ -3818,6 +3825,9 @@ def seeking_signal_reentry_check():
                 'data': {
                     'stock_code': stock_code,
                     'buy_price': buy_price,
+                    'buy_target_price': buy_target_price,
+                    'resistance_1_price': resistance_1_price,
+                    'resistance_2_price': resistance_2_price,
                     'exit_price': exit_price,
                     'signals': signals,
                     'last_close': last_close,

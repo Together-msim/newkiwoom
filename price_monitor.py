@@ -1164,13 +1164,33 @@ class PriceMonitor:
 
         for item in watchlist:
             code = item['stock_code']
-            buy_price = float(item.get('buy_price') or 0)
-            exit_price = float(item.get('exit_price') or 0)
             exit_date = item.get('exit_date', '')
             watchlist_id = item['id']
             stock_name = item['stock_name']
 
-            if not buy_price:
+            # Mode2 watcher에서 매수타점/저항선 가격 조회 (우선)
+            buy_target_price = 0.0
+            resistance_1_price = 0.0
+            resistance_2_price = 0.0
+            if self.mode2_mgr:
+                # mode2_mgr.watchers는 {code: watcher_dict} 형태
+                all_w = getattr(self.mode2_mgr, 'watchers', {})
+                m2 = all_w.get(code)
+                if m2:
+                    buy_target_price = float(m2.get('buy_target_price') or 0)
+                    resistance_1_price = float(m2.get('resistance_1_price') or 0)
+                    resistance_2_price = float(m2.get('resistance_2_price') or 0)
+                    # Mode2에서 매도 완료된 경우 exit_date를 updated_at 기준으로 갱신
+                    if m2.get('status') in ('auto_sold', 'manual_sold') and m2.get('updated_at'):
+                        exit_date = m2['updated_at'][:10]
+
+            # Mode2 가격 없으면 trade_watchlist 원래 값 fallback
+            if not buy_target_price:
+                buy_target_price = float(item.get('buy_price') or 0)
+            if not resistance_1_price:
+                resistance_1_price = float(item.get('exit_price') or 0)
+
+            if not buy_target_price:
                 continue
 
             # 단기과열 억제
@@ -1215,7 +1235,7 @@ class PriceMonitor:
                     logger.warning(f"Style3 {code} 일봉 조회 실패: {e}")
 
                 # 시그널 탐지
-                signals = scan_style3_signals(minute_bars, buy_price, exit_price, support_price)
+                signals = scan_style3_signals(minute_bars, buy_target_price, resistance_1_price, resistance_2_price, support_price)
 
                 for sig in signals:
                     sig_type = sig['type']
@@ -1226,17 +1246,16 @@ class PriceMonitor:
                         last_price = last.get('entry_price_suggestion') or 0
                         last_time = last.get('signal_time', '00:00')
 
-                        if sig_type == 'A':
-                            # A: 당일 1개만
+                        if sig_type in ('A', 'A2'):
+                            # A/A2: 당일 1개만
                             continue
-                        elif sig_type == 'B':
+                        elif sig_type in ('B-r1', 'B-r2'):
                             # B: entry_price가 동일하면 skip (같은 가격대 반복 방지)
                             if last_price and abs(sig['entry_price'] - last_price) / last_price < 0.02:
                                 continue
                         elif sig_type in ('C1', 'C3'):
                             # C1/C3: 마지막 동일 타입 시그널로부터 2시간 경과해야 재발동
                             try:
-                                from datetime import datetime as _dt
                                 last_h, last_m = map(int, last_time.split(':'))
                                 cur_h, cur_m = map(int, time_str.split(':'))
                                 elapsed = (cur_h * 60 + cur_m) - (last_h * 60 + last_m)
@@ -1265,21 +1284,29 @@ class PriceMonitor:
 
                     # 텔레그램 알림
                     type_label = {
-                        'A': '원가 복귀',
-                        'B': '익절가 돌파 (기록)',
+                        'A': '매수타점 복귀',
+                        'A2': '1차저항 복귀 (익절가 지지선 전환)',
+                        'B-r1': '1차저항 돌파',
+                        'B-r2': '2차저항 돌파',
                         'C1': '거감봉 진행중',
                         'C2': '쌍바닥 지지 터치',
                         'C3': '거래량 급증 재상승',
                     }.get(sig_type, sig_type)
-                    overheat_days = 0
+                    ref_prices = []
+                    if buy_target_price:
+                        ref_prices.append(f"매수타점: {int(buy_target_price):,}원")
+                    if resistance_1_price:
+                        ref_prices.append(f"1차저항: {int(resistance_1_price):,}원")
+                    if resistance_2_price:
+                        ref_prices.append(f"2차저항: {int(resistance_2_price):,}원")
                     msg = (
                         f"🔄 Style3 재진입 시그널 [{sig_type}]\n\n"
                         f"종목: {stock_name} ({code})\n"
                         f"타입: {type_label}\n"
                         f"현재가: {sig['entry_price']:,}원"
                         + (f" | 지지선: {int(sig['support_price']):,}원" if sig.get('support_price') else "")
-                        + f"\n내 매수가: {int(buy_price):,}원 | 익절가: {int(exit_price):,}원\n"
-                        f"시간: {time_str}\n\n"
+                        + ("\n" + " | ".join(ref_prices) if ref_prices else "")
+                        + f"\n시간: {time_str}\n\n"
                         f"{sig['reason']}"
                     )
                     await self.send_notification(msg)

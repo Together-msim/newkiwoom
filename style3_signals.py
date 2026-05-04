@@ -60,7 +60,7 @@ def is_overheat_period(exit_date_str: str, reference_date: Optional[date] = None
         cursor += timedelta(days=1)
         if cursor.weekday() < 5:  # 월~금
             trading_days += 1
-    return trading_days <= 3
+    return trading_days < 3
 
 
 def calc_c2_support(daily_bars: List[Dict], exit_date_str: str) -> Optional[float]:
@@ -87,12 +87,16 @@ def _fmt_time(raw: str) -> str:
 
 def scan_style3_signals(
     bars: List[Dict],
-    buy_price: float,
-    exit_price: float,
+    buy_target_price: float,
+    resistance_1_price: float,
+    resistance_2_price: float,
     support_price: Optional[float] = None,
 ) -> List[Dict]:
     """3분봉 배열에서 Style3 시그널 탐지.
     bars: 시간 오름차순 (oldest→newest), 각 bar에 'time'(HHMMSS) 필드 있음
+    buy_target_price: Mode2 매수타점 (Type A 기준)
+    resistance_1_price: Mode2 1차 저항 (Type A2, B-r1 기준)
+    resistance_2_price: Mode2 2차 저항 (Type B-r2 기준)
     반환: 시그널 리스트 [{type, signal_time, entry_price, support_price, confidence, reason}, ...]
     """
     if len(bars) < 3:
@@ -108,30 +112,41 @@ def scan_style3_signals(
     signal_time = _fmt_time(str(last.get('time', '')))
     found = []
 
-    # Type A: 현재가 ≤ 매수가 × 1.03
-    if close <= buy_price * 1.03:
+    # Type A: 현재가 ≤ 매수타점 × 1.03
+    if buy_target_price and close <= buy_target_price * 1.03:
         found.append({
             'type': 'A',
             'signal_time': signal_time,
             'entry_price': close,
             'support_price': 0,
             'confidence': 'M',
-            'reason': f"현재가({close:,}원) ≤ 매수가({int(buy_price):,}원) 존 터치",
+            'reason': f"현재가({close:,}원) ≤ 매수타점({int(buy_target_price):,}원) 존 터치",
+        })
+
+    # Type A2: 현재가 ≤ 1차 저항 × 1.03 (익절가/저항선 근처 복귀)
+    if resistance_1_price and close <= resistance_1_price * 1.03:
+        found.append({
+            'type': 'A2',
+            'signal_time': signal_time,
+            'entry_price': close,
+            'support_price': 0,
+            'confidence': 'M',
+            'reason': f"현재가({close:,}원) ≤ 1차저항({int(resistance_1_price):,}원) 존 복귀 — 익절가 지지선 전환 확인",
         })
 
     # Type C2: 쌍바닥 지지 터치 (support_price 미리 계산된 값 사용)
     if support_price and abs(close - support_price) / support_price < 0.008:
-        # 쌍바닥 지지가가 익절가 ±2% 이내이면 "익절가 지지" 프리미엄 시그널
-        near_exit = (exit_price and abs(support_price - exit_price) / exit_price <= 0.02)
-        c2_confidence = 'H+' if near_exit else 'H'
-        near_exit_note = f" ★ 익절가({int(exit_price):,}원) 근처 지지 — 강한 지지선" if near_exit else ""
+        # 쌍바닥 지지가가 1차 저항 ±2% 이내이면 "익절가 지지" 프리미엄 시그널
+        near_r1 = (resistance_1_price and abs(support_price - resistance_1_price) / resistance_1_price <= 0.02)
+        c2_confidence = 'H+' if near_r1 else 'H'
+        near_note = f" ★ 1차저항({int(resistance_1_price):,}원) 근처 지지 — 강한 지지선" if near_r1 else ""
         found.append({
             'type': 'C2',
             'signal_time': signal_time,
             'entry_price': close,
             'support_price': support_price,
             'confidence': c2_confidence,
-            'reason': f"쌍바닥 지지선({int(support_price):,}원) 터치 확인 — 현재가 {close:,}원{near_exit_note}",
+            'reason': f"쌍바닥 지지선({int(support_price):,}원) 터치 확인 — 현재가 {close:,}원{near_note}",
         })
 
     # Type C1: 거감봉 진행 중
@@ -160,15 +175,26 @@ def scan_style3_signals(
             'reason': f"거래량 급증 양봉 ({last['volume']:,} / 평균대비 {last['volume']/vol_avg:.1f}배) — 재상승 시작",
         })
 
-    # Type B: 익절가 2%+ 돌파 (재상승 확인)
-    if exit_price and close > exit_price * 1.02:
+    # Type B-r1: 1차 저항 2%+ 돌파
+    if resistance_1_price and close > resistance_1_price * 1.02:
         found.append({
-            'type': 'B',
+            'type': 'B-r1',
             'signal_time': signal_time,
-            'entry_price': int(exit_price * 1.01),
+            'entry_price': int(resistance_1_price * 1.01),
             'support_price': 0,
             'confidence': 'M',
-            'reason': f"익절가({int(exit_price):,}원) +{(close/exit_price-1)*100:.0f}% 돌파 — 재상승 확인",
+            'reason': f"1차저항({int(resistance_1_price):,}원) +{(close/resistance_1_price-1)*100:.0f}% 돌파 — 재상승 확인",
+        })
+
+    # Type B-r2: 2차 저항 2%+ 돌파
+    if resistance_2_price and close > resistance_2_price * 1.02:
+        found.append({
+            'type': 'B-r2',
+            'signal_time': signal_time,
+            'entry_price': int(resistance_2_price * 1.01),
+            'support_price': 0,
+            'confidence': 'H',
+            'reason': f"2차저항({int(resistance_2_price):,}원) +{(close/resistance_2_price-1)*100:.0f}% 돌파 — 강한 재상승",
         })
 
     return found
