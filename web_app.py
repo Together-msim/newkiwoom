@@ -2458,16 +2458,32 @@ def get_analysis_pending():
 @app.route('/api/live/picks', methods=['GET'])
 @auth.login_required
 def get_live_picks():
-    """오늘 날짜 시황체크(siwhang_results) 기반 실전 추천 종목 반환.
+    """오늘 날짜 최신 backtest session의 picks 반환.
     ?date=YYYY-MM-DD 로 날짜 지정 가능. 기본값: 오늘.
+    stock_code 없는 항목은 stock_name_map으로 자동 보완.
     """
     from datetime import date as _date
     target_date = request.args.get('date') or _date.today().isoformat()
     ns = _get_news_storage()
-    rows = ns.get_siwhang_results(target_date)
-    # stock_name이 없는 시황 요약 행 제외, confidence=None이면 표시 허용
-    picks = [r for r in rows if r.get('stock_name')]
-    return jsonify({'success': True, 'data': picks, 'date': target_date})
+
+    # 오늘 날짜 최신 session 조회
+    sessions = ns.get_backtest_sessions()
+    today_sessions = [s for s in sessions if s.get('run_date') == target_date]
+    if not today_sessions:
+        return jsonify({'success': True, 'data': [], 'date': target_date, 'session_id': None})
+
+    session = today_sessions[0]  # created_at DESC 정렬이므로 첫 번째가 최신
+    picks = ns.get_backtest_picks(session['id'])
+
+    # stock_code 없는 항목 자동 보완
+    name_map = _load_stock_name_map()
+    for p in picks:
+        if not p.get('stock_code') and p.get('stock_name'):
+            code = name_map.get(p['stock_name'])
+            if code:
+                p['stock_code'] = code
+
+    return jsonify({'success': True, 'data': picks, 'date': target_date, 'session_id': session['id']})
 
 
 # ─── 재무정보 (Financial Info) ────────────────────────────────────────────
