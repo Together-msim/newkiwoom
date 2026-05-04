@@ -3596,7 +3596,8 @@ def seeking_signal_reentry_check():
             all_after_exit = [b['date'] for b in analysis_bars]
             if overheat_date:
                 overheat_idx = next((i for i, d in enumerate(all_after_exit) if d > overheat_date), 0)
-                start_idx = overheat_idx + 3
+                # skip 2 days (trading_days 1,2 are overheat); day 3 (trading_days=3) is allowed (< 3 boundary)
+                start_idx = overheat_idx + 2
                 trading_dates = all_after_exit[start_idx:start_idx + 5]
             else:
                 trading_dates = all_after_exit[:5]
