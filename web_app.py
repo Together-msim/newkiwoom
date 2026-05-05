@@ -3635,7 +3635,7 @@ def seeking_signal_reentry_check():
                     day_all_idx = next((j for j, b in enumerate(all_bars) if b['date'] == day_date), None)
                     if overheat_all_idx is not None and day_all_idx is not None:
                         days_since = day_all_idx - overheat_all_idx
-                        if 1 <= days_since <= 3:
+                        if 1 <= days_since < 3:
                             key = ('OVERHEAT', day_date)
                             if key not in seen_key:
                                 seen_key.add(key)
