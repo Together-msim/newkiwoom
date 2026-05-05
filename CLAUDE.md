@@ -333,6 +333,12 @@ IGNORE_MARKET_HOURS=1     # 시간 검증 스킵
 | `siwhang` | `/siwhang [1h\|2h]` | 급등주 시황 부합 여부 + 관심종목 매칭 AI 분석 → Oracle 저장 + 텔레그램 알림 |
 | `backtest` | `/backtest [YYYY-MM-DD] [--version v2] [--desc "설명"]` | 지정 날짜 급등주/뉴스 → 13 타임슬롯 AI 분석 → 종목 추천 → Oracle 저장. 같은 날짜 재실행 시 버전 태그로 구분, 웹UI에서 A/B 비교 가능 |
 | `reentry` | `/reentry` | ⚠️ **구형 (일봉 기반, 사실상 미사용)** — Style3 실시간 감지는 `price_monitor.py:check_style3_conditions()`로 대체됨 |
+| `style3-register` | `/style3-register [YYYY-MM-DD]` | 저녁 루틴 — 익절 종목 → draft 등록. 데이터 소스: ①april_trade_sets.json → ②kt00015 메인계좌(로컬) → ③수동 입력 |
+| `style3-backtest` | `/style3-backtest [stock_code]` | 장마감 후 — 익절 이후 재진입 패턴 분석 (백테스트 API 호출 + 시그널 요약) |
+| `style3-consult` | `/style3-consult [stock_code]` | 장중 — 시그널 발생 시 매크로(morning_report) + 장중 시황(siwhang_results) 교차 → 진입 판단 컨설팅 |
+| `signal-consult` | `/signal-consult [stock_code[,code2,...]]` | signalreport.co.kr 멤버십 페이지 크롤링 → Signal Report 전문 분석 즉시 컨설팅. 당일 캐시 재사용. 로그인 만료 시 헤드풀 모드로 세션 갱신 |
+| `dart-consult` | `/dart-consult [종목코드] [질문]` | DART 공시 원문 조회 → 질문에 직접 답변. corp_code_map → list.json → document.xml 순으로 조회. 기재정정 포함 최대 5건 원문 분석 |
+| `mode2-register` | `/mode2-register` | Mode2 알림모드 종목 일괄 등록. 섹션명 + 종목별 (매수타점/지지/저항) 자유 텍스트 입력 → 섹션 자동 생성 + 신규등록/기존 이동+업데이트 |
 
 프롬프트 커스터마이징: `.claude/skills/<skill>/prompts/`
 
@@ -450,7 +456,8 @@ scp -i /Users/msim/Downloads/ssh-key-2026-04-26.key \
 |--------|------|------|
 | GET/POST | `/api/trade-watchlist` | 감시 목록 조회/등록 (?status=watching) |
 | PUT/DELETE | `/api/trade-watchlist/<id>` | 수정/삭제 |
-| GET | `/api/reentry/signals` | 날짜별 시그널 조회 (?date=) |
+| GET | `/api/reentry/signals` | 날짜별 시그널 조회 (?date=) — source='watchlist' |
+| GET | `/api/reentry/morning-signals` | 관심종목 C시그널 조회 (?date=) — source='morning', 종목별 그룹핑 |
 | POST | `/api/seeking-signal/reentry-check` | 백테스트 모드 — 과거 3분봉 기반 시그널 탐색 |
 
 #### 재무/종목 정보
@@ -1023,3 +1030,161 @@ Kiwoom ka10080 API는 응답에 `return_code` 필드를 반환하지 않음. `da
 - **CSV 텍스트**: `{"csv": "종목코드,종목명\n005930,삼성전자\n..."}`
   - 종목코드 앞 `'` 자동 제거, `isdigit()` 검증, 6자리 패딩
 - 파일 위치: `.data/morning_watchlist.json` (환경변수 `MORNING_WATCHLIST_PATH` 오버라이드 가능)
+
+### Style3 발라먹기 — 저녁 루틴 파이프라인 (2026-05-05)
+
+**전체 루틴 흐름**:
+```
+[저녁] /style3-register [날짜]
+  → 익절 데이터 탐색 (april_trade_sets → kt00015 → 수동입력)
+  → POST /api/trade-watchlist-draft
+  → 웹 UI 발라먹기 탭 → ✓ 등록 (draft → watching)
+  → (선택) /style3-backtest → 과거 시그널 패턴 확인
+
+[장중] price_monitor가 3분 폴링으로 실시간 시그널 자동 감지
+  → 텔레그램 알림 수신
+
+[시그널 발생 시] /style3-consult [종목코드]
+  → 매크로(morning_report) + 시황(siwhang) + 뉴스 교차 분석
+  → 진입 판단 컨설팅
+
+[진입 결정 시] 웹 UI 발라먹기 탭 → 📊 Mode2 버튼 → 모달 등록
+```
+
+**스킬 요약**:
+| 스킬 | 실행 시점 | 핵심 입력 | 핵심 출력 |
+|------|---------|---------|---------|
+| `/style3-register` | 저녁 (장마감 후) | 날짜 | draft 등록 |
+| `/style3-backtest` | 장마감 후 검증용 | stock_code or all | 시그널 패턴 요약 |
+| `/style3-consult` | 장중 시그널 발생 시 | stock_code | 진입 판단 |
+
+### Style3 파이프라인 트러블슈팅 레슨런드 (2026-05-05)
+
+**1. 매매 데이터 조회 우선순위 — 반드시 이 순서로 확인**
+
+```
+① .data/april_trade_sets.json
+   - 구조: {종목코드: {stock_name, buys:[{date,price,qty}], sells:[{date,price,qty}]}}
+   - date 형식: YYYYMMDD (하이픈 없음)
+   - 한계: 4월 데이터까지만 존재. max(sells.date) < 조회날짜 → ②로 이동
+
+② kt00015 메인계좌 (로컬 PC에서만 실행 가능)
+   from kiwoom_client import KiwoomClient
+   client = KiwoomClient(account='main')
+   result = client._call_api('kt00015', {
+       'acnt_no': client.account_no,
+       'acnt_prdt_cd': client.account_product_code,
+       'strt_dt': 'YYYYMMDD',
+       'end_dt': 'YYYYMMDD',
+       'ottks_tp': '0',    # ← 필수. 없으면 return_code=2
+       'ch_crd_tp': '0',   # ← 필수. 없으면 return_code=2
+   })
+   trades = result.get('data', {}).get('tdy_trde_diary', [])
+   # sell_qty > 0 인 행만 익절 종목
+
+③ 사용자 직접 입력 인터뷰
+```
+
+**2. kt00015 자주 틀리는 포인트**
+- `strt_dt`/`end_dt`는 **체결일(cntr_dt)** 기준 — 결제일(trde_dt, +2영업일)과 혼동 금지
+  - 예: 4/29 체결 → 결제일 5/1. 5/1로 조회하면 0건
+- `ottks_tp` + `ch_crd_tp` 두 파라미터 **모두** 필수 — 하나라도 누락 시 return_code=2
+- 응답 리스트 키: `tdy_trde_diary` (다른 키명 아님)
+- 메인계좌 키 Oracle 서버에 없음 → **반드시 로컬 PC에서 실행**
+
+**3. Oracle API 인증 — 환경변수 미로드 시 401**
+Oracle SSH 내 Python에서 `os.environ.get("WEB_USERNAME")` 빈값이면 401.
+`.env` 자동 로드 안 되므로 **하드코딩 또는 명시적 로드** 필요:
+```python
+# 올바른 패턴
+WU = "smh8857"; WP = "Saturday06.!chltnfus"
+
+# 틀린 패턴 (Oracle SSH에서 환경변수 미로드)
+WU = os.environ.get("WEB_USERNAME", "")  # → "" → 401
+```
+
+**4. Mode2 watcher API 필드명**
+`POST /api/mode2/watchers` 필드명은 `stock_code`/`stock_name`이 **아님**:
+```python
+# 올바른 필드명
+{"code": "059090", "name": "미코", "buy_target_price": ..., "budget": ...}
+
+# 틀린 필드명 (400 에러)
+{"stock_code": "059090", "stock_name": "미코", ...}
+```
+필수 3개: `code`, `buy_target_price`, `budget`
+
+**5. Mode2 섹션 API 응답 구조**
+`GET /api/mode2/sections` 응답: `{"data": [{id, name, collapsed, order}, ...]}`
+- `data`가 list (dict 아님) → `.get("sections")` 하면 None
+- 섹션 id는 문자열: `"section_8_1777976873"` 형태
+
+**6. `/api/trade-watchlist-draft` POST 날짜 형식**
+- `buy_date`, `exit_date`: 반드시 `YYYY-MM-DD` (하이픈 포함)
+- `YYYYMMDD` 형식 넣으면 저장은 되지만 웹 UI에서 날짜 표시 깨짐
+- april_trade_sets.json의 date(YYYYMMDD) → 변환 필요: `date[:4]+"-"+date[4:6]+"-"+date[6:]`
+
+**7. 일봉/분봉 조회 — Oracle 서버 한계**
+- Oracle 서버 `.env`에 Kiwoom 서브계좌 키는 있으나 **일봉 조회 결과 0건** 반환되는 경우 있음
+- 메인계좌 키는 Oracle에 없음 → 차트 조회 전부 로컬 실행
+- 로컬도 지정단말기 인증(코드 3) 실패 시 → **사용자에게 직접 가격 확인 요청**이 가장 빠름
+
+**8. trade_watchlist draft → watching 전환 후 Mode2 섹션 생성**
+`confirmDraftWatchlist()` JS 함수 흐름:
+1. `PUT /api/trade-watchlist/{id}` → `{status: "watching"}`
+2. `_ensureSection("MM-DD 발라먹기")` → 섹션 없으면 자동 생성
+- draft 상태에서는 price_monitor 실시간 폴링 **안 됨** (watching만 폴링)
+- 웹 UI ✓ 등록 버튼 클릭 전까지 시그널 미발생
+
+### Style3 발라먹기 UI 구조 (2026-05-05)
+
+**발라먹기 탭 내 서브탭**:
+- **감시목록**: trade_watchlist 전체 (draft=노란배경, watching=흰배경, exited=필터링)
+  - draft 행: "✓ 등록" + "✕" 버튼
+  - watching 행: "📊 Mode2" + "삭제" 버튼
+- **오늘 시그널**: `reentry_signals?date=오늘` (source='watchlist') — 장중 실시간 감지 결과
+  - 각 카드에 "📊 Mode2 전환" 버튼 → `showS3Mode2Modal()` 팝업
+- **관심종목 C**: `reentry/morning-signals?date=오늘` (source='morning') — 130종목 C시그널
+  - 종목=행, 시그널 발생 시각=열 매트릭스 테이블
+  - C2(쌍바닥)/C1(거감봉) 타입 + H/M/L 컨피던스 배지 + 지지가 표시
+  - 텔레그램 알림 없음 (웹 전용)
+
+**Mode2 전환 모달 (`s3Mode2Modal`)**:
+- 매수타점, 1차저항(익절가 기본), 2차저항(선택)
+- 1차지지 + 손절/물타기 select + 물타기 추가예산(hidden)
+- 2차지지, 예산
+- "💾 Mode2 등록" → `submitS3Mode2Modal()` → `POST /api/mode2/watchers`
+- 기존 동일 종목 watcher 있으면 "덮어쓰기?" 확인 팝업
+
+**`POST /api/trade-watchlist-draft` (신규 API)**:
+- `items` 배열로 복수 종목 일괄 등록
+- 이미 watching/draft인 종목은 자동 스킵 → `skipped` 배열 반환
+- status='draft'로 저장 → 웹 UI 확인 후 ✓ 등록으로 활성화
+
+### Mode2 청산 → 발라먹기 자동 draft 등록 (2026-05-06)
+
+Mode2 전량 매도(`record_sell` 후 `remaining_qty == 0`) 시 `trade_watchlist`에 `status='draft'`로 자동 삽입.
+
+**가격 설정 규칙**:
+- 익절(`reason`에 'resistance' 포함): `buy_price=bought_price`, `exit_price=매도가(저항선)`
+- 손절: `buy_price=매도가(손절가)`, `exit_price=bought_price(원래 매수가)`
+
+이미 watching/draft 상태인 종목은 중복 삽입 스킵.
+웹 발라먹기 감시목록에 노란 배경 draft로 뜸 → "✓ 등록" 클릭 시 watching 전환.
+
+### 관심종목 C시그널 폴링 (2026-05-06)
+
+`price_monitor.py: check_morning_c_signals()` — 3분마다 `morning_watchlist.json` 130종목 C시그널 체크.
+
+**특징**:
+- C2(쌍바닥 지지 터치), C1(거감봉) 만 감지 (A/B 시그널 없음 — 매수가/저항가 미등록)
+- 텔레그램 알림 없음 → `reentry_signals` DB(`source='morning'`)에만 저장
+- 120분 쿨다운, 단일가 매매일(봉 간격 25분+ > 50%) 스킵
+- C2 지지가: 일봉 조회 후 `morning_c2_cache`에 하루 1회 캐싱
+
+**reentry_signals.source 컬럼**:
+- `'watchlist'`: 기존 trade_watchlist watching 종목 시그널
+- `'morning'`: 관심종목 130개 C시그널
+
+**UI**: 발라먹기 탭 → "관심종목 C" 서브탭 → `GET /api/reentry/morning-signals`
+- 종목=행, 시그널 발생 시각=열 매트릭스 (가로 스크롤)
