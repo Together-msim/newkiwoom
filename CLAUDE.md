@@ -97,7 +97,8 @@ Tactic1/2 (`bot_v3.py`)는 구형 기능으로 현재 미사용.
   - 실제 Style3 수동 매매 이력이 있는 계좌
   - `ka10170` 전일 체결 이력 조회 → Track B Style3 종목 자동 등록 소스
   - `place_buy_order` / `place_sell_order` / `cancel_order` 호출 시 `PermissionError` 강제 차단
-  - `.env`: `KIWOOM_MAIN_APPKEY=`, `KIWOOM_MAIN_SECRETKEY=` (키 등록 후 사용)
+  - **키 보관**: 로컬 `.env`에만 존재. Oracle 서버 `.env`에는 빈값 — Oracle에 키 올리지 않음
+  - Track B 흐름: **로컬 PC에서 직접 Kiwoom 조회** → Oracle `POST /api/trade-watchlist` 전송
 
 **관련 파일**:
 - `style3_signals.py` — 시그널 감지 유틸 (web_app.py + price_monitor.py 공유)
