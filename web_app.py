@@ -3586,13 +3586,8 @@ def seeking_signal_reentry_check():
             # - exit_time이 있으면: 익절 당일도 포함 (해당 시각 이후 봉만 분석)
             # - 과열기간(3거래일) 이후 5거래일 분석
             all_after_exit = [b['date'] for b in analysis_bars]
-            if overheat_date:
-                overheat_idx = next((i for i, d in enumerate(all_after_exit) if d > overheat_date), 0)
-                # skip 2 days (trading_days 1,2 are overheat); day 3 (trading_days=3) is allowed (< 3 boundary)
-                start_idx = overheat_idx + 2
-                trading_dates = all_after_exit[start_idx:start_idx + 5]
-            else:
-                trading_dates = all_after_exit[:5]
+            # 과열기간 억제 없음 — exit_date 다음날부터 전부 분석 대상
+            trading_dates = all_after_exit[:7]  # 최대 7거래일
 
             # exit_time이 있으면 익절 당일도 분석 대상에 앞에 추가
             exit_date_compact = exit_date.replace('-', '') if exit_date else ''
@@ -3620,26 +3615,30 @@ def seeking_signal_reentry_check():
             seen_key = set()
             total_bars = 0
 
-            for day_date in trading_dates:
-                # 과열기간 체크
-                if overheat_date:
-                    overheat_all_idx = next((j for j, b in enumerate(all_bars) if b['date'] == overheat_date), None)
-                    day_all_idx = next((j for j, b in enumerate(all_bars) if b['date'] == day_date), None)
-                    if overheat_all_idx is not None and day_all_idx is not None:
-                        days_since = day_all_idx - overheat_all_idx
-                        if 1 <= days_since < 3:
-                            key = ('OVERHEAT', day_date)
-                            if key not in seen_key:
-                                seen_key.add(key)
-                                all_signals.append({
-                                    'type': 'OVERHEAT',
-                                    'date': day_date,
-                                    'signal_time': '',
-                                    'desc': f"단기과열 기간 ({overheat_date} 폭등 후 {days_since}거래일째) — 시그널 억제",
-                                    'confidence': '-',
-                                })
-                            continue
+            def _is_danilga_day(bars_list):
+                """단일가 매매일 판단: 봉 간격이 주로 30분이면 단일가 (연속매매 아님)."""
+                if len(bars_list) < 3:
+                    return False
+                times = [b.get('hhmm', '') for b in bars_list if b.get('hhmm')]
+                if len(times) < 3:
+                    return False
+                gaps = []
+                for i in range(1, len(times)):
+                    try:
+                        h1, m1 = int(times[i-1][:2]), int(times[i-1][2:])
+                        h2, m2 = int(times[i][:2]), int(times[i][2:])
+                        gap = (h2 * 60 + m2) - (h1 * 60 + m1)
+                        if gap > 0:
+                            gaps.append(gap)
+                    except Exception:
+                        pass
+                if not gaps:
+                    return False
+                # 전체 봉 간격 중 30분 이상인 비율 > 50% → 단일가
+                long_gaps = sum(1 for g in gaps if g >= 25)
+                return long_gaps / len(gaps) > 0.5
 
+            for day_date in trading_dates:
                 # 해당 날짜 3분봉 조회
                 # base_dt를 당일로 고정하는 대신 임시로 환경 조작 없이
                 # get_minute_chart의 최근 거래일 자동감지 사용 — 단, 과거 날짜는
@@ -3702,6 +3701,17 @@ def seeking_signal_reentry_check():
                     }
 
                 minute_bars = [_parse_min_bar(b) for b in day_bars]
+
+                # 단일가 매매일 감지 — 30분 간격 봉이 주를 이루면 시그널 제외
+                if _is_danilga_day(minute_bars):
+                    all_signals.append({
+                        'type': 'DANILGA',
+                        'date': day_date,
+                        'signal_time': '',
+                        'desc': f"단일가 매매일 — 시간 연속성 없어 시그널 제외 (봉 수: {len(minute_bars)})",
+                        'confidence': '-',
+                    })
+                    continue
 
                 # 익절 당일: exit_time 이후 봉만 분석 (그 이전은 익절 전 구간)
                 if day_date == exit_date_compact and exit_time_hhmm:

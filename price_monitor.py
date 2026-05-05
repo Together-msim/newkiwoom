@@ -14,7 +14,7 @@ from kiwoom_token import get_token
 from trend_analyzer import check_condition_satisfied, format_candles_summary
 from global_config import get_global_config
 from kiwoom_client_async import KiwoomClientAsync
-from style3_signals import is_overheat_period, calc_c2_support, scan_style3_signals
+from style3_signals import calc_c2_support, scan_style3_signals
 
 load_dotenv()
 
@@ -1193,15 +1193,34 @@ class PriceMonitor:
             if not buy_target_price:
                 continue
 
-            # 단기과열 억제
-            if is_overheat_period(exit_date):
-                logger.debug(f"Style3 {code} 단기과열 기간 — 스킵")
-                continue
+            # (과열기간 억제 없음 — 단일가 매매일만 3분봉 조회 후 제외)
 
             try:
                 # 3분봉 조회 (최근 20봉)
                 minute_bars = get_minute_chart(token, code, "3분", count=20)
                 if not minute_bars or len(minute_bars) < 3:
+                    continue
+
+                # 단일가 매매일 감지 — 봉 간격 30분 이상이 주를 이루면 스킵
+                def _is_danilga(bars):
+                    times = [str(b.get('time', ''))[:4] for b in bars if b.get('time')]
+                    if len(times) < 3:
+                        return False
+                    gaps = []
+                    for i in range(1, len(times)):
+                        try:
+                            h1, m1 = int(times[i-1][:2]), int(times[i-1][2:])
+                            h2, m2 = int(times[i][:2]), int(times[i][2:])
+                            gap = (h2 * 60 + m2) - (h1 * 60 + m1)
+                            if gap > 0:
+                                gaps.append(gap)
+                        except Exception:
+                            pass
+                    if not gaps:
+                        return False
+                    return sum(1 for g in gaps if g >= 25) / len(gaps) > 0.5
+                if _is_danilga(minute_bars):
+                    logger.debug(f"Style3 {code} 단일가 매매일 — 시그널 스킵")
                     continue
 
                 # C2 지지가: 일봉 배열로 계산 (ka10081 직접 호출)
