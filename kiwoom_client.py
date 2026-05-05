@@ -26,8 +26,9 @@ class KiwoomClient:
     - 일일 가격 정보 조회 (시가, 전일종가 등)
     """
 
-    def __init__(self, host: Optional[str] = None, token: Optional[str] = None):
+    def __init__(self, host: Optional[str] = None, token: Optional[str] = None, account: str = 'sub'):
         self.host = (host or os.getenv("KIWOOM_HOST") or "").rstrip("/")
+        self._account = account  # 'sub' or 'main'
 
         if not self.host:
             raise ValueError("KIWOOM_HOST is required")
@@ -37,7 +38,7 @@ class KiwoomClient:
             self.token = token
             self._token_issued_at = time.time()
         else:
-            self.token = get_token()
+            self.token = get_token(account)
             self._token_issued_at = time.time()
 
         # 토큰 갱신 간격 (25분, 키움 토큰 TTL에 맞춤)
@@ -48,7 +49,7 @@ class KiwoomClient:
         now = time.time()
         if (now - self._token_issued_at) >= self._token_refresh_seconds:
             try:
-                self.token = get_token()
+                self.token = get_token(self._account)
                 self._token_issued_at = now
             except Exception:
                 # 토큰 갱신 실패해도 기존 토큰으로 시도
@@ -846,3 +847,89 @@ class KiwoomClient:
                 "success": False,
                 "message": str(e)
             }
+
+    def get_daily_trades(self, date: Optional[str] = None) -> list:
+        """
+        일별 체결 내역 조회 (ka10170 API).
+
+        Args:
+            date: 조회 날짜 YYYYMMDD (None이면 전 영업일 자동 계산)
+
+        Returns:
+            list of {
+                stock_code: str,
+                stock_name: str,
+                trade_type: "buy" | "sell",
+                price: int,
+                quantity: int,
+                trade_date: str (YYYYMMDD),
+            }
+        """
+        self._ensure_valid_token()
+
+        if date is None:
+            from zoneinfo import ZoneInfo
+            from datetime import timedelta
+            kst = ZoneInfo("Asia/Seoul")
+            today = datetime.now(kst)
+            # 전 영업일: 월요일이면 금요일로
+            offset = 3 if today.weekday() == 0 else (2 if today.weekday() == 6 else 1)
+            prev_biz = today - timedelta(days=offset)
+            date = prev_biz.strftime('%Y%m%d')
+
+        url = f"{self.host}/api/dostk/acnt"
+        headers = {
+            "Content-Type": "application/json;charset=UTF-8",
+            "api-id": "ka10170",
+            "authorization": f"Bearer {self.token}",
+        }
+        body = {"qry_dt": date}
+
+        all_rows = []
+        cont_yn = None
+        next_key = None
+
+        while True:
+            req_headers = dict(headers)
+            if cont_yn:
+                req_headers["cont-yn"] = cont_yn
+            if next_key:
+                req_headers["next-key"] = next_key
+
+            try:
+                resp = requests.post(url, headers=req_headers, json=body, timeout=10)
+                resp.raise_for_status()
+                data = resp.json()
+                h = resp.headers
+
+                rows = data.get("cts_acnt_dtls", []) or []
+                for row in rows:
+                    code = normalize_stock_code(str(row.get("stk_cd", "") or ""))
+                    if not code:
+                        continue
+                    buy_sell = str(row.get("deal_tp", "") or row.get("bstp_nm", "") or "")
+                    trade_type = "buy" if "매수" in buy_sell or buy_sell in ("1", "01") else "sell"
+                    try:
+                        price = abs(int(str(row.get("cntr_uv", 0) or row.get("ord_uv", 0) or 0).replace(",", "")))
+                        qty = abs(int(str(row.get("cntr_qty", 0) or 0).replace(",", "")))
+                    except (ValueError, TypeError):
+                        price, qty = 0, 0
+                    all_rows.append({
+                        "stock_code": code,
+                        "stock_name": str(row.get("stk_nm", "") or "").strip(),
+                        "trade_type": trade_type,
+                        "price": price,
+                        "quantity": qty,
+                        "trade_date": date,
+                    })
+
+                cont_yn = h.get("cont-yn")
+                next_key = h.get("next-key")
+                if cont_yn != "Y":
+                    break
+
+            except Exception as e:
+                logger.error(f"일별 체결 조회 실패 ({date}): {e}")
+                break
+
+        return all_rows

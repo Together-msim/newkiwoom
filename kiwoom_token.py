@@ -11,9 +11,12 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(dotenv_path=os.path.join(BASE_DIR, ".env"))
 
 
-def get_token() -> str:
+def get_token(account: str = 'sub') -> str:
     """
     키움 API에서 OAuth2 토큰을 발급받습니다.
+
+    account='main'이면 KIWOOM_MAIN_APPKEY/KIWOOM_MAIN_SECRETKEY 사용.
+    account='sub'(기본)이면 KIWOOM_APPKEY/KIWOOM_SECRETKEY 사용.
 
     Returns:
         str: 발급받은 토큰
@@ -23,19 +26,24 @@ def get_token() -> str:
         RuntimeError: 키움 API에서 에러 응답을 받은 경우
         requests.RequestException: HTTP 요청 실패 시
     """
+    if account == 'main':
+        appkey_env, secretkey_env = 'KIWOOM_MAIN_APPKEY', 'KIWOOM_MAIN_SECRETKEY'
+    else:
+        appkey_env, secretkey_env = 'KIWOOM_APPKEY', 'KIWOOM_SECRETKEY'
+
     # 호출 시마다 .env 재로드 (다른 스레드에서 env가 비어 있는 경우 대비)
     load_dotenv(dotenv_path=os.path.join(BASE_DIR, ".env"))
 
     host = (os.getenv("KIWOOM_HOST") or "").strip()
-    appkey = (os.getenv("KIWOOM_APPKEY") or "").strip()
-    secretkey = (os.getenv("KIWOOM_SECRETKEY") or "").strip()
+    appkey = (os.getenv(appkey_env) or "").strip()
+    secretkey = (os.getenv(secretkey_env) or "").strip()
 
     if not host:
         raise ValueError("KIWOOM_HOST 환경 변수가 설정되지 않았습니다.")
     if not appkey:
-        raise ValueError("KIWOOM_APPKEY 환경 변수가 설정되지 않았습니다.")
+        raise ValueError(f"{appkey_env} 환경 변수가 설정되지 않았습니다.")
     if not secretkey:
-        raise ValueError("KIWOOM_SECRETKEY 환경 변수가 설정되지 않았습니다.")
+        raise ValueError(f"{secretkey_env} 환경 변수가 설정되지 않았습니다.")
 
     # OAuth는 REST용 https 사용 (wss/ws 설정 시 교정)
     oauth_host = host.replace("wss://", "https://").replace("ws://", "http://").rstrip("/")
@@ -64,7 +72,7 @@ def get_token() -> str:
                 f"응답: {body}\n\n"
                 f"확인 사항:\n"
                 f"  - KIWOOM_HOST: https://api.kiwoom.com (실서버) 또는 https://mockapi.kiwoom.com (모의)\n"
-                f"  - KIWOOM_APPKEY, KIWOOM_SECRETKEY가 정확한지\n"
+                f"  - {appkey_env}, {secretkey_env}가 정확한지\n"
                 f"  - 키움 OpenAPI 포털에서 서버 IP 주소가 등록되었는지\n"
                 f"  - appkey/secretkey 갱신 또는 지정단말기 인증 필요 여부"
             )

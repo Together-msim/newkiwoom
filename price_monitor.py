@@ -42,6 +42,9 @@ class PriceMonitor:
         # Style3 마지막 체크 시간 + 중복 알림 방지
         self.style3_last_check = datetime.min.replace(tzinfo=None)
         self.style3_last_signals: dict = {}  # {(code, sig_type, date): price}
+        # Style3 C2 지지가 캐시: {code: {support_price, cached_date}}
+        # 하루 1회 장 시작 전(8:50) or 첫 실행 시 일봉 조회 후 캐싱
+        self.style3_c2_cache: dict = {}
         # news_storage 참조 (Style3 시그널 저장용)
         self.news_storage = None
 
@@ -1136,7 +1139,7 @@ class PriceMonitor:
                 await asyncio.sleep(self.interval)
 
     async def check_style3_conditions(self):
-        """trade_watchlist watching 종목에 대해 3분봉 기반 Style3 시그널 체크."""
+        """trade_watchlist watching 종목에 대해 3분봉 기반 Style3 시그널 체크 (비동기 병렬)."""
         if not self.news_storage:
             return
         try:
@@ -1158,182 +1161,200 @@ class PriceMonitor:
         today_str = datetime.now(KST).strftime('%Y-%m-%d')
         time_str = datetime.now(KST).strftime('%H:%M')
 
+        # C2 캐시 갱신: 날짜가 바뀌었거나 아직 오늘 캐시가 없으면 일봉 조회 예약
+        cache_stale = self.style3_c2_cache.get('_date') != today_str
+        if cache_stale:
+            self.style3_c2_cache = {'_date': today_str}
+            logger.info(f"Style3 C2 캐시 초기화 (날짜 변경: {today_str})")
+
+        if len(watchlist) > 0:
+            logger.info(f"🚀 Style3 병렬 API 호출 시작: {len(watchlist)}개 종목")
+
+        check_tasks = [
+            self._check_style3_one(item, token, today_str, time_str, cache_stale)
+            for item in watchlist
+        ]
+        results = await asyncio.gather(*check_tasks, return_exceptions=True)
+
+        for i, item in enumerate(watchlist):
+            if isinstance(results[i], Exception):
+                logger.error(f"Style3 종목 체크 실패 ({item.get('stock_code', '?')}): {results[i]}")
+
+    async def _check_style3_one(self, item: dict, token: str, today_str: str, time_str: str, refresh_c2: bool):
+        """Style3 단일 종목 비동기 체크 (check_style3_conditions의 per-item 헬퍼)."""
         import requests as _rq
         import os as _os
-        HOST = _os.environ.get('KIWOOM_HOST', 'https://api.kiwoom.com')
 
-        for item in watchlist:
-            code = item['stock_code']
-            exit_date = item.get('exit_date', '')
-            watchlist_id = item['id']
-            stock_name = item['stock_name']
+        code = item['stock_code']
+        exit_date = item.get('exit_date', '')
+        watchlist_id = item['id']
+        stock_name = item['stock_name']
 
-            # Mode2 watcher에서 매수타점/저항선 가격 조회 (우선)
-            buy_target_price = 0.0
-            resistance_1_price = 0.0
-            resistance_2_price = 0.0
-            if self.mode2_mgr:
-                # mode2_mgr.watchers는 {code: watcher_dict} 형태
-                all_w = getattr(self.mode2_mgr, 'watchers', {})
-                m2 = all_w.get(code)
-                if m2:
-                    buy_target_price = float(m2.get('buy_target_price') or 0)
-                    resistance_1_price = float(m2.get('resistance_1_price') or 0)
-                    resistance_2_price = float(m2.get('resistance_2_price') or 0)
-                    # Mode2에서 매도 완료된 경우 exit_date를 updated_at 기준으로 갱신
-                    if m2.get('status') in ('auto_sold', 'manual_sold') and m2.get('updated_at'):
-                        exit_date = m2['updated_at'][:10]
+        # Mode2 watcher에서 매수타점/저항선 가격 조회 (우선)
+        buy_target_price = 0.0
+        resistance_1_price = 0.0
+        resistance_2_price = 0.0
+        if self.mode2_mgr:
+            all_w = getattr(self.mode2_mgr, 'watchers', {})
+            m2 = all_w.get(code)
+            if m2:
+                buy_target_price = float(m2.get('buy_target_price') or 0)
+                resistance_1_price = float(m2.get('resistance_1_price') or 0)
+                resistance_2_price = float(m2.get('resistance_2_price') or 0)
+                if m2.get('status') in ('auto_sold', 'manual_sold') and m2.get('updated_at'):
+                    exit_date = m2['updated_at'][:10]
 
-            # Mode2 가격 없으면 trade_watchlist 원래 값 fallback
-            if not buy_target_price:
-                buy_target_price = float(item.get('buy_price') or 0)
-            if not resistance_1_price:
-                resistance_1_price = float(item.get('exit_price') or 0)
+        # Mode2 가격 없으면 trade_watchlist 원래 값 fallback
+        if not buy_target_price:
+            buy_target_price = float(item.get('buy_price') or 0)
+        if not resistance_1_price:
+            resistance_1_price = float(item.get('exit_price') or 0)
 
-            if not buy_target_price:
-                continue
+        # buy_target_price=0 이면 Track A (C2 전용) — A/A2/B 는 scan_style3_signals 내에서 체크되지 않도록
+        # scan_style3_signals는 buy_target_price=0이면 Type A/A2 미발생, resistance_1=0이면 A2/B-r1 미발생
 
-            # (과열기간 억제 없음 — 단일가 매매일만 3분봉 조회 후 제외)
+        # 3분봉 조회 (비동기)
+        try:
+            minute_bars = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: get_minute_chart(token, code, "3분", count=20)
+            )
+        except Exception as e:
+            logger.warning(f"Style3 {code} 3분봉 조회 실패: {e}")
+            return
 
-            try:
-                # 3분봉 조회 (최근 20봉)
-                minute_bars = get_minute_chart(token, code, "3분", count=20)
-                if not minute_bars or len(minute_bars) < 3:
-                    continue
+        if not minute_bars or len(minute_bars) < 3:
+            return
 
-                # 단일가 매매일 감지 — 봉 간격 30분 이상이 주를 이루면 스킵
-                def _is_danilga(bars):
-                    times = [str(b.get('time', ''))[:4] for b in bars if b.get('time')]
-                    if len(times) < 3:
-                        return False
-                    gaps = []
-                    for i in range(1, len(times)):
-                        try:
-                            h1, m1 = int(times[i-1][:2]), int(times[i-1][2:])
-                            h2, m2 = int(times[i][:2]), int(times[i][2:])
-                            gap = (h2 * 60 + m2) - (h1 * 60 + m1)
-                            if gap > 0:
-                                gaps.append(gap)
-                        except Exception:
-                            pass
-                    if not gaps:
-                        return False
-                    return sum(1 for g in gaps if g >= 25) / len(gaps) > 0.5
-                if _is_danilga(minute_bars):
-                    logger.debug(f"Style3 {code} 단일가 매매일 — 시그널 스킵")
-                    continue
-
-                # C2 지지가: 일봉 배열로 계산 (ka10081 직접 호출)
-                support_price = None
+        # 단일가 매매일 감지 — 봉 간격 25분 이상이 주를 이루면 스킵
+        times = [str(b.get('time', ''))[:4] for b in minute_bars if b.get('time')]
+        if len(times) >= 3:
+            gaps = []
+            for i in range(1, len(times)):
                 try:
-                    kw_headers = {
-                        'Content-Type': 'application/json;charset=UTF-8',
-                        'api-id': 'ka10081',
-                        'authorization': 'Bearer ' + token,
-                    }
-                    base_dt = datetime.now(KST).strftime('%Y%m%d')
-                    payload = {'stk_cd': code, 'base_dt': base_dt, 'upd_stkpc_tp': '1'}
-                    resp = _rq.post(HOST.rstrip('/') + '/api/dostk/chart', headers=kw_headers, json=payload, timeout=15)
-                    chart_resp = resp.json() if resp.ok else {}
-                    raw_bars = chart_resp.get('stk_dt_pole_chart_qry', [])
+                    h1, m1 = int(times[i-1][:2]), int(times[i-1][2:])
+                    h2, m2_v = int(times[i][:2]), int(times[i][2:])
+                    gap = (h2 * 60 + m2_v) - (h1 * 60 + m1)
+                    if gap > 0:
+                        gaps.append(gap)
+                except Exception:
+                    pass
+            if gaps and sum(1 for g in gaps if g >= 25) / len(gaps) > 0.5:
+                logger.debug(f"Style3 {code} 단일가 매매일 — 시그널 스킵")
+                return
 
-                    def _pp(v):
-                        return abs(int(str(v).replace('+', '').replace('-', '').replace(',', ''))) if v else 0
+        # C2 지지가: 캐시 우선, 없으면 일봉 조회 후 캐싱
+        cache_entry = self.style3_c2_cache.get(code)
+        if cache_entry:
+            support_price = cache_entry.get('support_price')
+        else:
+            support_price = None
+            try:
+                HOST = _os.environ.get('KIWOOM_HOST', 'https://api.kiwoom.com')
+                kw_headers = {
+                    'Content-Type': 'application/json;charset=UTF-8',
+                    'api-id': 'ka10081',
+                    'authorization': 'Bearer ' + token,
+                }
+                base_dt = datetime.now(KST).strftime('%Y%m%d')
+                payload = {'stk_cd': code, 'base_dt': base_dt, 'upd_stkpc_tp': '1'}
+                resp = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: _rq.post(HOST.rstrip('/') + '/api/dostk/chart', headers=kw_headers, json=payload, timeout=15)
+                )
+                chart_resp = resp.json() if resp.ok else {}
+                raw_bars = chart_resp.get('stk_dt_pole_chart_qry', [])
 
-                    daily_bars = sorted([{
-                        'date': str(b.get('dt', '')),
-                        'open': _pp(b.get('open_pric')),
-                        'high': _pp(b.get('high_pric')),
-                        'low': _pp(b.get('low_pric')),
-                        'close': _pp(b.get('cur_prc')),
-                        'volume': int(str(b.get('trde_qty', '0')).replace(',', '')),
-                    } for b in raw_bars], key=lambda x: x['date'])
+                def _pp(v):
+                    return abs(int(str(v).replace('+', '').replace('-', '').replace(',', ''))) if v else 0
 
-                    support_price = calc_c2_support(daily_bars, exit_date)
-                except Exception as e:
-                    logger.warning(f"Style3 {code} 일봉 조회 실패: {e}")
+                daily_bars = sorted([{
+                    'date': str(b.get('dt', '')),
+                    'open': _pp(b.get('open_pric')),
+                    'high': _pp(b.get('high_pric')),
+                    'low': _pp(b.get('low_pric')),
+                    'close': _pp(b.get('cur_prc')),
+                    'volume': int(str(b.get('trde_qty', '0')).replace(',', '')),
+                } for b in raw_bars], key=lambda x: x['date'])
 
-                # 시그널 탐지
-                signals = scan_style3_signals(minute_bars, buy_target_price, resistance_1_price, resistance_2_price, support_price)
-
-                for sig in signals:
-                    sig_type = sig['type']
-
-                    # DB 기반 중복 억제 (서버 재시작 후에도 유지)
-                    last = self.news_storage.get_latest_signal_today(code, sig_type, today_str)
-                    if last:
-                        last_price = last.get('entry_price_suggestion') or 0
-                        last_time = last.get('signal_time', '00:00')
-
-                        if sig_type in ('A', 'A2'):
-                            # A/A2: 당일 1개만
-                            continue
-                        elif sig_type in ('B-r1', 'B-r2'):
-                            # B: entry_price가 동일하면 skip (같은 가격대 반복 방지)
-                            if last_price and abs(sig['entry_price'] - last_price) / last_price < 0.02:
-                                continue
-                        elif sig_type in ('C1', 'C3'):
-                            # C1/C3: 마지막 동일 타입 시그널로부터 2시간 경과해야 재발동
-                            try:
-                                last_h, last_m = map(int, last_time.split(':'))
-                                cur_h, cur_m = map(int, time_str.split(':'))
-                                elapsed = (cur_h * 60 + cur_m) - (last_h * 60 + last_m)
-                                if elapsed < 120:
-                                    continue
-                            except Exception:
-                                pass
-                        # C2: 기존 style3_signals.py dedup 로직(support_price ±100원)이 이미 처리
-
-                    # DB 저장
-                    try:
-                        self.news_storage.save_reentry_signal(
-                            watchlist_id=watchlist_id,
-                            stock_code=code,
-                            stock_name=stock_name,
-                            signal_type=sig_type,
-                            signal_date=today_str,
-                            entry_price_suggestion=sig['entry_price'],
-                            confidence=sig['confidence'],
-                            reason=sig['reason'],
-                            signal_time=time_str,
-                            support_price=sig.get('support_price', 0),
-                        )
-                    except Exception as e:
-                        logger.error(f"Style3 시그널 저장 실패: {e}")
-
-                    # 텔레그램 알림
-                    type_label = {
-                        'A': '매수타점 복귀',
-                        'A2': '1차저항 복귀 (익절가 지지선 전환)',
-                        'B-r1': '1차저항 돌파',
-                        'B-r2': '2차저항 돌파',
-                        'C1': '거감봉 진행중',
-                        'C2': '쌍바닥 지지 터치',
-                        'C3': '거래량 급증 재상승',
-                    }.get(sig_type, sig_type)
-                    ref_prices = []
-                    if buy_target_price:
-                        ref_prices.append(f"매수타점: {int(buy_target_price):,}원")
-                    if resistance_1_price:
-                        ref_prices.append(f"1차저항: {int(resistance_1_price):,}원")
-                    if resistance_2_price:
-                        ref_prices.append(f"2차저항: {int(resistance_2_price):,}원")
-                    msg = (
-                        f"🔄 Style3 재진입 시그널 [{sig_type}]\n\n"
-                        f"종목: {stock_name} ({code})\n"
-                        f"타입: {type_label}\n"
-                        f"현재가: {sig['entry_price']:,}원"
-                        + (f" | 지지선: {int(sig['support_price']):,}원" if sig.get('support_price') else "")
-                        + ("\n" + " | ".join(ref_prices) if ref_prices else "")
-                        + f"\n시간: {time_str}\n\n"
-                        f"{sig['reason']}"
-                    )
-                    await self.send_notification(msg)
-                    logger.info(f"Style3 시그널: {code} [{sig_type}] @ {sig['entry_price']:,}원 ({time_str})")
-
+                support_price = calc_c2_support(daily_bars, exit_date)
+                self.style3_c2_cache[code] = {'support_price': support_price, 'cached_date': today_str}
+                logger.debug(f"Style3 C2 캐시 저장 {code}: support_price={support_price}")
             except Exception as e:
-                logger.error(f"Style3 종목 체크 실패 ({code}): {e}")
-                continue
+                logger.warning(f"Style3 {code} 일봉 조회 실패: {e}")
+
+        # 시그널 탐지
+        signals = scan_style3_signals(minute_bars, buy_target_price, resistance_1_price, resistance_2_price, support_price)
+
+        for sig in signals:
+            sig_type = sig['type']
+
+            # DB 기반 중복 억제
+            last = self.news_storage.get_latest_signal_today(code, sig_type, today_str)
+            if last:
+                last_price = last.get('entry_price_suggestion') or 0
+                last_time = last.get('signal_time', '00:00')
+
+                if sig_type in ('A', 'A2'):
+                    continue
+                elif sig_type in ('B-r1', 'B-r2'):
+                    if last_price and abs(sig['entry_price'] - last_price) / last_price < 0.02:
+                        continue
+                elif sig_type in ('C1', 'C3'):
+                    try:
+                        last_h, last_m = map(int, last_time.split(':'))
+                        cur_h, cur_m = map(int, time_str.split(':'))
+                        elapsed = (cur_h * 60 + cur_m) - (last_h * 60 + last_m)
+                        if elapsed < 120:
+                            continue
+                    except Exception:
+                        pass
+
+            # DB 저장
+            try:
+                self.news_storage.save_reentry_signal(
+                    watchlist_id=watchlist_id,
+                    stock_code=code,
+                    stock_name=stock_name,
+                    signal_type=sig_type,
+                    signal_date=today_str,
+                    entry_price_suggestion=sig['entry_price'],
+                    confidence=sig['confidence'],
+                    reason=sig['reason'],
+                    signal_time=time_str,
+                    support_price=sig.get('support_price', 0),
+                )
+            except Exception as e:
+                logger.error(f"Style3 시그널 저장 실패: {e}")
+
+            # 텔레그램 알림
+            type_label = {
+                'A': '매수타점 복귀',
+                'A2': '1차저항 복귀 (익절가 지지선 전환)',
+                'B-r1': '1차저항 돌파',
+                'B-r2': '2차저항 돌파',
+                'C1': '거감봉 진행중',
+                'C2': '쌍바닥 지지 터치',
+                'C3': '거래량 급증 재상승',
+            }.get(sig_type, sig_type)
+            ref_prices = []
+            if buy_target_price:
+                ref_prices.append(f"매수타점: {int(buy_target_price):,}원")
+            if resistance_1_price:
+                ref_prices.append(f"1차저항: {int(resistance_1_price):,}원")
+            if resistance_2_price:
+                ref_prices.append(f"2차저항: {int(resistance_2_price):,}원")
+            msg = (
+                f"🔄 Style3 재진입 시그널 [{sig_type}]\n\n"
+                f"종목: {stock_name} ({code})\n"
+                f"타입: {type_label}\n"
+                f"현재가: {sig['entry_price']:,}원"
+                + (f" | 지지선: {int(sig['support_price']):,}원" if sig.get('support_price') else "")
+                + ("\n" + " | ".join(ref_prices) if ref_prices else "")
+                + f"\n시간: {time_str}\n\n"
+                f"{sig['reason']}"
+            )
+            await self.send_notification(msg)
+            logger.info(f"Style3 시그널: {code} [{sig_type}] @ {sig['entry_price']:,}원 ({time_str})")
 
     async def start_monitoring_task(self):
         """모니터링 태스크 시작"""

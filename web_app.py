@@ -1707,6 +1707,62 @@ def delete_watchlist(code):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+# ========== Morning Watchlist API (Style3 Track A) ==========
+
+_MORNING_WATCHLIST_PATH = Path(os.getenv("MORNING_WATCHLIST_PATH", ".data/morning_watchlist.json"))
+
+
+def _load_morning_watchlist():
+    if _MORNING_WATCHLIST_PATH.exists():
+        try:
+            return json.loads(_MORNING_WATCHLIST_PATH.read_text(encoding='utf-8'))
+        except Exception:
+            return []
+    return []
+
+
+@app.route('/api/morning-watchlist', methods=['GET'])
+@auth.login_required
+def get_morning_watchlist():
+    try:
+        items = _load_morning_watchlist()
+        return jsonify({'success': True, 'data': items, 'count': len(items)})
+    except Exception as e:
+        logger.error(f"get_morning_watchlist 실패: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/morning-watchlist', methods=['POST'])
+@auth.login_required
+def set_morning_watchlist():
+    """전체 교체. body: {"items": [{"code": "005930", "name": "삼성전자"}, ...]}
+    또는 CSV 텍스트: {"csv": "종목코드,종목명\\n005930,삼성전자\\n..."}
+    """
+    try:
+        data = request.get_json(force=True) or {}
+        if 'csv' in data:
+            items = []
+            for line in data['csv'].splitlines():
+                parts = [p.strip() for p in line.split(',')]
+                if len(parts) >= 2:
+                    code = parts[0].lstrip("'").strip()
+                    name = parts[1].strip()
+                    if code and code.isdigit():
+                        items.append({'code': normalize_stock_code(code), 'name': name})
+        else:
+            raw = data.get('items', [])
+            items = [
+                {'code': normalize_stock_code(str(it['code']).lstrip("'")), 'name': str(it.get('name', ''))}
+                for it in raw if it.get('code')
+            ]
+        _MORNING_WATCHLIST_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _MORNING_WATCHLIST_PATH.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding='utf-8')
+        return jsonify({'success': True, 'count': len(items)})
+    except Exception as e:
+        logger.error(f"set_morning_watchlist 실패: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 # ========== Hotstock Parsed API ==========
 
 import re as _re
