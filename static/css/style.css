@@ -2706,6 +2706,8 @@ tbody tr.inactive {
     text-align: left;
 }
 .reentry-watchlist-table th { background: var(--bg-secondary); color: var(--text-secondary); font-weight: 600; }
+.s3-editable { cursor: pointer; }
+.s3-editable:hover { background: rgba(52, 152, 219, 0.08); border-radius: 3px; }
 
 /* Style3 벌크 등록 탭 */
 #ssReentryCard .btn-primary { background: var(--primary); color: white; }

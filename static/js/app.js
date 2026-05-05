@@ -8610,6 +8610,58 @@ async function _registerStyle3Item({ code, name, buyPrice, buyDate, exitPrice, e
     }
 }
 
+function _s3WatchlistRowHtml(w, today) {
+    const createdAt = w.created_at ? new Date(w.created_at) : null;
+    const daysSince = createdAt ? Math.floor((today - createdAt) / 86400000) + 1 : '-';
+    const dayLabel = typeof daysSince === 'number' ? `등록 ${daysSince}일차` : '-';
+    const isDraft = w.status === 'draft';
+    const rowStyle = isDraft ? 'background:rgba(255,193,7,0.08);' : '';
+    const actionBtns = isDraft
+        ? `<button class="btn btn-sm btn-primary" onclick="confirmDraftWatchlist(${w.id},'${w.stock_code}','${w.stock_name}',${w.buy_price||0},${w.exit_price||0},'${w.buy_date||''}','${w.exit_date||''}')">✓ 등록</button>
+           <button class="btn btn-sm btn-secondary" style="margin-left:4px;" onclick="deleteTradeWatchlist(${w.id})">✕</button>`
+        : `<button class="btn btn-sm btn-outline" onclick="showS3Mode2Modal('${w.stock_code}','${w.stock_name}',${w.buy_price||0},${w.exit_price||0},${w.id})">📊 Mode2</button>
+           <button class="btn btn-sm btn-secondary" style="margin-left:4px;" onclick="deleteTradeWatchlist(${w.id})">삭제</button>`;
+    return `<tr style="${rowStyle}" data-wid="${w.id}">
+        <td><strong>${w.stock_name}</strong><br><small style="color:#868e96">${w.stock_code}</small></td>
+        <td class="s3-editable" data-wid="${w.id}" data-field="buy_price" onclick="s3InlineEdit(this)">${(w.buy_price||0).toLocaleString()}원</td>
+        <td class="s3-editable" data-wid="${w.id}" data-field="exit_price" onclick="s3InlineEdit(this)">${(w.exit_price||0).toLocaleString()}원</td>
+        <td class="s3-editable" data-wid="${w.id}" data-field="exit_date" onclick="s3InlineEdit(this)">${w.exit_date||'-'}</td>
+        <td style="font-size:12px;color:#868e96;">${dayLabel}</td>
+        <td><span class="reentry-status-${w.status}">${isDraft ? '초안' : w.status}</span></td>
+        <td style="white-space:nowrap;">${actionBtns}</td>
+    </tr>`;
+}
+
+function s3InlineEdit(td) {
+    if (td.querySelector('input')) return;
+    const field = td.dataset.field;
+    const wid = td.dataset.wid;
+    const raw = td.textContent.replace(/[원,]/g, '').trim();
+    const isDate = field === 'exit_date';
+    const input = document.createElement('input');
+    input.type = isDate ? 'date' : 'number';
+    input.value = isDate ? (raw === '-' ? '' : raw) : (parseFloat(raw) || 0);
+    input.style.cssText = 'width:100%;box-sizing:border-box;padding:3px 5px;font-size:13px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-primary);color:var(--text-primary);';
+    td.textContent = '';
+    td.appendChild(input);
+    input.focus();
+
+    const save = async () => {
+        const val = input.value;
+        const body = { [field]: isDate ? val : parseFloat(val) };
+        await fetch(`/api/trade-watchlist/${wid}`, {
+            method: 'PUT', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        // 두 컨테이너 모두 갱신
+        loadTradeWatchlist();
+        _liveLoadS3Watchlist();
+    };
+    input.addEventListener('blur', save);
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') input.blur(); if (e.key === 'Escape') { loadTradeWatchlist(); _liveLoadS3Watchlist(); } });
+}
+
 async function loadTradeWatchlist() {
     const container = document.getElementById('tradeWatchlistContainer');
     if (!container) return;
@@ -8624,23 +8676,7 @@ async function loadTradeWatchlist() {
         const today = new Date();
         container.innerHTML = `<table class="reentry-watchlist-table">
             <thead><tr><th>종목</th><th>매수가</th><th>익절가</th><th>익절일</th><th>등록</th><th>상태</th><th></th></tr></thead>
-            <tbody>${items.map(w => {
-                const createdAt = w.created_at ? new Date(w.created_at) : null;
-                const daysSince = createdAt ? Math.floor((today - createdAt) / 86400000) + 1 : '-';
-                const dayLabel = typeof daysSince === 'number' ? `등록 ${daysSince}일차` : '-';
-                return `
-                <tr>
-                    <td><strong>${w.stock_name}</strong><br><small style="color:#868e96">${w.stock_code}</small></td>
-                    <td>${(w.buy_price||0).toLocaleString()}원</td>
-                    <td>${(w.exit_price||0).toLocaleString()}원</td>
-                    <td>${w.exit_date||'-'}</td>
-                    <td style="font-size:12px;color:#868e96;">${dayLabel}</td>
-                    <td><span class="reentry-status-${w.status}">${w.status}</span></td>
-                    <td>
-                        <button class="btn btn-sm btn-secondary" onclick="deleteTradeWatchlist(${w.id})">삭제</button>
-                    </td>
-                </tr>`;
-            }).join('')}</tbody>
+            <tbody>${items.map(w => _s3WatchlistRowHtml(w, today)).join('')}</tbody>
         </table>`;
     } catch (e) {
         container.innerHTML = '<p style="color:#e74c3c">로드 실패</p>';
@@ -8651,7 +8687,7 @@ async function deleteTradeWatchlist(id) {
     if (!confirm('감시 목록에서 삭제할까요?')) return;
     const res = await fetch(`/api/trade-watchlist/${id}`, { method: 'DELETE', credentials: 'same-origin' });
     const r = await res.json();
-    if (r.success) loadTradeWatchlist();
+    if (r.success) { loadTradeWatchlist(); _liveLoadS3Watchlist(); }
 }
 
 // ─── Style3 벌크 등록 + 탭 전환 ──────────────────────────────────────
@@ -8960,28 +8996,8 @@ async function _liveLoadS3Watchlist() {
         }
         const today = new Date();
         container.innerHTML = `<table class="reentry-watchlist-table">
-            <thead><tr><th>종목</th><th>매수가</th><th>익절가</th><th>익절일</th><th>등록</th><th>상태</th><th></th></tr></thead>
-            <tbody>${items.map(w => {
-                const createdAt = w.created_at ? new Date(w.created_at) : null;
-                const daysSince = createdAt ? Math.floor((today - createdAt) / 86400000) + 1 : '-';
-                const dayLabel = typeof daysSince === 'number' ? `등록 ${daysSince}일차` : '-';
-                const isDraft = w.status === 'draft';
-                const rowStyle = isDraft ? 'background:rgba(255,193,7,0.08);' : '';
-                const actionBtns = isDraft
-                    ? `<button class="btn btn-sm btn-primary" onclick="confirmDraftWatchlist(${w.id},'${w.stock_code}','${w.stock_name}',${w.buy_price||0},${w.exit_price||0},'${w.buy_date||''}','${w.exit_date||''}')">✓ 등록</button>
-                       <button class="btn btn-sm btn-secondary" style="margin-left:4px;" onclick="deleteTradeWatchlist(${w.id})">✕</button>`
-                    : `<button class="btn btn-sm btn-outline" onclick="showS3Mode2Modal('${w.stock_code}','${w.stock_name}',${w.buy_price||0},${w.exit_price||0},${w.id})">📊 Mode2</button>
-                       <button class="btn btn-sm btn-secondary" style="margin-left:4px;" onclick="deleteTradeWatchlist(${w.id})">삭제</button>`;
-                return `<tr style="${rowStyle}">
-                    <td><strong>${w.stock_name}</strong><br><small style="color:#868e96">${w.stock_code}</small></td>
-                    <td>${(w.buy_price||0).toLocaleString()}원</td>
-                    <td>${(w.exit_price||0).toLocaleString()}원</td>
-                    <td>${w.exit_date||'-'}</td>
-                    <td style="font-size:12px;color:#868e96;">${dayLabel}</td>
-                    <td><span class="reentry-status-${w.status}">${isDraft ? '초안' : w.status}</span></td>
-                    <td style="white-space:nowrap;">${actionBtns}</td>
-                </tr>`;
-            }).join('')}</tbody>
+            <thead><tr><th>종목</th><th>매수가 ✏️</th><th>익절가 ✏️</th><th>익절일 ✏️</th><th>등록</th><th>상태</th><th></th></tr></thead>
+            <tbody>${items.map(w => _s3WatchlistRowHtml(w, today)).join('')}</tbody>
         </table>`;
     } catch (e) {
         container.innerHTML = '<p style="color:#e74c3c">로드 실패</p>';
@@ -8989,7 +9005,7 @@ async function _liveLoadS3Watchlist() {
 }
 
 async function confirmDraftWatchlist(wid, code, name, buyPrice, exitPrice, buyDate, exitDate) {
-    // draft → watching 전환 + Mode2 섹션 자동 생성
+    // draft → watching 전환 (시그널 감시 시작)
     const res = await fetch(`/api/trade-watchlist/${wid}`, {
         method: 'PUT', credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
@@ -8998,14 +9014,9 @@ async function confirmDraftWatchlist(wid, code, name, buyPrice, exitPrice, buyDa
     const r = await res.json();
     if (!r.success) { showToast('상태 전환 실패', 'error'); return; }
 
-    // Mode2 섹션 생성
-    const today = new Date();
-    const mmdd = String(today.getMonth()+1).padStart(2,'0') + '-' + String(today.getDate()).padStart(2,'0');
-    const sectionName = `${mmdd} 발라먹기`;
-    await _ensureSection(sectionName);
-
-    showToast(`${name} 감시 등록 완료 → [${sectionName}]`, 'success');
+    showToast(`${name} 감시 시작 — 시그널 탭에서 확인`, 'success');
     _liveLoadS3Watchlist();
+    loadTradeWatchlist();
 }
 
 async function _liveLoadS3Signals() {
@@ -9020,26 +9031,48 @@ async function _liveLoadS3Signals() {
             container.innerHTML = '<p style="color:#868e96;font-size:13px;text-align:center;padding:12px;">오늘 재진입 시그널 없음</p>';
             return;
         }
-        const typeColor = { A: '#3498db', B: '#f39c12', C1: '#2ecc71', C2: '#27ae60', C3: '#1a8a4a' };
-        container.innerHTML = signals.map(s => `
-            <div class="reentry-signal-card" style="margin-bottom:10px;">
-                <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap;">
-                    <strong>${s.stock_name}</strong>
-                    <span class="reentry-type-badge" style="background:${typeColor[s.signal_type]||'#95a5a6'}">Type ${s.signal_type}</span>
-                    <span class="reentry-confidence">${s.confidence||'M'}</span>
-                    ${s.signal_time ? `<span style="font-size:12px;color:#adb5bd;">⏱ ${s.signal_time}</span>` : ''}
-                </div>
-                <div style="font-size:13px;color:#495057;">${s.reason||''}</div>
-                <div style="font-size:13px;margin-top:4px;">
-                    진입가: <strong>${(s.entry_price||0).toLocaleString()}원</strong>
-                    &nbsp;|&nbsp; 매수가: ${(s.buy_price||0).toLocaleString()}원
-                    &nbsp;|&nbsp; 익절가: ${(s.exit_price||0).toLocaleString()}원
-                </div>
-                <div style="margin-top:8px;">
-                    <button class="btn btn-sm btn-outline" onclick="showS3Mode2Modal('${s.stock_code}','${s.stock_name}',${s.entry_price||s.buy_price||0},${s.exit_price||0},null)">📊 Mode2 전환</button>
-                </div>
-            </div>
-        `).join('');
+        const typeColor = { A: '#3498db', 'A2': '#2980b9', 'B-r1': '#f39c12', 'B-r2': '#e67e22', C1: '#2ecc71', C2: '#27ae60', C3: '#1a8a4a' };
+        const confColor = { H: '#e74c3c', 'H+': '#c0392b', M: '#f39c12', L: '#868e96' };
+
+        // 종목별 그룹핑 (시그널 누적)
+        const byStock = {};
+        for (const s of signals) {
+            const key = s.stock_code;
+            if (!byStock[key]) byStock[key] = { code: s.stock_code, name: s.stock_name, buy_price: s.buy_price, exit_price: s.exit_price, signals: [] };
+            byStock[key].signals.push(s);
+        }
+        // 최신 시그널이 위로 오도록 signal_time 역순 정렬
+        for (const v of Object.values(byStock)) {
+            v.signals.sort((a, b) => (b.signal_time || '').localeCompare(a.signal_time || ''));
+        }
+
+        container.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:13px;">
+            <thead><tr style="border-bottom:1px solid var(--border-color);">
+                <th style="padding:6px 8px;text-align:left;width:110px;white-space:nowrap;">종목</th>
+                <th style="padding:6px 8px;text-align:left;">시그널 (최신순)</th>
+            </tr></thead>
+            <tbody>${Object.values(byStock).map(stock => `
+                <tr style="border-bottom:1px solid var(--border-color);vertical-align:top;">
+                    <td style="padding:8px;white-space:nowrap;">
+                        <strong style="font-size:13px;">${stock.name}</strong><br>
+                        <small style="color:#868e96;">${stock.code}</small><br>
+                        <small style="color:#868e96;">매수 ${(stock.buy_price||0).toLocaleString()}</small><br>
+                        <small style="color:#868e96;">익절 ${(stock.exit_price||0).toLocaleString()}</small><br>
+                        <button class="btn btn-sm btn-outline" style="margin-top:4px;font-size:11px;" onclick="showS3Mode2Modal('${stock.code}','${stock.name}',${stock.buy_price||0},${stock.exit_price||0},null)">📊 Mode2</button>
+                    </td>
+                    <td style="padding:8px;">
+                        ${stock.signals.map(s => `
+                        <div style="display:flex;align-items:baseline;gap:6px;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.04);flex-wrap:wrap;">
+                            <span style="font-size:11px;color:#adb5bd;white-space:nowrap;">${s.signal_time || '--:--'}</span>
+                            <span class="reentry-type-badge" style="background:${typeColor[s.signal_type]||'#95a5a6'};font-size:11px;padding:1px 5px;">Type ${s.signal_type}</span>
+                            <span style="font-size:11px;font-weight:bold;color:${confColor[s.confidence]||'#f39c12'};">${s.confidence||'M'}</span>
+                            <span style="font-size:12px;color:var(--text-primary);">${s.reason||''}</span>
+                            ${s.entry_price ? `<span style="font-size:12px;color:#3498db;white-space:nowrap;">→ ${s.entry_price.toLocaleString()}원</span>` : ''}
+                        </div>`).join('')}
+                    </td>
+                </tr>`).join('')}
+            </tbody>
+        </table>`;
     } catch (e) {
         container.innerHTML = '<p style="color:#e74c3c">로드 실패</p>';
     }
