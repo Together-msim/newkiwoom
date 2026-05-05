@@ -91,16 +91,26 @@ Tactic1/2 (`bot_v3.py`)는 구형 기능으로 현재 미사용.
 - 섹션명: `YYYY-MM-DD Style3 발라먹기` (Mode2 날짜 필터로 조회 가능)
 - 실전 체크("⚡ 지금 확인") 버튼 → 현재 3분봉 기준 즉시 시그널 체크
 
-**Kiwoom 계좌 제약**:
-- 현재 연결: **부계좌** (실제 Style3 매매 이력 없음)
-- 실제 Style3 매매: **메인계좌** (미연결)
-- 향후 메인계좌 연결 시 `ka10170` 체결 이력 → `trade_watchlist` 자동 등록 예정
+**Kiwoom 계좌 구조 (2026-05 현재)**:
+- **서브계좌** (`account='sub'`, 기본): `KIWOOM_APPKEY`/`KIWOOM_SECRETKEY` — 자동매매 실행 계좌
+- **메인계좌** (`account='main'`): `KIWOOM_MAIN_APPKEY`/`KIWOOM_MAIN_SECRETKEY` — **조회 전용**
+  - 실제 Style3 수동 매매 이력이 있는 계좌
+  - `ka10170` 전일 체결 이력 조회 → Track B Style3 종목 자동 등록 소스
+  - `place_buy_order` / `place_sell_order` / `cancel_order` 호출 시 `PermissionError` 강제 차단
+  - `.env`: `KIWOOM_MAIN_APPKEY=`, `KIWOOM_MAIN_SECRETKEY=` (키 등록 후 사용)
 
 **관련 파일**:
 - `style3_signals.py` — 시그널 감지 유틸 (web_app.py + price_monitor.py 공유)
 - `news_storage.py` — `trade_watchlist` + `reentry_signals` 테이블
-- `web_app.py` — `/api/trade-watchlist` CRUD + `/api/reentry/signals` + `/api/seeking-signal/reentry-check`
-- `price_monitor.py: check_style3_conditions()` — 3분 폴링 실시간 체크
+- `web_app.py` — `/api/trade-watchlist` CRUD + `/api/reentry/signals` + `/api/seeking-signal/reentry-check` + `/api/morning-watchlist`
+- `price_monitor.py: check_style3_conditions()` — 3분 폴링 실시간 체크 (비동기 병렬, C2 캐시)
+- `kiwoom_client.py: get_daily_trades()` — ka10170 전일 매매일지 조회
+- `.data/morning_watchlist.json` — Track A 관심종목 (9.csv+10.csv 기반 130종목)
+
+**/morning-style3 스킬** (매일 아침 수동 실행):
+- Track A: 관심종목 130개 → 시가±5%(09:15)/±7%(10:00) 필터 → C2 전용 등록 (buy_price=0)
+- Track B: 메인계좌 전일 체결 → 매수타점+익절가 설정 → 전체 시그널 등록
+- 현재는 메인계좌 키 미등록으로 서브계좌 기준으로만 동작
 
 **Mode2 섹션 3종 구조** (매일 아침 기준):
 - `YYYY-MM-DD 눌림매매 (Style1)` — 수동 등록
@@ -967,3 +977,48 @@ Kiwoom ka10080 API는 응답에 `return_code` 필드를 반환하지 않음. `da
 
 ### style3_signals.py 배포 누락 주의
 `style3_signals.py`는 web_app.py와 price_monitor.py 양쪽에서 import하는 공유 모듈. 수정 후 git add 빠뜨리면 Oracle에 구버전이 남아서 `signal_time` 같은 필드가 없는 상태로 실행됨. 반드시 커밋 전 `git diff style3_signals.py` 확인.
+
+### Style3 비동기 전환 + C2 캐시 (2026-05-05)
+
+**`price_monitor.py: check_style3_conditions()`**:
+- 기존 동기 for-loop → `asyncio.gather()` + `_check_style3_one()` 헬퍼 분리
+- 150종목 동시 처리 시 ~30초 예상 (기존 150~300초 → 3분 초과 불가능했음)
+- `self.style3_c2_cache: dict` 추가 — `{code: {support_price, cached_date}, '_date': today_str}`
+  - 날짜가 바뀌면 `cache = {'_date': today_str}`으로 초기화
+  - 종목별 캐시 없으면 일봉(ka10081) 조회 후 저장, 이후 3분 주기엔 3분봉만 조회
+- `buy_target_price=0` (Track A 종목)이면 `scan_style3_signals`에서 Type A/A2/B 자연스럽게 미발생
+
+### ka10170 일별 매매일지 API 필수 파라미터 (2026-05-05)
+
+**실제 동작 파악 내용**:
+- 필수 파라미터: `ottks_tp` (0=전체), `ch_crd_tp` (0=현금+신용)
+  → 두 파라미터 모두 없으면 `return_code=2` 오류
+- 응답 리스트 키: `tdy_trde_diary` (기존 추측 `cts_acnt_dtls` 아님)
+- 응답 구조: 종목당 **1행**에 매수+매도 통합 (별개 행 아님)
+  - `buy_avg_pric` / `buy_qty`: 매수 평균가/수량
+  - `sel_avg_pric` / `sell_qty`: 매도 평균가/수량 (0이면 매도 없음)
+  - `pl_amt`: 당일 실현손익
+- `get_daily_trades()` 반환 형식: `{stock_code, stock_name, buy_price, buy_qty, sell_price, sell_qty, pl_amt, trade_date}`
+
+### CSV HTS 관심종목 파일 파싱 (2026-05-05)
+
+- 인코딩: **CP949** (한글 Windows HTS 내보내기)
+- 종목코드 컬럼: 마지막 컬럼 (`종목코드`), 값 앞에 `'` 접두어 포함 (`'005930`)
+- `lstrip("'").zfill(6)` 처리 필요
+- BLANK 행(섹션 구분선) 필터링: `row[0].strip() == 'BLANK'` 또는 종목명 컬럼 비어있으면 스킵
+- 9.csv + 10.csv 합산 → 130종목 (중복 제거)
+
+### 메인계좌 조회 전용 강제 차단 (2026-05-05)
+
+`KiwoomClient(account='main')` 인스턴스는 매매 불가:
+- `_assert_not_main_account()` → `place_buy_order`, `place_sell_order`, `cancel_order` 앞에서 `PermissionError` 발생
+- 조회 메서드(`get_daily_trades`, `get_positions`, `get_last_price` 등)는 정상 동작
+- `.env`에 `KIWOOM_MAIN_APPKEY`/`KIWOOM_MAIN_SECRETKEY` 빈값으로 추가됨 → 키 등록 후 사용
+
+### /api/morning-watchlist 업로드 방식 (2026-05-05)
+
+`POST /api/morning-watchlist` 두 가지 형식 지원:
+- **JSON**: `{"items": [{"code": "005930", "name": "삼성전자"}, ...]}`
+- **CSV 텍스트**: `{"csv": "종목코드,종목명\n005930,삼성전자\n..."}`
+  - 종목코드 앞 `'` 자동 제거, `isdigit()` 검증, 6자리 패딩
+- 파일 위치: `.data/morning_watchlist.json` (환경변수 `MORNING_WATCHLIST_PATH` 오버라이드 가능)
