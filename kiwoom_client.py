@@ -431,6 +431,14 @@ class KiwoomClient:
             logger.error(f"보유수량 조회 실패: {e}")
             return None
 
+    def _assert_not_main_account(self, operation: str):
+        """메인계좌(조회 전용)에서 매매 시도 시 즉시 차단."""
+        if self._account == 'main':
+            raise PermissionError(
+                f"메인계좌는 조회 전용입니다. {operation} 불가. "
+                "매매는 서브계좌(account='sub')만 허용됩니다."
+            )
+
     def place_buy_order(
         self,
         symbol: str,
@@ -456,6 +464,7 @@ class KiwoomClient:
                 "message": str
             }
         """
+        self._assert_not_main_account("매수 주문")
         symbol = normalize_stock_code(symbol)
         self._ensure_valid_token()
 
@@ -579,6 +588,7 @@ class KiwoomClient:
                 "message": str
             }
         """
+        self._assert_not_main_account("매도 주문")
         symbol = normalize_stock_code(symbol)
         self._ensure_valid_token()
 
@@ -794,6 +804,7 @@ class KiwoomClient:
                 "message": str
             }
         """
+        self._assert_not_main_account("주문 취소")
         symbol = normalize_stock_code(symbol)
         self._ensure_valid_token()
 
