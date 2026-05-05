@@ -8952,7 +8952,7 @@ async function _liveLoadS3Watchlist() {
     try {
         const res = await fetch('/api/trade-watchlist', { credentials: 'same-origin' });
         const r = await res.json();
-        const items = r.data || [];
+        const items = (r.data || []).filter(w => w.status !== 'exited');
         if (!items.length) {
             container.innerHTML = '<p style="color:#868e96;font-size:14px;text-align:center;padding:16px;">등록된 감시 종목 없음</p>';
             return;
@@ -8964,20 +8964,47 @@ async function _liveLoadS3Watchlist() {
                 const createdAt = w.created_at ? new Date(w.created_at) : null;
                 const daysSince = createdAt ? Math.floor((today - createdAt) / 86400000) + 1 : '-';
                 const dayLabel = typeof daysSince === 'number' ? `등록 ${daysSince}일차` : '-';
-                return `<tr>
+                const isDraft = w.status === 'draft';
+                const rowStyle = isDraft ? 'background:rgba(255,193,7,0.08);' : '';
+                const actionBtns = isDraft
+                    ? `<button class="btn btn-sm btn-primary" onclick="confirmDraftWatchlist(${w.id},'${w.stock_code}','${w.stock_name}',${w.buy_price||0},${w.exit_price||0},'${w.buy_date||''}','${w.exit_date||''}')">✓ 등록</button>
+                       <button class="btn btn-sm btn-secondary" style="margin-left:4px;" onclick="deleteTradeWatchlist(${w.id})">✕</button>`
+                    : `<button class="btn btn-sm btn-outline" onclick="showS3Mode2Modal('${w.stock_code}','${w.stock_name}',${w.buy_price||0},${w.exit_price||0},${w.id})">📊 Mode2</button>
+                       <button class="btn btn-sm btn-secondary" style="margin-left:4px;" onclick="deleteTradeWatchlist(${w.id})">삭제</button>`;
+                return `<tr style="${rowStyle}">
                     <td><strong>${w.stock_name}</strong><br><small style="color:#868e96">${w.stock_code}</small></td>
                     <td>${(w.buy_price||0).toLocaleString()}원</td>
                     <td>${(w.exit_price||0).toLocaleString()}원</td>
                     <td>${w.exit_date||'-'}</td>
                     <td style="font-size:12px;color:#868e96;">${dayLabel}</td>
-                    <td><span class="reentry-status-${w.status}">${w.status}</span></td>
-                    <td><button class="btn btn-sm btn-secondary" onclick="deleteTradeWatchlist(${w.id})">삭제</button></td>
+                    <td><span class="reentry-status-${w.status}">${isDraft ? '초안' : w.status}</span></td>
+                    <td style="white-space:nowrap;">${actionBtns}</td>
                 </tr>`;
             }).join('')}</tbody>
         </table>`;
     } catch (e) {
         container.innerHTML = '<p style="color:#e74c3c">로드 실패</p>';
     }
+}
+
+async function confirmDraftWatchlist(wid, code, name, buyPrice, exitPrice, buyDate, exitDate) {
+    // draft → watching 전환 + Mode2 섹션 자동 생성
+    const res = await fetch(`/api/trade-watchlist/${wid}`, {
+        method: 'PUT', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'watching' }),
+    });
+    const r = await res.json();
+    if (!r.success) { showToast('상태 전환 실패', 'error'); return; }
+
+    // Mode2 섹션 생성
+    const today = new Date();
+    const mmdd = String(today.getMonth()+1).padStart(2,'0') + '-' + String(today.getDate()).padStart(2,'0');
+    const sectionName = `${mmdd} 발라먹기`;
+    await _ensureSection(sectionName);
+
+    showToast(`${name} 감시 등록 완료 → [${sectionName}]`, 'success');
+    _liveLoadS3Watchlist();
 }
 
 async function _liveLoadS3Signals() {
@@ -9006,6 +9033,9 @@ async function _liveLoadS3Signals() {
                     진입가: <strong>${(s.entry_price||0).toLocaleString()}원</strong>
                     &nbsp;|&nbsp; 매수가: ${(s.buy_price||0).toLocaleString()}원
                     &nbsp;|&nbsp; 익절가: ${(s.exit_price||0).toLocaleString()}원
+                </div>
+                <div style="margin-top:8px;">
+                    <button class="btn btn-sm btn-outline" onclick="showS3Mode2Modal('${s.stock_code}','${s.stock_name}',${s.entry_price||s.buy_price||0},${s.exit_price||0},null)">📊 Mode2 전환</button>
                 </div>
             </div>
         `).join('');
@@ -9114,6 +9144,107 @@ async function _liveS3RegisterMode2(code, name, buyPrice, exitPrice) {
         if (btn) { btn.textContent = '✅ 등록됨'; btn.disabled = true; }
     } else {
         showToast(r.error || '등록 실패', 'error');
+    }
+}
+
+// ── Style3 → Mode2 전환 모달 ────────────────────────────────────────
+
+function showS3Mode2Modal(code, name, buyPrice, exitPrice, watchlistId) {
+    const stopDefault = Math.round(buyPrice * 0.97);
+    const modal = document.getElementById('s3Mode2Modal');
+    if (!modal) return;
+    document.getElementById('s3m2ModalCode').value = code;
+    document.getElementById('s3m2ModalName').textContent = `${name} (${code})`;
+    document.getElementById('s3m2ModalWid').value = watchlistId || '';
+    document.getElementById('s3m2ModalBuyTarget').value = buyPrice || '';
+    document.getElementById('s3m2ModalR1').value = exitPrice || '';
+    document.getElementById('s3m2ModalR2').value = '';
+    document.getElementById('s3m2ModalS1').value = stopDefault || '';
+    document.getElementById('s3m2ModalS1Mode').value = '손절';
+    _s3m2ToggleS1Mode('손절');
+    document.getElementById('s3m2S1AddBudget').value = '';
+    document.getElementById('s3m2ModalS2').value = '';
+    document.getElementById('s3m2ModalBudget').value = '';
+    modal.style.display = 'flex';
+}
+
+function closeS3Mode2Modal() {
+    const modal = document.getElementById('s3Mode2Modal');
+    if (modal) modal.style.display = 'none';
+}
+
+function _s3m2ToggleS1Mode(mode) {
+    const lossPctRow = document.getElementById('s3m2S1LossPctRow');
+    const addBudgetRow = document.getElementById('s3m2S1AddBudgetRow');
+    if (mode === '물타기') {
+        if (lossPctRow) lossPctRow.style.display = 'none';
+        if (addBudgetRow) addBudgetRow.style.display = '';
+    } else {
+        if (lossPctRow) lossPctRow.style.display = '';
+        if (addBudgetRow) addBudgetRow.style.display = 'none';
+    }
+}
+
+async function submitS3Mode2Modal() {
+    const code = document.getElementById('s3m2ModalCode').value.trim();
+    const name = document.getElementById('s3m2ModalName').textContent.split(' (')[0];
+    const watchlistId = parseInt(document.getElementById('s3m2ModalWid').value) || null;
+    const buyTarget = parseFloat(document.getElementById('s3m2ModalBuyTarget').value) || 0;
+    const r1 = parseFloat(document.getElementById('s3m2ModalR1').value) || 0;
+    const r2 = parseFloat(document.getElementById('s3m2ModalR2').value) || 0;
+    const s1 = parseFloat(document.getElementById('s3m2ModalS1').value) || 0;
+    const s1mode = document.getElementById('s3m2ModalS1Mode').value || '손절';
+    const s1addBudget = parseFloat(document.getElementById('s3m2S1AddBudget')?.value) || 0;
+    const s2 = parseFloat(document.getElementById('s3m2ModalS2').value) || 0;
+    const budgetMan = parseFloat(document.getElementById('s3m2ModalBudget').value) || 0;
+
+    if (!code || !buyTarget || !budgetMan) {
+        showToast('종목코드, 매수타점, 예산 필수', 'error'); return;
+    }
+
+    // 기존 Mode2 watcher 존재 여부 확인
+    const checkRes = await fetch(`/api/mode2/watchers/${code}`, { credentials: 'same-origin' });
+    const checkR = await checkRes.json();
+    if (checkR.success && checkR.data) {
+        if (!confirm(`${name} 종목이 이미 Mode2에 등록되어 있습니다.\n덮어쓰기 하시겠습니까?`)) return;
+    }
+
+    const today = new Date();
+    const mmdd = String(today.getMonth()+1).padStart(2,'0') + '-' + String(today.getDate()).padStart(2,'0');
+    const sectionName = `${mmdd} 발라먹기`;
+    const sectionId = await _ensureSection(sectionName);
+
+    const body = {
+        code, name,
+        buy_target_price: Math.round(buyTarget),
+        budget: budgetMan * 10000,
+        polling_interval: 60,
+        notify_only: true,
+        section: sectionId,
+        resistance_1_price: r1 ? Math.round(r1) : 0,
+        resistance_2_price: r2 ? Math.round(r2) : 0,
+        support_1_price: s1 ? Math.round(s1) : 0,
+        support_1_mode: s1mode,
+        support_2_price: s2 ? Math.round(s2) : 0,
+    };
+    if (s1mode === '물타기' && s1addBudget) {
+        body.support_1_add_budget = s1addBudget * 10000;
+    }
+
+    const method = checkR.success && checkR.data ? 'PUT' : 'POST';
+    const url = method === 'PUT' ? `/api/mode2/watchers/${code}` : '/api/mode2/watchers';
+    const res = await fetch(url, {
+        method, credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    });
+    const rv = await res.json();
+    if (rv.success || rv.code === code) {
+        showToast(`${name} Mode2 등록 완료 → [${sectionName}]`, 'success');
+        closeS3Mode2Modal();
+        _liveLoadS3Watchlist();
+    } else {
+        showToast(rv.error || 'Mode2 등록 실패', 'error');
     }
 }
 

@@ -3296,6 +3296,41 @@ def add_trade_watchlist():
     return jsonify({'success': True, 'id': wid})
 
 
+@app.route('/api/trade-watchlist-draft', methods=['POST'])
+@auth.login_required
+def add_trade_watchlist_draft():
+    """여러 종목 초안(draft) 일괄 등록. 이미 watching/draft인 코드는 스킵."""
+    data = request.json or {}
+    items = data.get('items', [])
+    if not items:
+        return jsonify({'success': False, 'error': 'items 필요'}), 400
+    ns = _get_news_storage()
+    existing = ns.get_trade_watchlist()
+    active_codes = {r['stock_code'] for r in existing if r['status'] in ('watching', 'draft')}
+    registered, skipped = [], []
+    for item in items:
+        code = normalize_stock_code(item.get('stock_code', ''))
+        name = item.get('stock_name', '')
+        if not code or not name:
+            continue
+        if code in active_codes:
+            skipped.append({'stock_code': code, 'stock_name': name, 'reason': '이미 watching/draft'})
+            continue
+        wid = ns.add_trade_watchlist(
+            stock_code=code,
+            stock_name=name,
+            buy_price=float(item.get('buy_price', 0)),
+            buy_date=item.get('buy_date', ''),
+            exit_price=float(item.get('exit_price', 0)),
+            exit_date=item.get('exit_date', ''),
+            notes=item.get('notes', ''),
+        )
+        ns.update_trade_watchlist(wid, status='draft')
+        active_codes.add(code)
+        registered.append({'id': wid, 'stock_code': code, 'stock_name': name})
+    return jsonify({'success': True, 'registered': registered, 'skipped': skipped})
+
+
 @app.route('/api/trade-watchlist/<int:wid>', methods=['PUT'])
 @auth.login_required
 def update_trade_watchlist(wid):
