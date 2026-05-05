@@ -3572,16 +3572,8 @@ def seeking_signal_reentry_check():
 
         exit_date_compact = exit_date.replace('-', '') if exit_date else ''
         if exit_date_compact:
-            # 익절일 봉이 all_bars에 있으면 그게 폭등일
-            exit_bar = next((b for b in all_bars if b['date'] == exit_date_compact), None)
-            if exit_bar and exit_bar['open'] > 0:
-                change_pct = (exit_bar['close'] - exit_bar['open']) / exit_bar['open'] * 100
-                if exit_bar['volume'] > 0 and change_pct >= 5:
-                    overheat_date = exit_date_compact
-                else:
-                    overheat_date = _find_overheat_date(all_bars)
-            else:
-                overheat_date = exit_date_compact  # 봉이 없어도 직접 사용
+            # exit_date가 명시된 경우: 그날을 overheat 기준일로 직접 사용
+            overheat_date = exit_date_compact
         else:
             overheat_date = _find_overheat_date(all_bars)
 
