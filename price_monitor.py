@@ -47,6 +47,9 @@ class PriceMonitor:
         self.style3_c2_cache: dict = {}
         # news_storage 참조 (Style3 시그널 저장용)
         self.news_storage = None
+        # morning_watchlist C시그널 마지막 체크
+        self.morning_last_check = datetime.min.replace(tzinfo=None)
+        self.morning_c2_cache: dict = {}  # {code: support_price}
 
         # 비동기 클라이언트 초기화
         self.kiwoom_async = None
@@ -1061,6 +1064,39 @@ class PriceMonitor:
                                             result_emoji = "⚠️"
                                             result_text = "손절"
 
+                                        # 전량 청산 시 trade_watchlist에 자동 등록 (발라먹기 추적용)
+                                        if remaining_qty == 0 and self.news_storage:
+                                            try:
+                                                today_str_sell = datetime.now(KST).strftime('%Y-%m-%d')
+                                                is_profit = 'resistance' in reason_text
+                                                if is_profit:
+                                                    # 익절: 매수가=bought_price, 익절가=매도가(1차저항)
+                                                    tw_buy = bought_price
+                                                    tw_exit = result['price']
+                                                else:
+                                                    # 손절: 매수가=손절가(매도가), 1차저항=bought_price(원래 매수가)
+                                                    tw_buy = result['price']
+                                                    tw_exit = bought_price
+                                                existing = self.news_storage.get_trade_watchlist()
+                                                already = any(
+                                                    w['stock_code'] == code and w['status'] in ('watching', 'draft')
+                                                    for w in existing
+                                                )
+                                                if not already:
+                                                    self.news_storage.add_trade_watchlist(
+                                                        stock_code=code,
+                                                        stock_name=watcher.get('name', code),
+                                                        buy_price=tw_buy,
+                                                        buy_date=today_str_sell,
+                                                        exit_price=tw_exit,
+                                                        exit_date=today_str_sell,
+                                                        status='draft',
+                                                        notes=f"Mode2 자동청산({result_text}) → 발라먹기 draft",
+                                                    )
+                                                    logger.info(f"Mode2 청산 → trade_watchlist draft 등록: {code} ({result_text})")
+                                            except Exception as _e:
+                                                logger.error(f"trade_watchlist 자동 등록 실패 ({code}): {_e}")
+
                                         # 수익/손실 이모지
                                         pnl_emoji = "🎉" if pnl_pct > 0 else "🔻"
 
@@ -1121,6 +1157,15 @@ class PriceMonitor:
                         await self.check_style3_conditions()
                     except Exception as e:
                         logger.error(f"Style3 체크 실패: {e}")
+
+                # 관심종목 C시그널 — 3분마다 폴링 (텔레그램 없음, DB만 저장)
+                morning_elapsed = (datetime.now() - self.morning_last_check).total_seconds()
+                if morning_elapsed >= 180:
+                    self.morning_last_check = datetime.now()
+                    try:
+                        await self.check_morning_c_signals()
+                    except Exception as e:
+                        logger.error(f"관심종목 C시그널 체크 실패: {e}")
 
                 logger.info(f"=== 가격 체크 완료 ===\n")
 
@@ -1355,6 +1400,165 @@ class PriceMonitor:
             )
             await self.send_notification(msg)
             logger.info(f"Style3 시그널: {code} [{sig_type}] @ {sig['entry_price']:,}원 ({time_str})")
+
+    async def check_morning_c_signals(self):
+        """morning_watchlist 130종목 C시그널 체크 (C2 전용, 텔레그램 없음, DB 저장만)."""
+        import json as _json
+        import os as _os
+        if not self.news_storage:
+            return
+        path = _os.getenv('MORNING_WATCHLIST_PATH', '.data/morning_watchlist.json')
+        try:
+            with open(path) as f:
+                items = _json.load(f)
+        except Exception:
+            return
+        if not items:
+            return
+
+        token = None
+        try:
+            token = get_token()
+        except Exception as e:
+            logger.error(f"morning C시그널 token 취득 실패: {e}")
+            return
+
+        today_str = datetime.now(KST).strftime('%Y-%m-%d')
+        time_str = datetime.now(KST).strftime('%H:%M')
+
+        # 날짜 바뀌면 캐시 초기화
+        if self.morning_c2_cache.get('_date') != today_str:
+            self.morning_c2_cache = {'_date': today_str}
+
+        check_tasks = [
+            self._check_morning_one(item, token, today_str, time_str)
+            for item in items
+        ]
+        results = await asyncio.gather(*check_tasks, return_exceptions=True)
+        for i, item in enumerate(items):
+            if isinstance(results[i], Exception):
+                logger.debug(f"morning C체크 실패 ({item.get('code','?')}): {results[i]}")
+
+    async def _check_morning_one(self, item: dict, token: str, today_str: str, time_str: str):
+        """관심종목 단일 종목 C2 시그널 체크."""
+        import os as _os
+        code = item.get('code', '')
+        stock_name = item.get('name', code)
+        if not code or not token:
+            return
+
+        # 3분봉 조회
+        try:
+            minute_bars = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: get_minute_chart(token, code, "3분", count=20)
+            )
+        except Exception:
+            return
+        if not minute_bars or len(minute_bars) < 3:
+            return
+
+        # 단일가 매매일 스킵
+        times = [str(b.get('time', ''))[:4] for b in minute_bars if b.get('time')]
+        if len(times) >= 3:
+            gaps = []
+            for i in range(1, len(times)):
+                try:
+                    h1, m1 = int(times[i-1][:2]), int(times[i-1][2:])
+                    h2, m2_v = int(times[i][:2]), int(times[i][2:])
+                    gap = (h2 * 60 + m2_v) - (h1 * 60 + m1)
+                    if gap > 0:
+                        gaps.append(gap)
+                except Exception:
+                    pass
+            if gaps and sum(1 for g in gaps if g >= 25) / len(gaps) > 0.5:
+                return
+
+        # C2 지지가: 캐시 우선
+        support_price = self.morning_c2_cache.get(code)
+        if support_price is None:
+            try:
+                HOST = _os.environ.get('KIWOOM_HOST', 'https://api.kiwoom.com')
+                import requests as _rq
+                headers = {'Content-Type': 'application/json;charset=UTF-8',
+                           'authorization': 'Bearer ' + token}
+                today_compact = today_str.replace('-', '')
+                body = {'stk_cd': code, 'base_dt': today_compact,
+                        'upd_stkpc_tp': '1', 'req_cnt': 30}
+                resp = _rq.post(HOST + '/api/dostk/chartchek/ka10081',
+                                json=body, headers=headers, timeout=10)
+                daily_raw = resp.json().get('stk_dt_pole_chart_qry', [])
+                daily_bars = [{'date': b.get('dt', ''), 'low': float(b.get('low_pric', 0) or 0),
+                                'high': float(b.get('high_pric', 0) or 0),
+                                'close': float(b.get('cls_pric', 0) or 0),
+                                'open': float(b.get('opn_pric', 0) or 0),
+                                'volume': int(b.get('trde_qty', 0) or 0)}
+                               for b in daily_raw]
+                support_price = calc_c2_support(daily_bars, today_str)
+            except Exception:
+                support_price = None
+            self.morning_c2_cache[code] = support_price  # None이어도 캐싱 (재조회 방지)
+
+        if not support_price:
+            return
+
+        last = minute_bars[-1]
+        close = last.get('close', 0)
+        if not close:
+            return
+
+        # C2 조건: 현재가가 지지가 ±0.8% 이내
+        if abs(close - support_price) / support_price >= 0.008:
+            return
+
+        # C1 조건도 함께 체크 (거감봉)
+        prev = minute_bars[:-1]
+        vol_avg = sum(b['volume'] for b in prev) / max(len(prev), 1)
+        is_weak_vol = last['volume'] < vol_avg * 0.50
+        is_bearish = close < last.get('open', close)
+
+        from style3_signals import _fmt_time
+        signal_time = _fmt_time(str(last.get('time', '')))
+
+        # dedup: 같은 날 같은 종목+타입 120분 이내 스킵
+        for sig_type, condition in [
+            ('C2', True),
+            ('C1', is_weak_vol and is_bearish),
+        ]:
+            if not condition:
+                continue
+            last_saved = self.news_storage.get_latest_signal_today(code, sig_type, today_str)
+            if last_saved:
+                last_time = last_saved.get('signal_time', '00:00')
+                try:
+                    lh, lm = map(int, last_time.split(':'))
+                    ch, cm = map(int, time_str.split(':'))
+                    if (ch * 60 + cm) - (lh * 60 + lm) < 120:
+                        continue
+                except Exception:
+                    continue
+
+            reason = (
+                f"쌍바닥 지지선({int(support_price):,}원) 터치 — 현재가 {close:,}원"
+                if sig_type == 'C2' else
+                f"거감봉 진행 중 (거래량 {last['volume']:,} / 평균 {int(vol_avg):,})"
+            )
+            try:
+                self.news_storage.save_reentry_signal(
+                    watchlist_id=0,
+                    stock_code=code,
+                    stock_name=stock_name,
+                    signal_type=sig_type,
+                    signal_date=today_str,
+                    entry_price_suggestion=close,
+                    confidence='H' if sig_type == 'C2' else 'L',
+                    reason=reason,
+                    signal_time=signal_time,
+                    support_price=support_price if sig_type == 'C2' else 0,
+                    source='morning',
+                )
+                logger.info(f"관심종목 {sig_type}: {code} {stock_name} @ {close:,}원 ({time_str})")
+            except Exception as e:
+                logger.error(f"morning 시그널 저장 실패 ({code}): {e}")
 
     async def start_monitoring_task(self):
         """모니터링 태스크 시작"""

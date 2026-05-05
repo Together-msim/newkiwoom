@@ -8933,7 +8933,7 @@ async function liveRegisterMode2FromReentry(signal) {
 // ─── 실전페이지 Style3 발라먹기 섹션 ───────────────────────────────────
 
 function liveStyle3SwitchTab(tab) {
-    ['register', 'watchlist', 'signals'].forEach(t => {
+    ['register', 'watchlist', 'signals', 'morning'].forEach(t => {
         const content = document.getElementById('liveS3' + t.charAt(0).toUpperCase() + t.slice(1));
         const btn = document.getElementById('liveS3Tab' + t.charAt(0).toUpperCase() + t.slice(1));
         if (content) content.style.display = t === tab ? '' : 'none';
@@ -8944,6 +8944,7 @@ function liveStyle3SwitchTab(tab) {
     });
     if (tab === 'watchlist') _liveLoadS3Watchlist();
     if (tab === 'signals') _liveLoadS3Signals();
+    if (tab === 'morning') _liveLoadMorningSignals();
 }
 
 async function _liveLoadS3Watchlist() {
@@ -9041,6 +9042,81 @@ async function _liveLoadS3Signals() {
         `).join('');
     } catch (e) {
         container.innerHTML = '<p style="color:#e74c3c">로드 실패</p>';
+    }
+}
+
+async function _liveLoadMorningSignals() {
+    const container = document.getElementById('liveS3MorningContainer');
+    if (!container) return;
+    const today = new Date().toISOString().slice(0, 10);
+    container.innerHTML = '<p style="color:#868e96;font-size:13px;text-align:center;padding:12px;">로딩 중...</p>';
+    try {
+        const res = await fetch(`/api/reentry/morning-signals?date=${today}`, { credentials: 'same-origin' });
+        const r = await res.json();
+        const rows = r.data || [];
+        if (!rows.length) {
+            container.innerHTML = '<p style="color:#868e96;font-size:13px;text-align:center;padding:12px;">오늘 관심종목 C시그널 없음</p>';
+            return;
+        }
+
+        // 전체 시그널에서 등장한 모든 시간대 수집 (컬럼 헤더용)
+        const allTimes = [...new Set(
+            rows.flatMap(r => r.signals.map(s => s.time)).filter(Boolean)
+        )].sort();
+
+        const typeColor = { C1: '#e67e22', C2: '#27ae60', C3: '#2980b9' };
+        const confColor = { 'H': '#e74c3c', 'M': '#f39c12', 'L': '#95a5a6' };
+
+        // 테이블: 종목(행) × 시그널발생(열)
+        const thead = `<tr style="background:var(--bg-secondary);">
+            <th style="padding:6px 10px;text-align:left;font-size:13px;min-width:110px;">종목</th>
+            <th style="padding:6px 10px;text-align:center;font-size:13px;">지지가</th>
+            ${allTimes.map(t => `<th style="padding:6px 10px;text-align:center;font-size:12px;color:#adb5bd;">${t}</th>`).join('')}
+        </tr>`;
+
+        const tbody = rows.map(row => {
+            // 시간별로 시그널 매핑
+            const sigMap = {};
+            row.signals.forEach(s => {
+                const key = s.time || '?';
+                if (!sigMap[key]) sigMap[key] = [];
+                sigMap[key].push(s);
+            });
+            const supportPrice = row.signals.find(s => s.support_price)?.support_price || 0;
+            const cells = allTimes.map(t => {
+                const sigs = sigMap[t] || [];
+                if (!sigs.length) return `<td style="padding:5px 8px;text-align:center;color:#444;">—</td>`;
+                const badges = sigs.map(s =>
+                    `<span style="display:inline-block;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:600;background:${typeColor[s.type]||'#666'};color:#fff;margin:1px;">${s.type}</span>` +
+                    `<span style="font-size:10px;font-weight:700;color:${confColor[s.confidence]||'#aaa'};margin-left:2px;">${s.confidence}</span>`
+                ).join('<br>');
+                return `<td style="padding:5px 8px;text-align:center;">${badges}</td>`;
+            });
+            return `<tr style="border-bottom:1px solid var(--border-color);">
+                <td style="padding:6px 10px;font-size:13px;font-weight:600;">
+                    ${row.stock_name}<br>
+                    <span style="font-size:11px;color:#868e96;font-weight:400;">${row.stock_code}</span>
+                </td>
+                <td style="padding:5px 8px;text-align:center;font-size:12px;color:#74c0fc;">
+                    ${supportPrice ? supportPrice.toLocaleString() + '원' : '—'}
+                </td>
+                ${cells.join('')}
+            </tr>`;
+        }).join('');
+
+        container.innerHTML = `
+            <div style="font-size:12px;color:#868e96;margin-bottom:8px;">
+                ${rows.length}개 종목 · 3분마다 자동 갱신 · C2(쌍바닥 지지) / C1(거감봉)
+                <button class="btn btn-sm btn-outline" style="float:right;padding:2px 8px;font-size:11px;" onclick="_liveLoadMorningSignals()">🔄 새로고침</button>
+            </div>
+            <div style="overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                    <thead>${thead}</thead>
+                    <tbody>${tbody}</tbody>
+                </table>
+            </div>`;
+    } catch (e) {
+        container.innerHTML = '<p style="color:#e74c3c">로드 실패: ' + e.message + '</p>';
     }
 }
 

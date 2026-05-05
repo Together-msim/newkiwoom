@@ -3383,6 +3383,16 @@ def save_reentry_signal():
     return jsonify({'success': True, 'ids': saved_ids})
 
 
+@app.route('/api/reentry/morning-signals', methods=['GET'])
+@auth.login_required
+def get_morning_signals():
+    """morning_watchlist 출처 C시그널 — 종목별 그룹핑 반환."""
+    signal_date = request.args.get('date')
+    ns = _get_news_storage()
+    data = ns.get_morning_signals(signal_date=signal_date)
+    return jsonify({'success': True, 'data': data})
+
+
 # ─── Seeking Signal 재진입 체크 ───────────────────────────────────────
 
 @app.route('/api/seeking-signal/reentry-check', methods=['POST'])

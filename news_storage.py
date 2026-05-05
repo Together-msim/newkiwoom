@@ -295,6 +295,7 @@ class NewsStorage:
             for col, definition in [
                 ("signal_time", "TEXT"),      # HH:MM 장중 시간
                 ("support_price", "REAL"),    # C2 쌍바닥 지지가
+                ("source", "TEXT DEFAULT 'watchlist'"),  # watchlist / morning
             ]:
                 try:
                     conn.execute(f"ALTER TABLE reentry_signals ADD COLUMN {col} {definition}")
@@ -1035,13 +1036,13 @@ class NewsStorage:
     def add_trade_watchlist(self, stock_code: str, stock_name: str,
                              buy_price: float, buy_date: str,
                              exit_price: float, exit_date: str,
-                             notes: str = "") -> int:
+                             notes: str = "", status: str = "watching") -> int:
         with self._conn() as conn:
             cur = conn.execute(
                 """INSERT INTO trade_watchlist
-                   (stock_code, stock_name, buy_price, buy_date, exit_price, exit_date, notes)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (stock_code, stock_name, buy_price, buy_date, exit_price, exit_date, notes)
+                   (stock_code, stock_name, buy_price, buy_date, exit_price, exit_date, notes, status)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (stock_code, stock_name, buy_price, buy_date, exit_price, exit_date, notes, status)
             )
             return cur.lastrowid
 
@@ -1101,19 +1102,47 @@ class NewsStorage:
                              signal_type: str, signal_date: str,
                              entry_price_suggestion: float, confidence: str,
                              reason: str, ss_matched: bool = False,
-                             signal_time: str = '', support_price: float = 0) -> int:
+                             signal_time: str = '', support_price: float = 0,
+                             source: str = 'watchlist') -> int:
         with self._conn() as conn:
             cur = conn.execute(
                 """INSERT INTO reentry_signals
                    (watchlist_id, stock_code, stock_name, signal_type, signal_date,
                     entry_price_suggestion, confidence, reason, ss_matched,
-                    signal_time, support_price)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    signal_time, support_price, source)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (watchlist_id, stock_code, stock_name, signal_type, signal_date,
                  entry_price_suggestion, confidence, reason, 1 if ss_matched else 0,
-                 signal_time, support_price)
+                 signal_time, support_price, source)
             )
             return cur.lastrowid
+
+    def get_morning_signals(self, signal_date: Optional[str] = None) -> List[Dict]:
+        """morning_watchlist 출처 시그널 조회 — 종목별로 그룹핑된 딕셔너리 반환."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                """SELECT stock_code, stock_name, signal_type, signal_time,
+                          entry_price_suggestion, confidence, reason, support_price
+                   FROM reentry_signals
+                   WHERE source='morning' AND signal_date=?
+                   ORDER BY stock_code, signal_time""",
+                (signal_date or date.today().isoformat(),)
+            ).fetchall()
+        grouped: dict = {}
+        for r in rows:
+            d = dict(r)
+            code = d['stock_code']
+            if code not in grouped:
+                grouped[code] = {'stock_code': code, 'stock_name': d['stock_name'], 'signals': []}
+            grouped[code]['signals'].append({
+                'type': d['signal_type'],
+                'time': d['signal_time'],
+                'price': d['entry_price_suggestion'],
+                'confidence': d['confidence'],
+                'reason': d['reason'],
+                'support_price': d['support_price'],
+            })
+        return list(grouped.values())
 
     def get_reentry_signals(self, signal_date: Optional[str] = None, limit: int = 50) -> List[Dict]:
         with self._conn() as conn:
