@@ -850,7 +850,8 @@ class KiwoomClient:
 
     def get_daily_trades(self, date: Optional[str] = None) -> list:
         """
-        일별 체결 내역 조회 (ka10170 API).
+        일별 매매일지 조회 (ka10170 API).
+        응답: tdy_trde_diary 리스트 — 종목당 1행에 매수/매도 정보 모두 포함.
 
         Args:
             date: 조회 날짜 YYYYMMDD (None이면 전 영업일 자동 계산)
@@ -859,10 +860,12 @@ class KiwoomClient:
             list of {
                 stock_code: str,
                 stock_name: str,
-                trade_type: "buy" | "sell",
-                price: int,
-                quantity: int,
-                trade_date: str (YYYYMMDD),
+                buy_price: int,   # 매수 평균가 (0이면 매수 없음)
+                buy_qty: int,
+                sell_price: int,  # 매도 평균가 (0이면 매도 없음)
+                sell_qty: int,
+                pl_amt: int,      # 실현손익
+                trade_date: str,  # YYYYMMDD
             }
         """
         self._ensure_valid_token()
@@ -883,7 +886,8 @@ class KiwoomClient:
             "api-id": "ka10170",
             "authorization": f"Bearer {self.token}",
         }
-        body = {"qry_dt": date}
+        # ottks_tp=0 전체, ch_crd_tp=0 현금+신용 전체
+        body = {"qry_dt": date, "ottks_tp": "0", "ch_crd_tp": "0"}
 
         all_rows = []
         cont_yn = None
@@ -902,24 +906,30 @@ class KiwoomClient:
                 data = resp.json()
                 h = resp.headers
 
-                rows = data.get("cts_acnt_dtls", []) or []
+                if data.get("return_code", 0) != 0:
+                    logger.error(f"ka10170 오류: {data.get('return_msg')}")
+                    break
+
+                rows = data.get("tdy_trde_diary", []) or []
                 for row in rows:
                     code = normalize_stock_code(str(row.get("stk_cd", "") or ""))
                     if not code:
                         continue
-                    buy_sell = str(row.get("deal_tp", "") or row.get("bstp_nm", "") or "")
-                    trade_type = "buy" if "매수" in buy_sell or buy_sell in ("1", "01") else "sell"
-                    try:
-                        price = abs(int(str(row.get("cntr_uv", 0) or row.get("ord_uv", 0) or 0).replace(",", "")))
-                        qty = abs(int(str(row.get("cntr_qty", 0) or 0).replace(",", "")))
-                    except (ValueError, TypeError):
-                        price, qty = 0, 0
+
+                    def _to_int(v):
+                        try:
+                            return abs(int(str(v or "0").replace(",", "")))
+                        except (ValueError, TypeError):
+                            return 0
+
                     all_rows.append({
                         "stock_code": code,
                         "stock_name": str(row.get("stk_nm", "") or "").strip(),
-                        "trade_type": trade_type,
-                        "price": price,
-                        "quantity": qty,
+                        "buy_price": _to_int(row.get("buy_avg_pric")),
+                        "buy_qty": _to_int(row.get("buy_qty")),
+                        "sell_price": _to_int(row.get("sel_avg_pric")),
+                        "sell_qty": _to_int(row.get("sell_qty")),
+                        "pl_amt": int(str(row.get("pl_amt", "0") or "0").replace(",", "")),
                         "trade_date": date,
                     })
 
