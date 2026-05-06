@@ -1741,8 +1741,8 @@ def _load_morning_settings() -> dict:
             for k, v in _DEFAULT_MORNING_SETTINGS.items():
                 s.setdefault(k, v)
             return s
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"_load_morning_settings 실패 (path={p}): {e}")
     return dict(_DEFAULT_MORNING_SETTINGS)
 
 
