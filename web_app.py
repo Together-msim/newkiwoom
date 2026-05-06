@@ -2522,14 +2522,36 @@ def get_live_picks():
     target_date = request.args.get('date') or _date.today().isoformat()
     ns = _get_news_storage()
 
-    # 오늘 날짜 최신 session 조회
+    # 오늘 날짜 세션 조회 — backtest 세션 우선, siwhang 세션 picks를 합산
     sessions = ns.get_backtest_sessions()
     today_sessions = [s for s in sessions if s.get('run_date') == target_date]
     if not today_sessions:
         return jsonify({'success': True, 'data': [], 'date': target_date, 'session_id': None})
 
-    session = today_sessions[0]  # created_at DESC 정렬이므로 첫 번째가 최신
-    picks = ns.get_backtest_picks(session['id'])
+    backtest_sessions = [s for s in today_sessions if s.get('version') != 'siwhang']
+    siwhang_sessions = [s for s in today_sessions if s.get('version') == 'siwhang']
+
+    picks = []
+    primary_session_id = None
+
+    if backtest_sessions:
+        primary_session_id = backtest_sessions[0]['id']
+        picks = ns.get_backtest_picks(primary_session_id)
+
+    # siwhang picks 합산 (slot_time 기준 중복 없이 추가)
+    if siwhang_sessions:
+        if primary_session_id is None:
+            primary_session_id = siwhang_sessions[0]['id']
+        existing_keys = {(p.get('slot_time'), p.get('stock_code') or p.get('stock_name')) for p in picks}
+        for s in siwhang_sessions:
+            for p in ns.get_backtest_picks(s['id']):
+                key = (p.get('slot_time'), p.get('stock_code') or p.get('stock_name'))
+                if key not in existing_keys:
+                    p['_source'] = 'siwhang'
+                    picks.append(p)
+                    existing_keys.add(key)
+
+    session_id = primary_session_id
 
     # stock_code 없는 항목 자동 보완
     name_map = _load_stock_name_map()
@@ -2539,7 +2561,7 @@ def get_live_picks():
             if code:
                 p['stock_code'] = code
 
-    return jsonify({'success': True, 'data': picks, 'date': target_date, 'session_id': session['id']})
+    return jsonify({'success': True, 'data': picks, 'date': target_date, 'session_id': session_id})
 
 
 # ─── 재무정보 (Financial Info) ────────────────────────────────────────────
