@@ -1710,13 +1710,18 @@ def delete_watchlist(code):
 # ========== Morning Watchlist API (Style3 Track A) ==========
 
 _MORNING_WATCHLIST_PATH = Path(os.getenv("MORNING_WATCHLIST_PATH", ".data/morning_watchlist.json"))
-_MORNING_SETTINGS_PATH = Path(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".data/morning_settings.json"))
+_MORNING_SETTINGS_PATH = Path(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".data", "morning_settings.json"))
 
 _DEFAULT_MORNING_SETTINGS = {
     "enabled": False,
     "focus_only": False,
     "focus": []
 }
+
+
+def _get_morning_settings_path() -> Path:
+    # __file__ 기준 절대경로 — sudo 실행 시 cwd가 달라져도 안전
+    return Path(os.path.dirname(os.path.abspath(__file__))) / ".data" / "morning_settings.json"
 
 
 def _load_morning_watchlist():
@@ -1729,10 +1734,10 @@ def _load_morning_watchlist():
 
 
 def _load_morning_settings() -> dict:
-    if _MORNING_SETTINGS_PATH.exists():
+    p = _get_morning_settings_path()
+    if p.exists():
         try:
-            s = json.loads(_MORNING_SETTINGS_PATH.read_text(encoding='utf-8'))
-            # 누락 키 보완
+            s = json.loads(p.read_text(encoding='utf-8'))
             for k, v in _DEFAULT_MORNING_SETTINGS.items():
                 s.setdefault(k, v)
             return s
@@ -1742,8 +1747,9 @@ def _load_morning_settings() -> dict:
 
 
 def _save_morning_settings(settings: dict):
-    _MORNING_SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    _MORNING_SETTINGS_PATH.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding='utf-8')
+    p = _get_morning_settings_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding='utf-8')
 
 
 @app.route('/api/morning-watchlist', methods=['GET'])
