@@ -1710,7 +1710,7 @@ def delete_watchlist(code):
 # ========== Morning Watchlist API (Style3 Track A) ==========
 
 _MORNING_WATCHLIST_PATH = Path(os.getenv("MORNING_WATCHLIST_PATH", ".data/morning_watchlist.json"))
-_MORNING_SETTINGS_PATH = Path(".data/morning_settings.json")
+_MORNING_SETTINGS_PATH = Path(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".data/morning_settings.json"))
 
 _DEFAULT_MORNING_SETTINGS = {
     "enabled": False,
