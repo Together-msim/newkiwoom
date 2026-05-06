@@ -8399,7 +8399,7 @@ async function checkReentryLive() {
     const exitPrice = parseFloat(document.getElementById('reExitPrice').value);
     const exitDate = document.getElementById('reExitDate').value.trim();
     const resultEl = document.getElementById('reentryResultLive');
-    if (!stockCode || !buyPrice || !exitPrice) { showToast('종목코드, 매수가, 익절가 필수', 'error'); return; }
+    if (!stockCode || !buyPrice || !exitPrice) { showToast('종목코드, 매수목표가, 익절목표가 필수', 'error'); return; }
     resultEl.innerHTML = '<p style="color:#868e96">분석 중...</p>';
     try {
         const res = await fetch('/api/seeking-signal/reentry-check', {
@@ -8422,7 +8422,7 @@ async function checkReentryBacktest() {
     const exitDate = document.getElementById('btExitDate').value.trim();
     const exitTime = (document.getElementById('btExitTime')?.value || '').trim();
     const resultEl = document.getElementById('reentryResult');
-    if (!stockCode || !buyPrice || !exitPrice) { showToast('종목코드, 매수가, 익절가 필수', 'error'); return; }
+    if (!stockCode || !buyPrice || !exitPrice) { showToast('종목코드, 매수목표가, 익절목표가 필수', 'error'); return; }
     resultEl.innerHTML = '<p style="color:#868e96">히스토리컬 백테스트 분석 중...</p>';
     try {
         const body = { stock_code: stockCode, buy_price: buyPrice, exit_price: exitPrice, exit_date: exitDate, backtest_mode: true };
@@ -8559,7 +8559,7 @@ async function saveTradeWatchlist() {
     const exitDate = document.getElementById('reExitDate').value.trim();
 
     if (!stockCode || !stockName || !buyPrice || !exitPrice) {
-        showToast('종목코드, 종목명, 매수가, 익절가 필수', 'error');
+        showToast('종목코드, 종목명, 매수목표가, 익절목표가 필수', 'error');
         return;
     }
     await _registerStyle3Item({ code: stockCode, name: stockName, buyPrice, buyDate, exitPrice, exitDate });
@@ -8675,7 +8675,7 @@ async function loadTradeWatchlist() {
         }
         const today = new Date();
         container.innerHTML = `<table class="reentry-watchlist-table">
-            <thead><tr><th>종목</th><th>매수가</th><th>익절가</th><th>익절일</th><th>등록</th><th>상태</th><th></th></tr></thead>
+            <thead><tr><th>종목</th><th>매수목표가</th><th>익절목표가</th><th>익/손절일</th><th>등록</th><th>상태</th><th></th></tr></thead>
             <tbody>${items.map(w => _s3WatchlistRowHtml(w, today)).join('')}</tbody>
         </table>`;
     } catch (e) {
@@ -8730,10 +8730,10 @@ function parseBulkReentry() {
         <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:12px;">
             <thead><tr style="background:#f8f9fa;">
                 <th style="padding:6px;border:1px solid #dee2e6;">종목</th>
-                <th style="padding:6px;border:1px solid #dee2e6;">매수가</th>
+                <th style="padding:6px;border:1px solid #dee2e6;">매수목표가</th>
                 <th style="padding:6px;border:1px solid #dee2e6;">매수일</th>
-                <th style="padding:6px;border:1px solid #dee2e6;">익절가</th>
-                <th style="padding:6px;border:1px solid #dee2e6;">익절일</th>
+                <th style="padding:6px;border:1px solid #dee2e6;">익절목표가</th>
+                <th style="padding:6px;border:1px solid #dee2e6;">익/손절일</th>
                 <th style="padding:6px;border:1px solid #dee2e6;"></th>
             </tr></thead>
             <tbody>${items.map((it, i) => `
@@ -8926,8 +8926,8 @@ async function loadReentrySignals() {
                     </div>
                 </div>`).join('')}
                 <div style="margin-top:8px;display:flex;align-items:center;gap:8px;font-size:12px;color:#868e96;">
-                    <span>매수가 ${((g.sigs[0]||{}).buy_price||0).toLocaleString()}원</span>
-                    <span>익절가 ${((g.sigs[0]||{}).exit_price||0).toLocaleString()}원</span>
+                    <span>매수목표가 ${((g.sigs[0]||{}).buy_price||0).toLocaleString()}원</span>
+                    <span>익절목표가 ${((g.sigs[0]||{}).exit_price||0).toLocaleString()}원</span>
                     ${g.code ? `<button class="btn btn-sm btn-success" style="margin-left:auto;padding:3px 10px;font-size:12px;" onclick="liveRegisterMode2FromReentry(${JSON.stringify(g.sigs[0]).replace(/"/g,'&quot;')})">📊 Mode2 등록</button>` : ''}
                 </div>
             </div>
@@ -8980,7 +8980,7 @@ function liveStyle3SwitchTab(tab) {
     });
     if (tab === 'watchlist') _liveLoadS3Watchlist();
     if (tab === 'signals') _liveLoadS3Signals();
-    if (tab === 'morning') _liveLoadMorningSignals();
+    if (tab === 'morning') _msLoad().then(() => _liveLoadMorningSignals());
 }
 
 async function _liveLoadS3Watchlist() {
@@ -8996,7 +8996,7 @@ async function _liveLoadS3Watchlist() {
         }
         const today = new Date();
         container.innerHTML = `<table class="reentry-watchlist-table">
-            <thead><tr><th>종목</th><th>매수가 ✏️</th><th>익절가 ✏️</th><th>익절일 ✏️</th><th>등록</th><th>상태</th><th></th></tr></thead>
+            <thead><tr><th>종목</th><th>매수목표가 ✏️</th><th>익절목표가 ✏️</th><th>익/손절일 ✏️</th><th>등록</th><th>상태</th><th></th></tr></thead>
             <tbody>${items.map(w => _s3WatchlistRowHtml(w, today)).join('')}</tbody>
         </table>`;
     } catch (e) {
@@ -9078,6 +9078,231 @@ async function _liveLoadS3Signals() {
     }
 }
 
+// ── 관심종목 C 설정 (morning settings) ──────────────────────────────────────
+
+let _msSettings = null;  // 캐시
+let _msFocusSearchTimer = null;
+let _msFocusSearchActiveIdx = -1;
+let _msFocusSearchResults = [];
+
+async function _msLoad() {
+    try {
+        const res = await fetch('/api/morning-settings', { credentials: 'same-origin' });
+        const r = await res.json();
+        _msSettings = r.data || { enabled: false, focus_only: false, focus: [] };
+    } catch (e) {
+        _msSettings = { enabled: false, focus_only: false, focus: [] };
+    }
+    _msRender();
+}
+
+function _msRender() {
+    if (!_msSettings) return;
+    const s = _msSettings;
+
+    // 전체 토글
+    const btnAll = document.getElementById('msToggleAll');
+    if (btnAll) {
+        btnAll.textContent = s.enabled ? 'ON' : 'OFF';
+        btnAll.className = 'ms-toggle ' + (s.enabled ? 'on' : 'off');
+    }
+    // 포커스만 토글
+    const btnFocus = document.getElementById('msToggleFocusOnly');
+    if (btnFocus) {
+        btnFocus.textContent = s.focus_only ? 'ON' : 'OFF';
+        btnFocus.className = 'ms-toggle ' + (s.focus_only ? 'on' : 'off');
+    }
+    // 상태 레이블
+    const lbl = document.getElementById('msStatusLabel');
+    if (lbl) {
+        if (!s.enabled) lbl.textContent = '감시 꺼짐';
+        else if (s.focus_only) lbl.textContent = `포커스 ${s.focus.filter(f=>f.enabled).length}종목만 감시 중`;
+        else lbl.textContent = `전체 130종목 감시 중`;
+    }
+    // 포커스 목록
+    _msRenderFocusList();
+}
+
+function _msRenderFocusList() {
+    const container = document.getElementById('liveS3FocusListContainer');
+    if (!container || !_msSettings) return;
+    const focus = _msSettings.focus;
+    if (!focus.length) {
+        container.innerHTML = '<p style="font-size:12px;color:#868e96;margin:0 0 4px;">포커스 종목 없음 — 위에서 추가하세요</p>';
+        return;
+    }
+    container.innerHTML = focus.map(f => `
+        <div class="ms-focus-row" id="msFocusRow_${f.code}">
+            <span class="ms-focus-name">${f.name}</span>
+            <span class="ms-focus-code">${f.code}</span>
+            <div class="ms-focus-actions">
+                <button class="ms-toggle ${f.enabled ? 'on' : 'off'}" style="min-width:38px;padding:2px 8px;font-size:11px;"
+                    onclick="msFocusToggleEnabled('${f.code}', ${!f.enabled})">${f.enabled ? 'ON' : 'OFF'}</button>
+                <button class="active-toggle ${f.notify ? 'on' : 'off'}" style="min-width:38px;padding:2px 8px;font-size:11px;"
+                    onclick="msFocusToggleNotify('${f.code}', ${!f.notify})" title="텔레그램 알림">🔔</button>
+                <button class="btn btn-sm" style="padding:2px 8px;font-size:11px;background:#c0392b;color:#fff;border:none;border-radius:4px;"
+                    onclick="msFocusDelete('${f.code}')">✕</button>
+            </div>
+        </div>`).join('');
+}
+
+async function _msSave(patch) {
+    try {
+        const res = await fetch('/api/morning-settings', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(patch),
+        });
+        const r = await res.json();
+        if (r.success) { _msSettings = r.data; _msRender(); }
+    } catch (e) { showToast('설정 저장 실패', 'error'); }
+}
+
+async function msToggleAll() {
+    if (!_msSettings) return;
+    await _msSave({ enabled: !_msSettings.enabled });
+}
+
+async function msToggleFocusOnly() {
+    if (!_msSettings) return;
+    await _msSave({ focus_only: !_msSettings.focus_only });
+}
+
+async function msFocusToggleEnabled(code, val) {
+    const f = (_msSettings?.focus || []).find(x => x.code === code);
+    if (!f) return;
+    try {
+        const res = await fetch(`/api/morning-settings/focus/${code}`, {
+            method: 'PUT', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: val }),
+        });
+        const r = await res.json();
+        if (r.success) { _msSettings = r.data; _msRender(); }
+    } catch (e) { showToast('저장 실패', 'error'); }
+}
+
+async function msFocusToggleNotify(code, val) {
+    try {
+        const res = await fetch(`/api/morning-settings/focus/${code}`, {
+            method: 'PUT', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ notify: val }),
+        });
+        const r = await res.json();
+        if (r.success) { _msSettings = r.data; _msRender(); }
+    } catch (e) { showToast('저장 실패', 'error'); }
+}
+
+async function msFocusDelete(code) {
+    try {
+        const res = await fetch(`/api/morning-settings/focus/${code}`, {
+            method: 'DELETE', credentials: 'same-origin',
+        });
+        const r = await res.json();
+        if (r.success) { _msSettings = r.data; _msRender(); }
+    } catch (e) { showToast('삭제 실패', 'error'); }
+}
+
+async function msAddFocusFromInput() {
+    const inp = document.getElementById('msFocusSearch');
+    if (!inp) return;
+    // 드롭다운에서 선택된 종목이 있으면 그것 사용
+    if (_msFocusSearchResults.length && _msFocusSearchActiveIdx >= 0) {
+        const item = _msFocusSearchResults[_msFocusSearchActiveIdx];
+        await _msAddFocus(item.stock_code, item.stock_name);
+        inp.value = '';
+        _msFocusHideDropdown();
+        return;
+    }
+    // 첫 번째 결과 자동 선택
+    if (_msFocusSearchResults.length) {
+        const item = _msFocusSearchResults[0];
+        await _msAddFocus(item.stock_code, item.stock_name);
+        inp.value = '';
+        _msFocusHideDropdown();
+    }
+}
+
+async function _msAddFocus(code, name) {
+    try {
+        const res = await fetch('/api/morning-settings/focus', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code, name }),
+        });
+        const r = await res.json();
+        if (r.success) { _msSettings = r.data; _msRender(); showToast(`${name} 추가됨`); }
+    } catch (e) { showToast('추가 실패', 'error'); }
+}
+
+function msFocusSearchDebounce(q) {
+    clearTimeout(_msFocusSearchTimer);
+    if (!q.trim()) { _msFocusHideDropdown(); return; }
+    _msFocusSearchTimer = setTimeout(() => _msFocusDoSearch(q), 200);
+}
+
+async function _msFocusDoSearch(q) {
+    const dd = document.getElementById('msFocusDropdown');
+    if (!dd) return;
+    try {
+        const res = await fetch(`/api/stock/search?q=${encodeURIComponent(q)}`, { credentials: 'same-origin' });
+        const r = await res.json();
+        _msFocusSearchResults = r.results || [];
+        if (!_msFocusSearchResults.length) { dd.style.display = 'none'; return; }
+        _msFocusSearchActiveIdx = -1;
+        dd.innerHTML = _msFocusSearchResults.map((item, i) =>
+            `<div class="stock-search-item" data-idx="${i}"
+                  onmousedown="_msFocusSelectItem(${i})"
+                  onmouseenter="_msFocusSearchActiveIdx=${i};document.querySelectorAll('#msFocusDropdown .stock-search-item').forEach((el,j)=>el.classList.toggle('active',j===${i}))">
+                <span class="ssi-name">${item.stock_name}</span>
+                <span class="ssi-code">${item.stock_code}</span>
+            </div>`
+        ).join('');
+        dd.style.display = 'block';
+    } catch (e) { /* 무시 */ }
+}
+
+function _msFocusSelectItem(idx) {
+    const item = _msFocusSearchResults[idx];
+    if (!item) return;
+    const inp = document.getElementById('msFocusSearch');
+    if (inp) inp.value = item.stock_name;
+    _msFocusHideDropdown();
+    _msAddFocus(item.stock_code, item.stock_name);
+}
+
+function _msFocusHideDropdown() {
+    const dd = document.getElementById('msFocusDropdown');
+    if (dd) dd.style.display = 'none';
+    _msFocusSearchResults = [];
+    _msFocusSearchActiveIdx = -1;
+}
+
+function msFocusSearchKeyNav(e) {
+    const dd = document.getElementById('msFocusDropdown');
+    if (!dd || dd.style.display === 'none') return;
+    const items = dd.querySelectorAll('.stock-search-item');
+    if (!items.length) return;
+    if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        _msFocusSearchActiveIdx = Math.min(_msFocusSearchActiveIdx + 1, items.length - 1);
+        items.forEach((el, i) => el.classList.toggle('active', i === _msFocusSearchActiveIdx));
+    } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        _msFocusSearchActiveIdx = Math.max(_msFocusSearchActiveIdx - 1, 0);
+        items.forEach((el, i) => el.classList.toggle('active', i === _msFocusSearchActiveIdx));
+    } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (_msFocusSearchActiveIdx >= 0) _msFocusSelectItem(_msFocusSearchActiveIdx);
+        else if (_msFocusSearchResults.length) _msFocusSelectItem(0);
+    } else if (e.key === 'Escape') {
+        _msFocusHideDropdown();
+    }
+}
+
+// ── 관심종목 C 시그널 테이블 ─────────────────────────────────────────────────
+
 async function _liveLoadMorningSignals() {
     const container = document.getElementById('liveS3MorningContainer');
     if (!container) return;
@@ -9086,29 +9311,46 @@ async function _liveLoadMorningSignals() {
     try {
         const res = await fetch(`/api/reentry/morning-signals?date=${today}`, { credentials: 'same-origin' });
         const r = await res.json();
-        const rows = r.data || [];
-        if (!rows.length) {
+        const signalRows = r.data || [];  // 실제 시그널이 있는 종목
+
+        // 포커스 종목: 시그널 없어도 항상 행 표시
+        const focusList = _msSettings?.focus || [];
+        const focusCodes = new Set(focusList.map(f => f.code));
+
+        // 시그널 행을 map으로
+        const sigRowMap = {};
+        signalRows.forEach(row => { sigRowMap[row.stock_code] = row; });
+
+        // 전체 표시 행 = 시그널 있는 종목 + 포커스 종목 중 시그널 없는 것 추가
+        const allRows = [...signalRows];
+        focusList.forEach(f => {
+            if (!sigRowMap[f.code]) {
+                allRows.push({ stock_code: f.code, stock_name: f.name, signals: [] });
+            }
+        });
+
+        if (!allRows.length) {
             container.innerHTML = '<p style="color:#868e96;font-size:13px;text-align:center;padding:12px;">오늘 관심종목 C시그널 없음</p>';
             return;
         }
 
-        // 전체 시그널에서 등장한 모든 시간대 수집 (컬럼 헤더용)
+        // 전체 시간대 수집 (컬럼 헤더용)
         const allTimes = [...new Set(
-            rows.flatMap(r => r.signals.map(s => s.time)).filter(Boolean)
+            signalRows.flatMap(row => row.signals.map(s => s.time)).filter(Boolean)
         )].sort();
 
         const typeColor = { C1: '#e67e22', C2: '#27ae60', C3: '#2980b9' };
-        const confColor = { 'H': '#e74c3c', 'M': '#f39c12', 'L': '#95a5a6' };
+        const confColor = { H: '#e74c3c', M: '#f39c12', L: '#95a5a6' };
 
-        // 테이블: 종목(행) × 시그널발생(열)
         const thead = `<tr style="background:var(--bg-secondary);">
             <th style="padding:6px 10px;text-align:left;font-size:13px;min-width:110px;">종목</th>
             <th style="padding:6px 10px;text-align:center;font-size:13px;">지지가</th>
             ${allTimes.map(t => `<th style="padding:6px 10px;text-align:center;font-size:12px;color:#adb5bd;">${t}</th>`).join('')}
         </tr>`;
 
-        const tbody = rows.map(row => {
-            // 시간별로 시그널 매핑
+        const tbody = allRows.map(row => {
+            const isFocus = focusCodes.has(row.stock_code);
+            const hasSignal = row.signals.length > 0;
             const sigMap = {};
             row.signals.forEach(s => {
                 const key = s.time || '?';
@@ -9125,22 +9367,24 @@ async function _liveLoadMorningSignals() {
                 ).join('<br>');
                 return `<td style="padding:5px 8px;text-align:center;">${badges}</td>`;
             });
-            return `<tr style="border-bottom:1px solid var(--border-color);">
+            const focusBadge = isFocus ? `<span style="font-size:10px;background:#1a3a22;color:#69db7c;border-radius:3px;padding:1px 5px;margin-left:4px;">⭐</span>` : '';
+            const rowBg = isFocus && !hasSignal ? 'background:rgba(26,58,34,0.25);' : '';
+            return `<tr style="border-bottom:1px solid var(--border-color);${rowBg}">
                 <td style="padding:6px 10px;font-size:13px;font-weight:600;">
-                    ${row.stock_name}<br>
+                    ${row.stock_name}${focusBadge}<br>
                     <span style="font-size:11px;color:#868e96;font-weight:400;">${row.stock_code}</span>
                 </td>
                 <td style="padding:5px 8px;text-align:center;font-size:12px;color:#74c0fc;">
                     ${supportPrice ? supportPrice.toLocaleString() + '원' : '—'}
                 </td>
-                ${cells.join('')}
+                ${allTimes.length ? cells.join('') : '<td style="padding:5px 8px;text-align:center;color:#555;font-size:12px;">시그널 없음</td>'}
             </tr>`;
         }).join('');
 
         container.innerHTML = `
-            <div style="font-size:12px;color:#868e96;margin-bottom:8px;">
-                ${rows.length}개 종목 · 3분마다 자동 갱신 · C2(쌍바닥 지지) / C1(거감봉)
-                <button class="btn btn-sm btn-outline" style="float:right;padding:2px 8px;font-size:11px;" onclick="_liveLoadMorningSignals()">🔄 새로고침</button>
+            <div style="font-size:12px;color:#868e96;margin-bottom:8px;display:flex;align-items:center;gap:8px;">
+                <span>시그널 ${signalRows.length}종목 · C2(쌍바닥) / C1(거감봉) · ⭐ 포커스 종목</span>
+                <button class="btn btn-sm btn-outline" style="margin-left:auto;padding:2px 8px;font-size:11px;" onclick="_liveLoadMorningSignals()">🔄 새로고침</button>
             </div>
             <div style="overflow-x:auto;">
                 <table style="width:100%;border-collapse:collapse;font-size:13px;">
@@ -9164,7 +9408,7 @@ async function liveRegisterStyle3() {
     const stopPrice = parseFloat(document.getElementById('liveReStopPrice')?.value) || 0;
     const budget = parseFloat(document.getElementById('liveReBudget')?.value) || 0;
     if (!code || !name || !buyPrice || !exitPrice) {
-        showToast('종목코드, 종목명, 매수가, 익절가 필수', 'error'); return;
+        showToast('종목코드, 종목명, 매수목표가, 익절목표가 필수', 'error'); return;
     }
     const ok = await _registerStyle3Item({ code, name, buyPrice, buyDate, exitPrice, exitDate, stopPrice, budget });
     if (ok) liveStyle3SwitchTab('watchlist');
@@ -9180,7 +9424,7 @@ async function liveCheckStyle3Now() {
     const exitTime = document.getElementById('liveReExitTime')?.value.trim() || '';
     const resultEl = document.getElementById('liveS3CheckResult');
     if (!code || !buyPrice || !exitPrice) {
-        showToast('종목코드, 매수가, 익절가 필수', 'error'); return;
+        showToast('종목코드, 매수목표가, 익절목표가 필수', 'error'); return;
     }
     resultEl.innerHTML = '<p style="color:#868e96;font-size:13px;">3분봉 조회 중...</p>';
     try {

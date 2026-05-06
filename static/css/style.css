@@ -1113,6 +1113,45 @@ tbody tr.inactive {
     transform: scale(1.05);
 }
 
+/* Morning settings toggle */
+.ms-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 3px 12px;
+    border-radius: 14px;
+    border: 2px solid #adb5bd;
+    background: #343a40;
+    color: #868e96;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.18s;
+    min-width: 46px;
+    user-select: none;
+}
+.ms-toggle.on {
+    border-color: #37b24d;
+    background: #1a3a22;
+    color: #69db7c;
+}
+.ms-toggle:hover { transform: scale(1.05); }
+
+/* 포커스 종목 row */
+.ms-focus-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    background: var(--bg-secondary);
+    margin-bottom: 4px;
+    font-size: 13px;
+}
+.ms-focus-row .ms-focus-name { flex: 1; font-weight: 600; }
+.ms-focus-row .ms-focus-code { font-size: 11px; color: #868e96; }
+.ms-focus-row .ms-focus-actions { display: flex; gap: 5px; align-items: center; }
+
 .watcher-actions {
     display: flex;
     gap: 6px;

@@ -1158,12 +1158,21 @@ class PriceMonitor:
                     except Exception as e:
                         logger.error(f"Style3 체크 실패: {e}")
 
-                # 관심종목 C시그널 — 3분마다 폴링 (텔레그램 없음, DB만 저장)
+                # 관심종목 C시그널 — 3분마다 폴링 (설정 ON일 때만)
                 morning_elapsed = (datetime.now() - self.morning_last_check).total_seconds()
                 if morning_elapsed >= 180:
                     self.morning_last_check = datetime.now()
                     try:
-                        await self.check_morning_c_signals()
+                        import json as _json_ms, os as _os_ms
+                        _ms_path = _os_ms.path.join('.data', 'morning_settings.json')
+                        _ms = {}
+                        if _os_ms.path.exists(_ms_path):
+                            try:
+                                _ms = _json_ms.loads(open(_ms_path).read())
+                            except Exception:
+                                pass
+                        if _ms.get('enabled', False):
+                            await self.check_morning_c_signals()
                     except Exception as e:
                         logger.error(f"관심종목 C시그널 체크 실패: {e}")
 
@@ -1402,17 +1411,52 @@ class PriceMonitor:
             logger.info(f"Style3 시그널: {code} [{sig_type}] @ {sig['entry_price']:,}원 ({time_str})")
 
     async def check_morning_c_signals(self):
-        """morning_watchlist 130종목 C시그널 체크 (C2 전용, 텔레그램 없음, DB 저장만)."""
+        """morning_watchlist C시그널 체크. morning_settings에 따라 대상 종목·알림 여부 결정."""
         import json as _json
         import os as _os
         if not self.news_storage:
             return
+
+        # settings 로드
+        _ms_path = '.data/morning_settings.json'
+        settings = {}
+        try:
+            if _os.path.exists(_ms_path):
+                settings = _json.loads(open(_ms_path).read())
+        except Exception:
+            pass
+        focus_only = settings.get('focus_only', False)
+        focus_list = settings.get('focus', [])
+        focus_map = {f['code']: f for f in focus_list}  # code → {enabled, notify}
+
         path = _os.getenv('MORNING_WATCHLIST_PATH', '.data/morning_watchlist.json')
         try:
             with open(path) as f:
-                items = _json.load(f)
+                all_items = _json.load(f)
         except Exception:
             return
+        if not all_items:
+            return
+
+        # focus_only ON: enabled=True인 포커스 종목만 / OFF: 전체 (포커스 종목의 enabled 존중)
+        if focus_only:
+            items = [
+                {'code': f['code'], 'name': f['name'], 'notify': f.get('notify', False)}
+                for f in focus_list if f.get('enabled', True)
+            ]
+        else:
+            items = []
+            for it in all_items:
+                code = it.get('code', '')
+                fc = focus_map.get(code)
+                if fc and not fc.get('enabled', True):
+                    continue  # 포커스 종목 중 개별 OFF는 스킵
+                items.append({
+                    'code': code,
+                    'name': it.get('name', code),
+                    'notify': fc.get('notify', False) if fc else False,
+                })
+
         if not items:
             return
 
@@ -1431,7 +1475,7 @@ class PriceMonitor:
             self.morning_c2_cache = {'_date': today_str}
 
         check_tasks = [
-            self._check_morning_one(item, token, today_str, time_str)
+            self._check_morning_one(item, token, today_str, time_str, notify=item.get('notify', False))
             for item in items
         ]
         results = await asyncio.gather(*check_tasks, return_exceptions=True)
@@ -1439,8 +1483,8 @@ class PriceMonitor:
             if isinstance(results[i], Exception):
                 logger.debug(f"morning C체크 실패 ({item.get('code','?')}): {results[i]}")
 
-    async def _check_morning_one(self, item: dict, token: str, today_str: str, time_str: str):
-        """관심종목 단일 종목 C2 시그널 체크."""
+    async def _check_morning_one(self, item: dict, token: str, today_str: str, time_str: str, notify: bool = False):
+        """관심종목 단일 종목 C시그널 체크. notify=True면 텔레그램 알림 발송."""
         import os as _os
         code = item.get('code', '')
         stock_name = item.get('name', code)
@@ -1557,6 +1601,15 @@ class PriceMonitor:
                     source='morning',
                 )
                 logger.info(f"관심종목 {sig_type}: {code} {stock_name} @ {close:,}원 ({time_str})")
+                if notify:
+                    conf_label = {'C2': '🟢 쌍바닥 지지', 'C1': '🟡 거감봉'}.get(sig_type, sig_type)
+                    await self.send_notification(
+                        f"⭐ [관심종목 C시그널] {conf_label}\n"
+                        f"{stock_name} ({code})\n"
+                        f"현재가: {close:,}원"
+                        + (f" | 지지가: {int(support_price):,}원" if sig_type == 'C2' else "")
+                        + f"\n시간: {time_str}\n{reason}"
+                    )
             except Exception as e:
                 logger.error(f"morning 시그널 저장 실패 ({code}): {e}")
 
@@ -1628,7 +1681,7 @@ class PriceMonitor:
         if support_2 > 0 and current_price <= support_2:
             return 5
         if support_1 > 0 and current_price < support_1:
-            return 5
+            return 5 if support_2 > 0 else 4
         return 3  # 레벨 미설정 시 기본 횡보
 
     async def _update_monitoring_status(self, code: str, watcher: dict, current_price: float):

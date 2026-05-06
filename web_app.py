@@ -1710,6 +1710,13 @@ def delete_watchlist(code):
 # ========== Morning Watchlist API (Style3 Track A) ==========
 
 _MORNING_WATCHLIST_PATH = Path(os.getenv("MORNING_WATCHLIST_PATH", ".data/morning_watchlist.json"))
+_MORNING_SETTINGS_PATH = Path(".data/morning_settings.json")
+
+_DEFAULT_MORNING_SETTINGS = {
+    "enabled": False,
+    "focus_only": False,
+    "focus": []
+}
 
 
 def _load_morning_watchlist():
@@ -1719,6 +1726,24 @@ def _load_morning_watchlist():
         except Exception:
             return []
     return []
+
+
+def _load_morning_settings() -> dict:
+    if _MORNING_SETTINGS_PATH.exists():
+        try:
+            s = json.loads(_MORNING_SETTINGS_PATH.read_text(encoding='utf-8'))
+            # 누락 키 보완
+            for k, v in _DEFAULT_MORNING_SETTINGS.items():
+                s.setdefault(k, v)
+            return s
+        except Exception:
+            pass
+    return dict(_DEFAULT_MORNING_SETTINGS)
+
+
+def _save_morning_settings(settings: dict):
+    _MORNING_SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _MORNING_SETTINGS_PATH.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding='utf-8')
 
 
 @app.route('/api/morning-watchlist', methods=['GET'])
@@ -1760,6 +1785,97 @@ def set_morning_watchlist():
         return jsonify({'success': True, 'count': len(items)})
     except Exception as e:
         logger.error(f"set_morning_watchlist 실패: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/morning-settings', methods=['GET'])
+@auth.login_required
+def get_morning_settings():
+    try:
+        return jsonify({'success': True, 'data': _load_morning_settings()})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/morning-settings', methods=['POST'])
+@auth.login_required
+def save_morning_settings():
+    """전체 설정 저장. body: {enabled, focus_only, focus:[{code,name,enabled,notify}]}"""
+    try:
+        data = request.get_json(force=True) or {}
+        s = _load_morning_settings()
+        if 'enabled' in data:
+            s['enabled'] = bool(data['enabled'])
+        if 'focus_only' in data:
+            s['focus_only'] = bool(data['focus_only'])
+        if 'focus' in data:
+            s['focus'] = [
+                {
+                    'code': normalize_stock_code(str(it['code']).lstrip("'")),
+                    'name': str(it.get('name', '')),
+                    'enabled': bool(it.get('enabled', True)),
+                    'notify': bool(it.get('notify', False)),
+                }
+                for it in data['focus'] if it.get('code')
+            ]
+        _save_morning_settings(s)
+        return jsonify({'success': True, 'data': s})
+    except Exception as e:
+        logger.error(f"save_morning_settings 실패: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/morning-settings/focus', methods=['POST'])
+@auth.login_required
+def add_morning_focus():
+    """포커스 종목 단건 추가. body: {code, name}"""
+    try:
+        data = request.get_json(force=True) or {}
+        code = normalize_stock_code(str(data.get('code', '')).lstrip("'"))
+        name = str(data.get('name', ''))
+        if not code:
+            return jsonify({'success': False, 'error': 'code 필요'}), 400
+        s = _load_morning_settings()
+        if not any(f['code'] == code for f in s['focus']):
+            s['focus'].append({'code': code, 'name': name, 'enabled': True, 'notify': False})
+            _save_morning_settings(s)
+        return jsonify({'success': True, 'data': s})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/morning-settings/focus/<code>', methods=['PUT'])
+@auth.login_required
+def update_morning_focus(code):
+    """포커스 종목 row 수정. body: {enabled, notify, name}"""
+    try:
+        data = request.get_json(force=True) or {}
+        s = _load_morning_settings()
+        for f in s['focus']:
+            if f['code'] == code:
+                if 'enabled' in data:
+                    f['enabled'] = bool(data['enabled'])
+                if 'notify' in data:
+                    f['notify'] = bool(data['notify'])
+                if 'name' in data:
+                    f['name'] = str(data['name'])
+                break
+        _save_morning_settings(s)
+        return jsonify({'success': True, 'data': s})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/morning-settings/focus/<code>', methods=['DELETE'])
+@auth.login_required
+def delete_morning_focus(code):
+    """포커스 종목 삭제."""
+    try:
+        s = _load_morning_settings()
+        s['focus'] = [f for f in s['focus'] if f['code'] != code]
+        _save_morning_settings(s)
+        return jsonify({'success': True, 'data': s})
+    except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
