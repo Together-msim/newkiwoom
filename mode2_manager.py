@@ -648,7 +648,7 @@ class Mode2Manager:
         if old_zone == new_zone:
             return False
 
-        now_iso = datetime.now().isoformat()
+        now_iso = datetime.now(ZoneInfo("Asia/Seoul")).isoformat()
 
         # 인접 구역 왕복 카운트 (3↔4, 4↔5, 2↔3, 1↔2)
         if old_zone > 0 and abs(old_zone - new_zone) == 1:
