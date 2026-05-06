@@ -1353,6 +1353,12 @@ class PriceMonitor:
                 elif sig_type in ('B-r1', 'B-r2'):
                     if last_price and abs(sig['entry_price'] - last_price) / last_price < 0.02:
                         continue
+                elif sig_type == 'C2':
+                    # 같은 지지가 ±100원이면 당일 첫 감지만
+                    last_support = last.get('support_price') or 0
+                    cur_support = sig.get('support_price') or 0
+                    if last_support and cur_support and abs(cur_support - last_support) <= 100:
+                        continue
                 elif sig_type in ('C1', 'C3'):
                     try:
                         last_h, last_m = map(int, last_time.split(':'))
@@ -1563,7 +1569,7 @@ class PriceMonitor:
         from style3_signals import _fmt_time
         signal_time = _fmt_time(str(last.get('time', '')))
 
-        # dedup: 같은 날 같은 종목+타입 120분 이내 스킵
+        # dedup: C2 = 같은 지지가 ±100원 당일 첫 감지만 / C1 = 120분 쿨다운
         for sig_type, condition in [
             ('C2', True),
             ('C1', is_weak_vol and is_bearish),
@@ -1572,14 +1578,19 @@ class PriceMonitor:
                 continue
             last_saved = self.news_storage.get_latest_signal_today(code, sig_type, today_str)
             if last_saved:
-                last_time = last_saved.get('signal_time', '00:00')
-                try:
-                    lh, lm = map(int, last_time.split(':'))
-                    ch, cm = map(int, time_str.split(':'))
-                    if (ch * 60 + cm) - (lh * 60 + lm) < 120:
+                if sig_type == 'C2':
+                    last_support = last_saved.get('support_price') or 0
+                    if last_support and abs(support_price - last_support) <= 100:
                         continue
-                except Exception:
-                    continue
+                else:
+                    last_time = last_saved.get('signal_time', '00:00')
+                    try:
+                        lh, lm = map(int, last_time.split(':'))
+                        ch, cm = map(int, time_str.split(':'))
+                        if (ch * 60 + cm) - (lh * 60 + lm) < 120:
+                            continue
+                    except Exception:
+                        continue
 
             reason = (
                 f"쌍바닥 지지선({int(support_price):,}원) 터치 — 현재가 {close:,}원"
