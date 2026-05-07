@@ -444,7 +444,8 @@ class NewsStorage:
     def cleanup_old_messages(self, source_type: Optional[str] = None) -> int:
         """오늘 날짜 이전 메시지 삭제 (saved_news는 보존). 삭제된 건수 반환.
         source_type 지정 시 해당 타입만 삭제."""
-        today = date.today().isoformat()
+        from datetime import timezone, timedelta
+        today = (datetime.now(timezone.utc) + timedelta(hours=9)).date().isoformat()
         try:
             with self._conn() as conn:
                 # saved_news에 있는 message_id는 보존
