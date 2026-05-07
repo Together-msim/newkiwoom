@@ -120,7 +120,7 @@ def scan_style3_signals(
             'entry_price': close,
             'support_price': 0,
             'confidence': 'M',
-            'reason': f"현재가({close:,}원) ≤ 매수타점({int(buy_target_price):,}원) 존 터치",
+            'reason': f"현재가({close:,}원) — 매수타점({int(buy_target_price):,}원) +3% 이내 존 터치",
         })
 
     # Type A2: 현재가 ≤ 1차 저항 × 1.03 (익절가/저항선 근처 복귀)
@@ -131,7 +131,7 @@ def scan_style3_signals(
             'entry_price': close,
             'support_price': 0,
             'confidence': 'M',
-            'reason': f"현재가({close:,}원) ≤ 1차저항({int(resistance_1_price):,}원) 존 복귀 — 익절가 지지선 전환 확인",
+            'reason': f"현재가({close:,}원) — 1차저항({int(resistance_1_price):,}원) +3% 이내 존 복귀 (익절가 지지선 전환 확인)",
         })
 
     # Type C2: 쌍바닥 지지 터치 (support_price 미리 계산된 값 사용)
