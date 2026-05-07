@@ -112,26 +112,26 @@ def scan_style3_signals(
     signal_time = _fmt_time(str(last.get('time', '')))
     found = []
 
-    # Type A: 현재가 ≤ 매수타점 × 1.03
-    if buy_target_price and close <= buy_target_price * 1.03:
+    # Type A: 현재가 ±1.5% 이내 매수타점 존 터치
+    if buy_target_price and buy_target_price * 0.985 <= close <= buy_target_price * 1.015:
         found.append({
             'type': 'A',
             'signal_time': signal_time,
             'entry_price': close,
             'support_price': 0,
             'confidence': 'M',
-            'reason': f"현재가({close:,}원) — 매수타점({int(buy_target_price):,}원) +3% 이내 존 터치",
+            'reason': f"현재가({close:,}원) — 매수타점({int(buy_target_price):,}원) ±1.5% 존 터치",
         })
 
-    # Type A2: 현재가 ≤ 1차 저항 × 1.03 (익절가/저항선 근처 복귀)
-    if resistance_1_price and close <= resistance_1_price * 1.03:
+    # Type A2: 현재가 ±1.5% 이내 1차저항 존 복귀
+    if resistance_1_price and resistance_1_price * 0.985 <= close <= resistance_1_price * 1.015:
         found.append({
             'type': 'A2',
             'signal_time': signal_time,
             'entry_price': close,
             'support_price': 0,
             'confidence': 'M',
-            'reason': f"현재가({close:,}원) — 1차저항({int(resistance_1_price):,}원) +3% 이내 존 복귀 (익절가 지지선 전환 확인)",
+            'reason': f"현재가({close:,}원) — 1차저항({int(resistance_1_price):,}원) ±1.5% 존 복귀 (익절가 지지선 전환 확인)",
         })
 
     # Type C2: 쌍바닥 지지 터치 (support_price 미리 계산된 값 사용)
