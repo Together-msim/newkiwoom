@@ -134,6 +134,26 @@ def scan_style3_signals(
             'reason': f"현재가({close:,}원) — 1차저항({int(resistance_1_price):,}원) ±1.5% 존 복귀 (익절가 지지선 전환 확인)",
         })
 
+    # Type C2-intra: 3분봉 장중 쌍바닥 (tolerance 1%)
+    lows = [(b['low'], b['time']) for b in bars if b.get('low', 0) > 0]
+    if len(lows) >= 2:
+        intra_base = min(lows, key=lambda x: x[0])[0]
+        intra_bottoms = [(v, t) for v, t in lows if v <= intra_base * 1.01]
+        if len(intra_bottoms) >= 2:
+            intra_bottoms_sorted = sorted(intra_bottoms, key=lambda x: x[1])
+            first_t = _fmt_time(str(intra_bottoms_sorted[0][1]))
+            last_t = _fmt_time(str(intra_bottoms_sorted[-1][1]))
+            intra_support = int(intra_base * 1.005)
+            if abs(close - intra_support) / intra_support < 0.008:
+                found.append({
+                    'type': 'C2-intra',
+                    'signal_time': signal_time,
+                    'entry_price': close,
+                    'support_price': intra_support,
+                    'confidence': 'H',
+                    'reason': f"장중 쌍바닥({intra_base:,}원, {first_t}~{last_t}) 지지 터치 — 현재가 {close:,}원",
+                })
+
     # Type C2: 쌍바닥 지지 터치 (support_price 미리 계산된 값 사용)
     if support_price and abs(close - support_price) / support_price < 0.008:
         # 쌍바닥 지지가가 1차 저항 ±2% 이내이면 "익절가 지지" 프리미엄 시그널
