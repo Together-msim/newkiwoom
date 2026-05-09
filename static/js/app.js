@@ -616,8 +616,8 @@ function renderZoneCell(w) {
     // 진입 시각
     let enteredStr = '';
     if (w.zone_entered_at) {
-        const d = new Date(w.zone_entered_at);
-        enteredStr = `<span style="font-size:10px;color:#868e96;display:block;">${d.toLocaleTimeString('ko-KR', {hour:'2-digit',minute:'2-digit'})}</span>`;
+        const d = new Date(w.zone_entered_at + 'Z');
+        enteredStr = `<span style="font-size:10px;color:#868e96;display:block;">${d.toLocaleTimeString('ko-KR', {hour:'2-digit',minute:'2-digit', timeZone:'Asia/Seoul'})}</span>`;
     }
 
     // 왕복 카운트
