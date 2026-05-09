@@ -550,6 +550,7 @@ scp -i /Users/msim/Downloads/ssh-key-2026-04-26.key \
 | `news-insight-selected` | `/news-insight-selected` | 선택한 뉴스만 심층 분석 |
 | `news-grouping` | `/news-grouping` | 테마별 그룹핑 + 강도(H/M/L) |
 | `siwhang` | `/siwhang [1h\|2h]` | 급등주 시황 부합 여부 + 관심종목 매칭 AI 분석 → Oracle 저장 + 텔레그램 알림 |
+| `siwhang-v2` | `/siwhang-v2 [1h\|2h]` | siwhang v2 — AI 분석 전 Kiwoom 현재가 스냅샷 → Entry Gate 필터 (등락률/RSI/VWAP/거래량) → `version='siwhang_v2'` 세션으로 A/B 비교 |
 | `backtest` | `/backtest [YYYY-MM-DD] [--version v2] [--desc "설명"]` | 지정 날짜 급등주/뉴스 → 13 타임슬롯 AI 분석 → 종목 추천 → Oracle 저장 |
 | `style3-register` | `/style3-register [YYYY-MM-DD]` | 저녁 루틴 — 익절 종목 → draft 등록 |
 | `style3-backtest` | `/style3-backtest [stock_code]` | 장마감 후 — 익절 이후 재진입 패턴 분석 |

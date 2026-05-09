@@ -1233,6 +1233,13 @@
                     </div>
                 </div>
 
+                <!-- 버전 탭 행 (v1/v2 A/B 비교) -->
+                <div id="liveVersionBar" class="backtest-slot-bar" style="display:none;gap:6px;margin-bottom:4px;">
+                    <button class="slot-btn active" data-ver="all"       onclick="filterLiveVersion('all')">전체</button>
+                    <button class="slot-btn"         data-ver="siwhang"  onclick="filterLiveVersion('siwhang')">📊 v1</button>
+                    <button class="slot-btn"         data-ver="siwhang_v2" onclick="filterLiveVersion('siwhang_v2')">🔬 v2 (Gate)</button>
+                </div>
+
                 <!-- 슬롯 탭 행 -->
                 <div id="liveSlotBar" class="backtest-slot-bar" style="display:none;">
                     <button class="slot-btn" data-slot="all" onclick="filterLiveSlot('all')">전체</button>

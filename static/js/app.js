@@ -8018,6 +8018,7 @@ async function deleteMotto(mottoId) {
 let _liveAllPicks = [];
 let _liveSlotPicks = [];
 let _liveActiveSlot = 'current';
+let _liveActiveVersion = 'all';  // 'all' | 'siwhang' | 'siwhang_v2'
 let _liveCarouselIdx = 0;
 const _liveChartLoaded = {};  // pickId → true (차트 로드 완료 여부)
 
@@ -8069,22 +8070,35 @@ async function loadLive() {
 
         const emptyState = document.getElementById('liveEmptyState');
         const slotBar = document.getElementById('liveSlotBar');
+        const versionBar = document.getElementById('liveVersionBar');
         const banner = document.getElementById('liveSessionBanner');
 
         if (!_liveAllPicks.length) {
             emptyState.style.display = '';
             slotBar.style.display = 'none';
+            versionBar.style.display = 'none';
             banner.style.display = 'none';
             document.getElementById('liveCarouselTrack').innerHTML = '';
             document.getElementById('liveDesktopList').innerHTML = '';
             return;
         }
 
+        // v2 picks가 존재할 때만 버전 탭 노출
+        const hasV2 = _liveAllPicks.some(p => p._version === 'siwhang_v2');
+        versionBar.style.display = hasV2 ? '' : 'none';
+
         emptyState.style.display = 'none';
         slotBar.style.display = '';
-        banner.textContent = r.date + '  실전 시황체크 결과  ' + _liveAllPicks.length + '건';
+        const v1Count = _liveAllPicks.filter(p => p._version === 'siwhang').length;
+        const v2Count = _liveAllPicks.filter(p => p._version === 'siwhang_v2').length;
+        const countLabel = hasV2
+            ? `v1: ${v1Count}건 / v2: ${v2Count}건`
+            : `${_liveAllPicks.length}건`;
+        banner.textContent = r.date + '  실전 시황체크  ' + countLabel;
         banner.style.display = '';
 
+        _liveActiveVersion = 'all';
+        _highlightLiveVersionBtn('all');
         _liveActiveSlot = _getCurrentLiveSlot();
         _highlightLiveSlotBtn(_liveActiveSlot);
         _liveCarouselIdx = 0;
@@ -8095,6 +8109,19 @@ async function loadLive() {
         showToast('로드 실패', 'error');
         console.error(e);
     }
+}
+
+function filterLiveVersion(ver) {
+    _liveActiveVersion = ver;
+    _highlightLiveVersionBtn(ver);
+    _liveCarouselIdx = 0;
+    Object.keys(_liveChartLoaded).forEach(k => delete _liveChartLoaded[k]);
+    _renderLive();
+}
+
+function _highlightLiveVersionBtn(ver) {
+    document.querySelectorAll('#liveVersionBar .slot-btn').forEach(b =>
+        b.classList.toggle('active', b.dataset.ver === ver));
 }
 
 function filterLiveSlot(slot) {
@@ -8111,9 +8138,14 @@ function _highlightLiveSlotBtn(slot) {
 }
 
 function _renderLive() {
-    _liveSlotPicks = _liveActiveSlot === 'all'
+    // 1단계: 버전 필터
+    const versionFiltered = _liveActiveVersion === 'all'
         ? _liveAllPicks
-        : _liveAllPicks.filter(p => p._slotKey === _liveActiveSlot);
+        : _liveAllPicks.filter(p => p._version === _liveActiveVersion);
+    // 2단계: 슬롯 필터
+    _liveSlotPicks = _liveActiveSlot === 'all'
+        ? versionFiltered
+        : versionFiltered.filter(p => p._slotKey === _liveActiveSlot);
 
     const isMobile = window.innerWidth <= 768;
     const carouselWrapper = document.getElementById('liveCarouselWrapper');
@@ -8172,6 +8204,41 @@ function renderLivePickCard(p) {
     const priceStr = p.price_at_slot ? Number(p.price_at_slot).toLocaleString() + '원' : '';
     const slotDisplay = p._slotKey || p.slot_time || p._runKst || '';
 
+    // 버전 배지
+    const versionBadge = p._version === 'siwhang_v2'
+        ? `<span style="font-size:11px;background:#6741d9;color:#fff;padding:2px 6px;border-radius:4px;margin-left:4px;">v2</span>`
+        : p._version === 'siwhang'
+        ? `<span style="font-size:11px;background:#1971c2;color:#fff;padding:2px 6px;border-radius:4px;margin-left:4px;">v1</span>`
+        : '';
+
+    // Gate 정보 (v2 전용)
+    const gateHtml = (() => {
+        if (p._version !== 'siwhang_v2') return '';
+        const gs = p.gate_status;
+        if (!gs || gs === 'NO_DATA') return '';
+        const icon = gs === 'PASS' ? '✅' : gs === 'WARN' ? '⚠️' : '🚫';
+        const color = gs === 'PASS' ? '#2f9e44' : gs === 'WARN' ? '#e67700' : '#c92a2a';
+        let snap = '';
+        try {
+            const s = typeof p.gate_snapshot === 'string' ? JSON.parse(p.gate_snapshot) : (p.gate_snapshot || {});
+            const parts = [];
+            if (s.change_pct != null) parts.push(`등락 ${s.change_pct > 0 ? '+' : ''}${s.change_pct}%`);
+            if (s.rsi != null)        parts.push(`RSI ${s.rsi}`);
+            if (s.vwap_gap_pct != null) parts.push(`VWAP ${s.vwap_gap_pct > 0 ? '+' : ''}${s.vwap_gap_pct}%`);
+            if (s.vol_ratio != null)  parts.push(`vol×${s.vol_ratio}`);
+            snap = parts.join(' · ');
+        } catch(e) {}
+        const failed = (() => {
+            try {
+                const f = typeof p.gate_failed === 'string' ? JSON.parse(p.gate_failed) : (p.gate_failed || []);
+                return f.length ? `<span style="color:${color};font-size:11px;">실패: ${f.join(', ')}</span>` : '';
+            } catch(e) { return ''; }
+        })();
+        return `<div style="font-size:12px;padding:4px 8px;background:#f8f9fa;border-radius:4px;margin:4px 0;border-left:3px solid ${color};">
+            ${icon} Gate <strong style="color:${color}">${gs}</strong>${snap ? ` <span style="color:#868e96">(${snap})</span>` : ''}${failed ? ' ' + failed : ''}
+        </div>`;
+    })();
+
     // siwhang_results: news_summary + watchlist_match 활용
     const wlMatch = (() => {
         if (!p.watchlist_match) return [];
@@ -8205,7 +8272,7 @@ function renderLivePickCard(p) {
     return `
 <div class="bt-pick-card live-pick-card" id="liveCard_${p.id}">
     <div class="bt-pick-header">
-        <span class="bt-pick-name">${escapeHtml(p.stock_name)}${p.stock_code ? ` <small style="color:#868e96">${p.stock_code}</small>` : ''}</span>
+        <span class="bt-pick-name">${escapeHtml(p.stock_name)}${p.stock_code ? ` <small style="color:#868e96">${p.stock_code}</small>` : ''}${versionBadge}</span>
         ${slotDisplay ? `<span class="bt-pick-slot">${slotDisplay}</span>` : ''}
         ${tagLabel ? `<span class="tag-badge tag-${p.tag_type||'ss'}">${tagLabel}</span>` : ''}
         ${p.confidence ? `<span class="${confClass}" style="font-weight:700;font-size:13px;">[${p.confidence}]</span>` : ''}
@@ -8214,6 +8281,7 @@ function renderLivePickCard(p) {
         ${p.theme ? `<span>📌 ${escapeHtml(p.theme)}</span>` : ''}
         ${priceStr ? `<span>추천가 <strong>${priceStr}</strong></span>` : ''}
     </div>
+    ${gateHtml}
     ${wlHtml}
     ${p.catalyst ? `<div class="bt-catalyst"><span class="bt-catalyst-label">촉매</span>${escapeHtml(p.catalyst)}</div>` : ''}
     ${p.news_summary ? `<div class="bt-catalyst"><span class="bt-catalyst-label">뉴스</span>${escapeHtml(p.news_summary)}</div>` : ''}

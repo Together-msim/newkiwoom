@@ -2645,14 +2645,15 @@ def get_live_picks():
     target_date = request.args.get('date') or _date.today().isoformat()
     ns = _get_news_storage()
 
-    # 오늘 날짜 세션 조회 — backtest 세션 우선, siwhang 세션 picks를 합산
+    # 오늘 날짜 세션 조회 — backtest 세션 우선, siwhang/siwhang_v2 세션 picks를 합산
     sessions = ns.get_backtest_sessions()
     today_sessions = [s for s in sessions if s.get('run_date') == target_date]
     if not today_sessions:
         return jsonify({'success': True, 'data': [], 'date': target_date, 'session_id': None})
 
-    backtest_sessions = [s for s in today_sessions if s.get('version') != 'siwhang']
-    siwhang_sessions = [s for s in today_sessions if s.get('version') == 'siwhang']
+    backtest_sessions = [s for s in today_sessions if s.get('version') not in ('siwhang', 'siwhang_v2')]
+    siwhang_sessions  = [s for s in today_sessions if s.get('version') == 'siwhang']
+    siwhang_v2_sessions = [s for s in today_sessions if s.get('version') == 'siwhang_v2']
 
     picks = []
     primary_session_id = None
@@ -2660,19 +2661,27 @@ def get_live_picks():
     if backtest_sessions:
         primary_session_id = backtest_sessions[0]['id']
         picks = ns.get_backtest_picks(primary_session_id)
+        for p in picks:
+            p['_version'] = 'backtest'
 
-    # siwhang picks 합산 (slot_time 기준 중복 없이 추가)
-    if siwhang_sessions:
+    def _merge_siwhang(sessions_list, version_tag):
+        nonlocal primary_session_id
+        if not sessions_list:
+            return
         if primary_session_id is None:
-            primary_session_id = siwhang_sessions[0]['id']
+            primary_session_id = sessions_list[0]['id']
         existing_keys = {(p.get('slot_time'), p.get('stock_code') or p.get('stock_name')) for p in picks}
-        for s in siwhang_sessions:
+        for s in sessions_list:
             for p in ns.get_backtest_picks(s['id']):
                 key = (p.get('slot_time'), p.get('stock_code') or p.get('stock_name'))
                 if key not in existing_keys:
-                    p['_source'] = 'siwhang'
+                    p['_source'] = version_tag
+                    p['_version'] = version_tag
                     picks.append(p)
                     existing_keys.add(key)
+
+    _merge_siwhang(siwhang_sessions, 'siwhang')
+    _merge_siwhang(siwhang_v2_sessions, 'siwhang_v2')
 
     session_id = primary_session_id
 
