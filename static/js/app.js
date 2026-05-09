@@ -5874,6 +5874,7 @@ async function executeBulkAdd() {
     const colMap = {};
     const headerAliases = {
         '종목코드': 'code',
+        '종목명': 'name_input',
         '매수타점': 'buy_target', '매수가': 'buy_target',
         '1차지지': 'support_1', '1차지지가': 'support_1',
         '2차지지': 'support_2', '2차지지가': 'support_2',
@@ -5882,6 +5883,8 @@ async function executeBulkAdd() {
         '섹션명': 'section', '섹션': 'section',
     };
     headerParts.forEach((h, i) => { if (headerAliases[h]) colMap[headerAliases[h]] = i; });
+
+    const useNameInput = colMap['name_input'] !== undefined && colMap['code'] === undefined;
 
     const dataLines = lines.slice(1);
 
@@ -5904,18 +5907,36 @@ async function executeBulkAdd() {
         const parts = line.split(',').map(p => p.trim());
 
         if (parts.length < 2) {
-            results.failed.push({ line, reason: '최소 2개 컬럼 필요 (종목코드, 매수타점)' });
+            results.failed.push({ line, reason: '최소 2개 컬럼 필요 (종목코드 또는 종목명, 매수타점)' });
             continue;
         }
 
         const get = (key, fallbackIdx) => parts[colMap[key] !== undefined ? colMap[key] : fallbackIdx] || '';
-        const code       = get('code', 0);
-        const buy_target = get('buy_target', 1);
-        const support_1  = get('support_1', 2);
-        const support_2  = get('support_2', 3);
-        const resistance_1 = get('resistance_1', 4);
-        const resistance_2 = get('resistance_2', 5);
-        const sectionName  = get('section', 6);
+        let code         = get('code', useNameInput ? -1 : 0);
+        const nameRaw    = get('name_input', useNameInput ? 0 : -1);
+        const buy_target = get('buy_target', useNameInput ? 1 : 1);
+        const support_1  = get('support_1',  useNameInput ? 2 : 2);
+        const support_2  = get('support_2',  useNameInput ? 3 : 3);
+        const resistance_1 = get('resistance_1', useNameInput ? 4 : 4);
+        const resistance_2 = get('resistance_2', useNameInput ? 5 : 5);
+        const sectionName  = get('section',      useNameInput ? 6 : 6);
+
+        // 종목명으로 입력된 경우 코드 자동 조회
+        if (useNameInput && nameRaw && !code) {
+            try {
+                const srRes = await fetch('/api/stock/search?q=' + encodeURIComponent(nameRaw), { credentials: 'same-origin' });
+                const srData = await srRes.json();
+                if (srData.data && srData.data.length > 0) {
+                    code = srData.data[0].code;
+                } else {
+                    results.failed.push({ line, reason: '종목명 검색 실패: ' + nameRaw });
+                    continue;
+                }
+            } catch (e) {
+                results.failed.push({ line, reason: '종목명 조회 오류: ' + nameRaw });
+                continue;
+            }
+        }
 
         // 종목코드 검증
         if (!code) {
