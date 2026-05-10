@@ -8300,6 +8300,42 @@ function renderLivePickCard(p) {
         </div>`;
     })();
 
+    // 장마감 백테스트 섹션
+    const backtestHtml = (() => {
+        const bt = p._backtest;
+        if (!bt) return '';
+        const sigs = Array.isArray(bt.c_signals) ? bt.c_signals : [];
+        const sigTypeColor = { C1: '#868e96', 'C2-intra': '#1971c2', C2: '#1971c2', C3: '#2f9e44' };
+        const sigTypeIcon  = { C1: '↘', 'C2-intra': '⊥', C2: '⊥', C3: '↗' };
+        const confBg = { H: '#d3f9d8', M: '#fff3bf', L: '#f1f3f5', 'H+': '#b2f2bb' };
+        const sigRows = sigs.map(s => {
+            const col = sigTypeColor[s.type] || '#495057';
+            const ico = sigTypeIcon[s.type] || '●';
+            const cbg = confBg[s.confidence] || '#f1f3f5';
+            const sup = s.support_price ? ` <span style="color:#495057;font-size:11px;">${Number(s.support_price).toLocaleString()}원</span>` : '';
+            return `<div style="display:flex;align-items:center;gap:4px;padding:1px 0;">
+                <span style="color:${col};font-weight:700;font-size:12px;">${ico} ${s.type}</span>
+                <span style="color:#868e96;font-size:11px;">${s.time || ''}</span>
+                <span style="background:${cbg};border-radius:3px;padding:1px 4px;font-size:11px;">[${s.confidence}]</span>
+                ${sup}
+                <span style="color:#495057;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(s.reason || '')}</span>
+            </div>`;
+        }).join('');
+        const closing = bt.closing_price ? Number(bt.closing_price).toLocaleString() + '원' : null;
+        const chgSig = bt.price_change_from_signal_pct != null
+            ? `<span style="color:${bt.price_change_from_signal_pct >= 0 ? '#f03e3e' : '#1971c2'};font-size:12px;font-weight:700;">${bt.price_change_from_signal_pct >= 0 ? '+' : ''}${bt.price_change_from_signal_pct.toFixed(1)}%</span>`
+            : '';
+        const closingRow = closing
+            ? `<div style="font-size:12px;padding-top:3px;border-top:1px solid #e9ecef;margin-top:3px;">종가 <strong>${closing}</strong> ${chgSig ? '추천比 ' + chgSig : ''}</div>`
+            : '';
+        if (!sigRows && !closingRow) return '';
+        return `<div style="font-size:12px;padding:5px 8px;background:#f8f9fa;border-radius:4px;margin:4px 0;border-left:3px solid #845ef7;">
+            <div style="font-size:11px;color:#845ef7;font-weight:700;margin-bottom:3px;">📊 장마감 백테스트</div>
+            ${sigRows || '<span style="color:#868e96;font-size:11px;">C시그널 없음</span>'}
+            ${closingRow}
+        </div>`;
+    })();
+
     // siwhang_results: news_summary + watchlist_match 활용
     const wlMatch = (() => {
         if (!p.watchlist_match) return [];
@@ -8344,6 +8380,7 @@ function renderLivePickCard(p) {
     </div>
     ${priceTimelineHtml}
     ${gateHtml}
+    ${backtestHtml}
     ${wlHtml}
     ${p.catalyst ? `<div class="bt-catalyst"><span class="bt-catalyst-label">촉매</span>${escapeHtml(p.catalyst)}</div>` : ''}
     ${p.news_summary ? `<div class="bt-catalyst"><span class="bt-catalyst-label">뉴스</span>${escapeHtml(p.news_summary)}</div>` : ''}

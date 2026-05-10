@@ -311,6 +311,29 @@ class NewsStorage:
                     conn.execute(f"ALTER TABLE stock_master ADD COLUMN {col} {definition}")
                 except Exception:
                     pass
+            # live_pick_backtest 테이블 생성 (없으면)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS live_pick_backtest (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    pick_id INTEGER NOT NULL REFERENCES backtest_picks(id),
+                    stock_code TEXT,
+                    backtest_date TEXT NOT NULL,
+                    slot_time TEXT,
+                    c_signals_json TEXT,
+                    closing_price REAL,
+                    price_change_from_signal_pct REAL,
+                    price_change_from_slot_pct REAL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_live_pick_backtest_pick_id
+                ON live_pick_backtest(pick_id)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_live_pick_backtest_date
+                ON live_pick_backtest(backtest_date)
+            """)
         logger.info(f"NewsStorage 초기화 완료: {self.db_path}")
 
     # ─── 메시지 저장 ───────────────────────────────────────────
@@ -716,6 +739,56 @@ class NewsStorage:
                 d['sources'] = []
             result.append(d)
         return result
+
+    def upsert_live_pick_backtest(self, pick_id: int, stock_code: Optional[str],
+                                  backtest_date: str, slot_time: Optional[str],
+                                  c_signals: Optional[List[Dict]],
+                                  closing_price: Optional[float],
+                                  price_change_from_signal_pct: Optional[float],
+                                  price_change_from_slot_pct: Optional[float]) -> Optional[int]:
+        """장마감 백테스트 결과 저장/덮어쓰기 (pick_id 기준 upsert)."""
+        c_signals_json = json.dumps(c_signals, ensure_ascii=False) if c_signals is not None else None
+        try:
+            with self._conn() as conn:
+                cur = conn.execute(
+                    """INSERT INTO live_pick_backtest
+                       (pick_id, stock_code, backtest_date, slot_time, c_signals_json,
+                        closing_price, price_change_from_signal_pct, price_change_from_slot_pct)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                       ON CONFLICT(pick_id) DO UPDATE SET
+                           c_signals_json=excluded.c_signals_json,
+                           closing_price=excluded.closing_price,
+                           price_change_from_signal_pct=excluded.price_change_from_signal_pct,
+                           price_change_from_slot_pct=excluded.price_change_from_slot_pct,
+                           created_at=CURRENT_TIMESTAMP""",
+                    (pick_id, stock_code, backtest_date, slot_time, c_signals_json,
+                     closing_price, price_change_from_signal_pct, price_change_from_slot_pct),
+                )
+                return cur.lastrowid
+        except Exception as e:
+            logger.error(f"upsert_live_pick_backtest 실패: {e}")
+            return None
+
+    def get_live_pick_backtest_by_date(self, backtest_date: str) -> Dict[int, Dict]:
+        """날짜별 pick_id → backtest 결과 매핑 반환."""
+        try:
+            with self._conn() as conn:
+                rows = conn.execute(
+                    "SELECT * FROM live_pick_backtest WHERE backtest_date=?",
+                    (backtest_date,)
+                ).fetchall()
+            result = {}
+            for r in rows:
+                d = dict(r)
+                try:
+                    d['c_signals'] = json.loads(d['c_signals_json']) if d.get('c_signals_json') else []
+                except Exception:
+                    d['c_signals'] = []
+                result[d['pick_id']] = d
+            return result
+        except Exception as e:
+            logger.error(f"get_live_pick_backtest_by_date 실패: {e}")
+            return {}
 
     def upsert_backtest_pnl(self, pick_id: int, buy_price: Optional[float],
                              exit_price: Optional[float], stoploss_price: Optional[float],

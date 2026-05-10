@@ -559,6 +559,7 @@ scp -i /Users/msim/Downloads/ssh-key-2026-04-26.key \
 | `dart-consult` | `/dart-consult [종목코드] [질문]` | DART 공시 원문 조회 → 질문 직접 답변 |
 | `mode2-register` | `/mode2-register` | Mode2 알림모드 종목 일괄 등록 |
 | `oracle-server` | `/oracle-server [stop\|start\|restart\|status]` 또는 자연어 ("서버 죽여줘" 등) | Oracle 서버 stop/start/restart/status |
+| `live-backtest` | 자연어 ("실전추천종목 백테스트해줘봐", "추천종목 C시그널 확인해줘" 등) | 장마감 후 — 오늘 siwhang/v2 추천 picks 슬롯 이후 3분봉 C시그널 탐지 → Oracle DB 저장 → 실전 카드에 표시 |
 
 ### Deprecated 스킬
 
@@ -1175,3 +1176,89 @@ Mode2 감시종목 카드에서 종목명 hover 시 팝업.
 - `sources_json` — `[{type, time, text}]` 근거 목록 (hotstock/news/google/dart)
 - `note_source` — 향후 종목노트 소스 연결 예약 필드
 - `get_messages()` `until_utc` 파라미터 (백필 데이터는 received_at 동일해서 무효)
+
+---
+
+## 2026-05-10 작업 — Lessons Learned
+
+### siwhang v2 스킬 신설 (Entry Gate 필터)
+
+**배경**: 추천 종목이 이미 급등 이후여서 "고점 판독기" 문제 발생. 5가지 구조적 문제 파악:
+1. 텔레그램 채널 메시지 수신 자체가 후행 (이미 급등 후)
+2. related_stocks 현재가 미확인 (채널 미등장 ≠ 덜 오름)
+3. 뉴스 매칭이 후행지표 (많이 오른 종목일수록 뉴스 언급 ↑ → confidence 상향 역설)
+4. 가격 레벨 정보 없음
+5. 시간대별 전략 없음
+
+**구현**: `.claude/skills/siwhang-v2/` — v1 그대로 두고 Entry Gate 단계 추가.
+- `entry_gate_data.py`: ka10081(일봉) + ka10080(5분봉) → 등락률/갭/RSI/VWAP/거래량비율
+- Gate 판정: PASS(0개 실패) / WARN(1개) / BLOCK(2개+)
+- BLOCK 종목은 confidence=L 강제, picks 저장 제외
+- DB 버전: `siwhang_v2` → 실전 페이지에서 v1과 A/B 탭 비교
+
+**실전 페이지 A/B 탭**: `_version` 필드로 picks 구분. v2 data 있을 때만 버전 탭 노출.
+카드에 gate 정보 블록 표시 (✅ PASS / ⚠️ WARN / 🚫 BLOCK + 실패 지표 목록).
+
+### manual_focus — morning_report 수동 관련주 등록
+
+**배경**: `[SS]` 급등조짐 종목은 관심종목(watchlist/Mode2) 매칭인 것만 분석했는데, 오늘 아침 특정 뉴스 관련주를 임시로 분석 대상에 올리고 싶어도 방법이 없었음.
+
+**구현**: 실전 페이지 시황설정 > 주요 내용(자유입력)에 아래 형식으로 입력:
+```
+뉴스 제목
+관련주: 종목A, 종목B, 종목C
+다른 뉴스 제목
+관련주: 종목D, 종목E
+```
+
+**파싱 규칙** (v1/v2 공통, SKILL.md Step 2):
+- `관련주:` 로 시작하는 줄 → 콤마 split → 각 토큰 strip
+- 직전 비어있지 않은 줄 = `source_news` (뉴스-종목 1:1 연결)
+- 같은 종목이 여러 뉴스에 속하면 `source_news` 배열에 누적
+- 결과: `[{stock_name, source_news: [...]}]`
+
+**[SS] 필터 확장 (AND 조건)**:
+- 기존: `[SS]` && `watchlist_match` 있는 것
+- 변경: `[SS]` && (`watchlist_match` 있음 OR `manual_focus`에 본인/related_stocks 포함)
+- 즉 `[SS]`로 등장했다는 게 필수 전제(AND 왼쪽), 관심종목 OR 수동지정이 우측 조건
+
+**AI 분석 반영**: `source_news`를 1차 촉매로 간주 → `has_news_match=true`. analysis_text에 `[수동지정]` 태그.
+
+**파싱 검증**: `관련주:` 다음 줄이 다른 뉴스 제목이면 정확히 분리됨. 줄 중간 종목명 잘림(AP\n시스템) 방지 위해 사용자가 같은 종목은 줄바꿈 없이 입력.
+
+### backtest_picks 가격 스냅샷 추가
+
+**배경**: 추천 카드에 "얼마일 때 추천했는지"가 없어 사후 검증 불가.
+
+**신규 DB 컬럼** (backtest_picks, ALTER TABLE 마이그레이션):
+- `price_at_signal` REAL — [SS/VI] 메시지 수신 시점 3분봉 종가
+- `prev_close` REAL — 전일 종가
+- `today_open` REAL — 당일 시가
+
+**수집 스크립트**: `.claude/skills/siwhang/price_snapshot.py`
+- 인자: `종목코드:signal_hhmmss(KST6자리)` (예: `230240:091345`)
+- ka10081(일봉) → prev_close, today_open
+- ka10080(3분봉, count=80) → signal 시각 포함 봉 종가 = price_at_signal, 최신 봉 = price_at_slot
+- 1분봉 대신 3분봉 선택 이유: 노이즈 감소 + price_monitor와 동일 API + 최대 3분 오차 허용 범위
+
+**스킬 실행 순서**: Step 4(AI 분석) 완료 후 → Step 4-B(가격 수집) → Step 5(picks 저장 시 필드 포함)
+
+**카드 UI** (app.js `renderLivePickCard`):
+- `prev_close` 있을 때만 타임라인 블록 표시 (null이면 숨김 — 구버전 데이터 호환)
+- 표시 형식:
+  ```
+  [SS/VI] 09:13  15,400원  전일比+2.1%  시가比+0.8%
+  분석 09:15     15,650원  전일比+3.7%  시가比+2.3%
+  ```
+- signal 시각: `received_at`(UTC) → KST 변환 (별도 컬럼 없이 프론트에서 계산)
+- signal == slot 동일 봉이면 1줄 표시 생략 (중복 방지)
+
+**주의**: 기능 추가 이전(~2026-05-09) picks는 가격 필드 전부 null → 카드에 타임라인 미표시. 소급 적용 불가.
+
+### watchlist_match 소스 범위 (중요)
+`/api/hotstock/parsed` 에서 계산되는 `watchlist_match`는 **2개 소스만**:
+1. `.data/watchlist.json` (감시리스트 탭 수동 등록)
+2. Mode2 watchers (Mode2 탭 등록 종목)
+
+**포함되지 않는 것**: morning_watchlist 130종목, trade_watchlist(발라먹기 watching)
+→ `[SS]` 필터 통과 여부는 위 2개 소스 기준. manual_focus는 별도 경로로 추가됨.

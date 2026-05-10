@@ -2696,7 +2696,53 @@ def get_live_picks():
             if code:
                 p['stock_code'] = code
 
+    # 장마감 백테스트 결과 조인
+    backtest_map = ns.get_live_pick_backtest_by_date(target_date)
+    for p in picks:
+        p['_backtest'] = backtest_map.get(p['id'])
+
     return jsonify({'success': True, 'data': picks, 'date': target_date, 'session_id': session_id})
+
+
+@app.route('/api/live/picks/backtest', methods=['POST'])
+@auth.login_required
+def save_live_picks_backtest():
+    """장마감 백테스트 결과 저장. live-backtest 스킬에서 호출."""
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'no body'}), 400
+    ns = _get_news_storage()
+    backtest_date = data.get('date') or date.today().isoformat()
+    results = data.get('results', [])
+    saved = 0
+    for r in results:
+        pick_id = r.get('pick_id')
+        if not pick_id:
+            continue
+        ok = ns.upsert_live_pick_backtest(
+            pick_id=pick_id,
+            stock_code=r.get('stock_code'),
+            backtest_date=backtest_date,
+            slot_time=r.get('slot_time'),
+            c_signals=r.get('c_signals', []),
+            closing_price=r.get('closing_price'),
+            price_change_from_signal_pct=r.get('price_change_from_signal_pct'),
+            price_change_from_slot_pct=r.get('price_change_from_slot_pct'),
+        )
+        if ok:
+            saved += 1
+    return jsonify({'success': True, 'saved': saved})
+
+
+@app.route('/api/live/picks/backtest', methods=['GET'])
+@auth.login_required
+def get_live_picks_backtest():
+    """날짜별 장마감 백테스트 결과 조회."""
+    from datetime import date as _date
+    target_date = request.args.get('date') or _date.today().isoformat()
+    ns = _get_news_storage()
+    data = ns.get_live_pick_backtest_by_date(target_date)
+    return jsonify({'success': True, 'data': data, 'date': target_date})
 
 
 # ─── 재무정보 (Financial Info) ────────────────────────────────────────────
