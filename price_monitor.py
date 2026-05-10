@@ -1354,7 +1354,7 @@ class PriceMonitor:
                 elif sig_type in ('B-r1', 'B-r2'):
                     if last_price and abs(sig['entry_price'] - last_price) / last_price < 0.02:
                         continue
-                elif sig_type == 'C2':
+                elif sig_type in ('C2', 'C2-intra'):
                     # 같은 지지가 ±100원이면 당일 첫 감지만
                     last_support = last.get('support_price') or 0
                     cur_support = sig.get('support_price') or 0
