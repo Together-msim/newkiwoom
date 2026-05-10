@@ -2502,6 +2502,9 @@ def save_backtest_picks():
                 sources=p.get('sources'),
                 source_message_id=p.get('source_message_id'),
                 note_source=p.get('note_source'),
+                price_at_signal=p.get('price_at_signal'),
+                prev_close=p.get('prev_close'),
+                today_open=p.get('today_open'),
             )
             if pid:
                 saved_ids.append(pid)

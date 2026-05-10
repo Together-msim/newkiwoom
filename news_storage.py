@@ -269,6 +269,9 @@ class NewsStorage:
             for col, definition in [
                 ("catalyst", "TEXT"),
                 ("sources_json", "TEXT"),
+                ("price_at_signal", "REAL"),   # [SS/VI] 메시지 수신 시점 3분봉 종가
+                ("prev_close", "REAL"),         # 전일 종가 (등락률 기준)
+                ("today_open", "REAL"),         # 당일 시가 (등락률 기준)
             ]:
                 try:
                     conn.execute(f"ALTER TABLE backtest_picks ADD COLUMN {col} {definition}")
@@ -663,9 +666,15 @@ class NewsStorage:
                            catalyst: Optional[str] = None,
                            sources: Optional[List[Dict]] = None,
                            source_message_id: Optional[int] = None,
-                           note_source: Optional[str] = None) -> Optional[int]:
+                           note_source: Optional[str] = None,
+                           price_at_signal: Optional[float] = None,
+                           prev_close: Optional[float] = None,
+                           today_open: Optional[float] = None) -> Optional[int]:
         """
         sources: [{"type":"hotstock"|"news"|"google"|"dart", "time":"HH:MM KST", "text":"..."}]
+        price_at_signal: [SS/VI] 메시지 수신 시점 3분봉 종가
+        prev_close: 전일 종가 (등락률 기준)
+        today_open: 당일 시가 (등락률 기준)
         """
         sources_json = json.dumps(sources, ensure_ascii=False) if sources else None
         try:
@@ -674,11 +683,13 @@ class NewsStorage:
                     """INSERT INTO backtest_picks
                        (session_id, slot_time, stock_code, stock_name, tag_type, theme,
                         price_at_slot, analysis_text, confidence, catalyst, sources_json,
-                        source_message_id, note_source)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        source_message_id, note_source,
+                        price_at_signal, prev_close, today_open)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (session_id, slot_time, stock_code, stock_name, tag_type, theme,
                      price_at_slot, analysis_text, confidence, catalyst, sources_json,
-                     source_message_id, note_source),
+                     source_message_id, note_source,
+                     price_at_signal, prev_close, today_open),
                 )
                 return cur.lastrowid
         except Exception as e:

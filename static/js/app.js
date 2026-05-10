@@ -8204,6 +8204,67 @@ function renderLivePickCard(p) {
     const priceStr = p.price_at_slot ? Number(p.price_at_slot).toLocaleString() + '원' : '';
     const slotDisplay = p._slotKey || p.slot_time || p._runKst || '';
 
+    // 등락률 계산 헬퍼
+    function pctStr(price, base) {
+        if (!price || !base || base <= 0) return null;
+        const pct = (price - base) / base * 100;
+        return (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%';
+    }
+    function pctColor(price, base) {
+        if (!price || !base) return '#495057';
+        return price >= base ? '#f03e3e' : '#1971c2';
+    }
+
+    // 가격 타임라인 (signal 시점 / slot 시점)
+    const priceTimelineHtml = (() => {
+        const pc = parseFloat(p.prev_close) || null;
+        const to = parseFloat(p.today_open) || null;
+        const pas = parseFloat(p.price_at_signal) || null;
+        const pat = parseFloat(p.price_at_slot) || null;
+        if (!pc) return '';
+
+        const rows = [];
+
+        if (pas) {
+            const sigTime = (() => {
+                if (p.received_at) {
+                    try {
+                        const utcStr = p.received_at.replace(' ', 'T') + 'Z';
+                        const d = new Date(utcStr);
+                        const h = String(d.getUTCHours() + 9).padStart(2,'0');
+                        const m = String(d.getUTCMinutes()).padStart(2,'0');
+                        return `${h}:${m}`;
+                    } catch(e) {}
+                }
+                return '수신시';
+            })();
+            const vsPrev = pctStr(pas, pc);
+            const vsOpen = pctStr(pas, to);
+            rows.push(
+                `<span style="color:#868e96;font-size:11px;">[SS/VI] ${sigTime}</span> ` +
+                `<strong>${Number(pas).toLocaleString()}원</strong>` +
+                (vsPrev ? ` <span style="color:${pctColor(pas,pc)};font-size:11px;">전일比${vsPrev}</span>` : '') +
+                (vsOpen ? ` <span style="color:${pctColor(pas,to)};font-size:11px;">시가比${vsOpen}</span>` : '')
+            );
+        }
+
+        if (pat && pat !== pas) {
+            const vsPrev = pctStr(pat, pc);
+            const vsOpen = pctStr(pat, to);
+            rows.push(
+                `<span style="color:#868e96;font-size:11px;">분석 ${slotDisplay}</span> ` +
+                `<strong>${Number(pat).toLocaleString()}원</strong>` +
+                (vsPrev ? ` <span style="color:${pctColor(pat,pc)};font-size:11px;">전일比${vsPrev}</span>` : '') +
+                (vsOpen ? ` <span style="color:${pctColor(pat,to)};font-size:11px;">시가比${vsOpen}</span>` : '')
+            );
+        } else if (pat && pat === pas) {
+            // signal == slot (장 초반 동일 봉) — 1줄로 통합 표시
+        }
+
+        if (!rows.length) return '';
+        return `<div style="font-size:12px;padding:4px 8px;background:#f8f9fa;border-radius:4px;margin:4px 0;display:flex;flex-direction:column;gap:2px;">${rows.map(r => `<div>${r}</div>`).join('')}</div>`;
+    })();
+
     // 버전 배지
     const versionBadge = p._version === 'siwhang_v2'
         ? `<span style="font-size:11px;background:#6741d9;color:#fff;padding:2px 6px;border-radius:4px;margin-left:4px;">v2</span>`
@@ -8281,6 +8342,7 @@ function renderLivePickCard(p) {
         ${p.theme ? `<span>📌 ${escapeHtml(p.theme)}</span>` : ''}
         ${priceStr ? `<span>추천가 <strong>${priceStr}</strong></span>` : ''}
     </div>
+    ${priceTimelineHtml}
     ${gateHtml}
     ${wlHtml}
     ${p.catalyst ? `<div class="bt-catalyst"><span class="bt-catalyst-label">촉매</span>${escapeHtml(p.catalyst)}</div>` : ''}
