@@ -1267,10 +1267,11 @@ class PriceMonitor:
         # buy_target_price=0 이면 Track A (C2 전용) — A/A2/B 는 scan_style3_signals 내에서 체크되지 않도록
         # scan_style3_signals는 buy_target_price=0이면 Type A/A2 미발생, resistance_1=0이면 A2/B-r1 미발생
 
-        # 3분봉 조회 (비동기)
+        # 3분봉 조회 (비동기) — 08시대 NXT 구간은 _NX suffix로 조회
+        _chart_code = code + "_NX" if datetime.now(KST).hour == 8 else code
         try:
             minute_bars = await asyncio.get_event_loop().run_in_executor(
-                None, lambda: get_minute_chart(token, code, "3분", count=20)
+                None, lambda: get_minute_chart(token, _chart_code, "3분", count=20)
             )
         except Exception as e:
             logger.warning(f"Style3 {code} 3분봉 조회 실패: {e}")
@@ -1497,10 +1498,11 @@ class PriceMonitor:
         if not code or not token:
             return
 
-        # 3분봉 조회
+        # 3분봉 조회 — 08시대 NXT 구간은 _NX suffix로 조회
+        _chart_code = code + "_NX" if datetime.now(KST).hour == 8 else code
         try:
             minute_bars = await asyncio.get_event_loop().run_in_executor(
-                None, lambda: get_minute_chart(token, code, "3분", count=20)
+                None, lambda: get_minute_chart(token, _chart_code, "3분", count=20)
             )
         except Exception:
             return
