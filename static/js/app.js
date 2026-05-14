@@ -1,3 +1,8 @@
+// ========== KST 날짜 헬퍼 ==========
+function _kstToday() {
+    return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
 // ========== 페이지 전환 ==========
 document.addEventListener('DOMContentLoaded', () => {
     // 상단 nav 클릭
@@ -554,10 +559,10 @@ function renderMode2WatcherRow(w, idx) {
                  onmouseleave="hideStockTooltip()"
                  style="cursor: pointer; color: #228be6; font-weight: 600;">${autoPaused ? '⚠️ ' : ''}${w.name || '-'}</div>
             <div class="watcher-cell editable" data-field="buy_target_price" ondblclick="enableCellEdit(this, '${w.code}')">${formatNumber(w.buy_target_price)}</div>
-            <div class="watcher-cell editable" data-field="budget" ondblclick="enableCellEdit(this, '${w.code}')">${(w.budget / 10000).toFixed(0)}만</div>
+            <div class="watcher-cell editable" data-field="budget" data-raw="${w.budget}" ondblclick="enableCellEdit(this, '${w.code}')">${(w.budget / 10000).toFixed(0)}만</div>
             <div class="watcher-cell">${w.quantity}주</div>
             <div class="watcher-cell editable" data-field="support_2_price" ondblclick="enableCellEdit(this, '${w.code}')">${formatNumber(w.support_2_price)}</div>
-            <div class="watcher-cell editable" data-field="support_1_price" ondblclick="enableCellEdit(this, '${w.code}')">
+            <div class="watcher-cell editable" data-field="support_1_price" ondblclick="enableCellEdit(this, '${w.code}')" style="${w.support_1_mode === '물타기' && w.support_1_price > 0 ? 'background-color: rgba(173, 216, 230, 0.35);' : ''}">
                 ${formatNumber(w.support_1_price)}${w.support_1_price > 0 ? `<span style="font-size:10px;margin-left:3px;color:${w.support_1_mode === '물타기' ? '#1971c2' : '#e03131'};">${w.support_1_mode === '물타기' ? '📥' : '✂️'}</span>` : ''}
             </div>
             <div class="watcher-cell editable" data-field="resistance_1_price" ondblclick="enableCellEdit(this, '${w.code}')">${formatNumber(w.resistance_1_price)}</div>
@@ -3872,7 +3877,7 @@ async function wlOpenNote(itemId, groupId) {
     const panel = document.createElement('div');
     panel.className = 'wl-note-panel';
     panel.id = 'wlNotePanel-' + itemId;
-    const today = new Date().toISOString().slice(0, 10);
+    const today = _kstToday();
     panel.innerHTML = `
         <div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px;font-weight:600;">${_esc(item.stock_name || '')} (${_esc(code)}) 노트</div>
         <textarea class="wl-note-editor" id="wlNoteText-${itemId}" placeholder="[${today}]&#10;분석 내용을 입력...">${_esc(noteText)}</textarea>
@@ -3891,7 +3896,7 @@ async function wlOpenNote(itemId, groupId) {
 function wlAppendDate(itemId) {
     const ta = document.getElementById('wlNoteText-' + itemId);
     if (!ta) return;
-    const today = new Date().toISOString().slice(0, 10);
+    const today = _kstToday();
     const prefix = ta.value.trim() ? '\n\n' : '';
     ta.value += `${prefix}[${today}]\n`;
     ta.focus();
@@ -4056,7 +4061,7 @@ function wlSearch(q) {
 // ── CSV 내보내기 ─────────────────────────────────────────────────────────
 
 function wlExportCsv() {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = _kstToday();
     const url = `/api/watchlist-groups/export-csv?date=${today}`;
     const a = document.createElement('a');
     a.href = url; a.download = `watchlist_notes_${today}.csv`;
@@ -5555,7 +5560,8 @@ async function saveWatcherRow(code) {
                 hasChanges = true;
             }
 
-            data[field] = parseInt(currentValue) || 0;
+            const isBudget = field === 'budget';
+            data[field] = isBudget ? (parseInt(currentValue) * 10000 || 0) : (parseInt(currentValue) || 0);
         }
     });
 
@@ -5640,13 +5646,24 @@ function enableCellEdit(cell, code) {
 
     const field = cell.getAttribute('data-field');
     const isBudget = field === 'budget';
-    const originalValue = cell.textContent.replace(/,/g, '').replace(/원/g, '').trim();
+    const isNote = field === 'sm_note' || field === 'note';
+    const rawAttr = cell.getAttribute('data-raw');
+    let originalValue;
+    if (rawAttr !== null && rawAttr !== '') {
+        originalValue = rawAttr;
+    } else if (isNote) {
+        originalValue = cell.textContent.trim();
+    } else {
+        // 숫자만 추출 (이모지/단위/콤마 제거)
+        const m = cell.textContent.replace(/,/g, '').match(/-?\d+/);
+        originalValue = m ? m[0] : '';
+    }
 
     const input = document.createElement('input');
     {
         input.type = 'number';
         // Budget 필드는 만원 단위로 표시
-        input.value = isBudget ? (parseInt(originalValue) / 10000 || 0) : originalValue;
+        input.value = isBudget ? Math.round((parseInt(originalValue) || 0) / 10000) : originalValue;
         input.style.width = '100%';
         if (isBudget) {
             input.placeholder = '만원 단위 (예: 30 = 30만원)';
@@ -5772,12 +5789,22 @@ function enterEditMode(row, code) {
     // editable 필드를 input으로 변경
     row.querySelectorAll('.editable').forEach(cell => {
         const field = cell.getAttribute('data-field');
-        const value = cell.textContent.replace(/,/g, '').replace(/원/g, '').replace(/주/g, '').trim();
+        const isBudget = field === 'budget';
+        let value;
+        if (isBudget) {
+            const raw = cell.getAttribute('data-raw');
+            value = String(Math.round((parseInt(raw) || 0) / 10000));
+        } else {
+            // 숫자만 추출 (이모지/단위/콤마 제거)
+            const m = cell.textContent.replace(/,/g, '').match(/-?\d+/);
+            value = m ? m[0] : '';
+        }
 
         const input = document.createElement('input');
         input.type = 'number';
         input.value = value;
         input.setAttribute('data-original-value', value);
+        if (isBudget) input.placeholder = '만원';
         cell.innerHTML = '';
         cell.appendChild(input);
     });
@@ -5811,7 +5838,8 @@ async function saveSectionWatchers(sectionId, rows) {
                     hasChanges = true;
                 }
 
-                data[field] = parseInt(currentValue) || 0;
+                const isBudget = field === 'budget';
+                data[field] = isBudget ? (parseInt(currentValue) * 10000 || 0) : (parseInt(currentValue) || 0);
             }
         });
 
@@ -5873,8 +5901,7 @@ async function executeBulkAdd() {
     const headerParts = lines[0].split(',').map(p => p.trim().replace(/\s/g, ''));
     const colMap = {};
     const headerAliases = {
-        '종목코드': 'code',
-        '종목명': 'name_input',
+        '종목코드': 'stock', '종목명': 'stock', '종목': 'stock',
         '매수타점': 'buy_target', '매수가': 'buy_target',
         '1차지지': 'support_1', '1차지지가': 'support_1',
         '2차지지': 'support_2', '2차지지가': 'support_2',
@@ -5883,8 +5910,6 @@ async function executeBulkAdd() {
         '섹션명': 'section', '섹션': 'section',
     };
     headerParts.forEach((h, i) => { if (headerAliases[h]) colMap[headerAliases[h]] = i; });
-
-    const useNameInput = colMap['name_input'] !== undefined && colMap['code'] === undefined;
 
     const dataLines = lines.slice(1);
 
@@ -5912,36 +5937,47 @@ async function executeBulkAdd() {
         }
 
         const get = (key, fallbackIdx) => parts[colMap[key] !== undefined ? colMap[key] : fallbackIdx] || '';
-        let code         = get('code', useNameInput ? -1 : 0);
-        const nameRaw    = get('name_input', useNameInput ? 0 : -1);
-        const buy_target = get('buy_target', useNameInput ? 1 : 1);
-        const support_1  = get('support_1',  useNameInput ? 2 : 2);
-        const support_2  = get('support_2',  useNameInput ? 3 : 3);
-        const resistance_1 = get('resistance_1', useNameInput ? 4 : 4);
-        const resistance_2 = get('resistance_2', useNameInput ? 5 : 5);
-        const sectionName  = get('section',      useNameInput ? 6 : 6);
+        const stockRaw   = get('stock', 0);
+        const buy_target = get('buy_target', 1);
+        const support_1  = get('support_1',  2);
+        const support_2  = get('support_2',  3);
+        const resistance_1 = get('resistance_1', 4);
+        const resistance_2 = get('resistance_2', 5);
+        const sectionName  = get('section',      6);
 
-        // 종목명으로 입력된 경우 코드 자동 조회
-        if (useNameInput && nameRaw && !code) {
+        // 첫 컬럼: 숫자만 있으면 종목코드(6자리 zero-pad), 아니면 종목명으로 검색
+        let code = '';
+        if (!stockRaw) {
+            results.failed.push({ line, reason: '종목코드/종목명 누락' });
+            continue;
+        }
+        if (/^\d+$/.test(stockRaw)) {
+            code = stockRaw.padStart(6, '0');
+        } else {
             try {
-                const srRes = await fetch('/api/stock/search?q=' + encodeURIComponent(nameRaw), { credentials: 'same-origin' });
+                const srRes = await fetch('/api/stock/search?q=' + encodeURIComponent(stockRaw), { credentials: 'same-origin' });
                 const srData = await srRes.json();
-                if (srData.data && srData.data.length > 0) {
-                    code = srData.data[0].code;
-                } else {
-                    results.failed.push({ line, reason: '종목명 검색 실패: ' + nameRaw });
+                const list = srData.results || srData.data || [];
+                if (list.length === 0) {
+                    results.failed.push({ line, reason: '종목명 검색 실패: ' + stockRaw });
+                    continue;
+                }
+                // 정확히 일치하는 항목 우선
+                const exact = list.find(r => (r.stock_name || r.name) === stockRaw);
+                const pick = exact || list[0];
+                code = pick.stock_code || pick.code;
+                if (!code) {
+                    results.failed.push({ line, reason: '종목코드 매핑 실패: ' + stockRaw });
+                    continue;
+                }
+                if (!exact && list.length > 1) {
+                    results.failed.push({ line, reason: `종목명 후보 ${list.length}개 (정확 일치 없음): ${stockRaw} → ${list.slice(0,3).map(r => r.stock_name||r.name).join(', ')}...` });
                     continue;
                 }
             } catch (e) {
-                results.failed.push({ line, reason: '종목명 조회 오류: ' + nameRaw });
+                results.failed.push({ line, reason: '종목명 조회 오류: ' + stockRaw });
                 continue;
             }
-        }
-
-        // 종목코드 검증
-        if (!code) {
-            results.failed.push({ line, reason: '종목코드 누락' });
-            continue;
         }
 
         // 이미 등록된 종목이면 스킵
@@ -6487,19 +6523,58 @@ function _renderWatchlistTags() {
     }).join('');
 }
 
+// 입력 토큰(종목코드 또는 종목명) 배열을 종목코드 배열로 변환. 실패 토큰은 failed에 모음.
+async function _resolveWatchlistTokens(tokens) {
+    const codes = [];
+    const failed = [];
+    for (const tok of tokens) {
+        const t = tok.trim();
+        if (!t) continue;
+        if (/^\d+$/.test(t)) {
+            codes.push(t.padStart(6, '0'));
+            continue;
+        }
+        try {
+            const sr = await (await fetch('/api/stock/search?q=' + encodeURIComponent(t), { credentials: 'same-origin' })).json();
+            const list = sr.results || sr.data || [];
+            if (!list.length) { failed.push(`${t} (검색 결과 없음)`); continue; }
+            const exact = list.find(r => (r.stock_name || r.name) === t);
+            if (!exact && list.length > 1) {
+                const cand = list.slice(0, 3).map(r => r.stock_name || r.name).join(', ');
+                failed.push(`${t} (정확 일치 없음, 후보: ${cand}...)`);
+                continue;
+            }
+            const pick = exact || list[0];
+            const code = pick.stock_code || pick.code;
+            if (!code) { failed.push(`${t} (코드 매핑 실패)`); continue; }
+            codes.push(code);
+        } catch (e) {
+            failed.push(`${t} (조회 오류)`);
+        }
+    }
+    return { codes, failed };
+}
+
 async function addWatchlistItems() {
     const input = document.getElementById('watchlistInput');
     const raw = input?.value?.trim();
     if (!raw) return;
+    const tokens = raw.split(/[\n,]/).map(s => s.trim()).filter(Boolean);
+    const { codes, failed } = await _resolveWatchlistTokens(tokens);
+    if (!codes.length && failed.length) {
+        showToast('❌ 모두 실패: ' + failed.join(' / '), 'error', 5000);
+        return;
+    }
     try {
         const r = await (await fetch('/api/watchlist', {
             method: 'POST', credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ codes: raw }),
+            body: JSON.stringify({ codes: codes.join(',') }),
         })).json();
         if (r.success) {
             input.value = '';
-            showToast(`✓ ${r.added}개 추가됨`, 'success');
+            const failMsg = failed.length ? ` / ❌ 실패 ${failed.length}: ${failed.join(' / ')}` : '';
+            showToast(`✓ ${r.added}개 추가됨${failMsg}`, failed.length ? 'info' : 'success', failed.length ? 6000 : 2000);
             await loadWatchlist_siwhang();
         } else { showToast(r.error || '추가 실패', 'error'); }
     } catch (e) { showToast('요청 실패', 'error'); }
@@ -6524,7 +6599,7 @@ function toggleWatchlistEdit() {
     if (isEditing) {
         cancelWatchlistEdit();
     } else {
-        // 수동 추가 종목만 textarea에 채움
+        // 수동 추가 종목만 textarea에 채움 (종목코드 우선, 없으면 종목명)
         const manualItems = _watchlistData.filter(i => i.origin === 'manual' || i.origin === 'both');
         areaEl.value = manualItems.map(i => i.code).join('\n');
         tagsEl.style.display = 'none';
@@ -6535,7 +6610,8 @@ function toggleWatchlistEdit() {
 async function saveWatchlistEdit() {
     const areaEl = document.getElementById('watchlistEditArea');
     const raw = areaEl?.value || '';
-    const codes = raw.split(/[\n,]/).map(s => s.trim()).filter(Boolean);
+    const tokens = raw.split(/[\n,]/).map(s => s.trim()).filter(Boolean);
+    const { codes, failed } = await _resolveWatchlistTokens(tokens);
     try {
         const r = await (await fetch('/api/watchlist/bulk', {
             method: 'POST', credentials: 'same-origin',
@@ -6543,7 +6619,10 @@ async function saveWatchlistEdit() {
             body: JSON.stringify({ codes }),
         })).json();
         if (r.success) {
-            showToast('✓ 관심종목 저장됨', 'success');
+            const msg = failed.length
+                ? `✓ ${r.count}개 저장 / ❌ 실패 ${failed.length}: ${failed.join(' / ')}`
+                : `✓ ${r.count}개 관심종목 저장됨`;
+            showToast(msg, failed.length ? 'info' : 'success', failed.length ? 6000 : 2000);
             document.getElementById('watchlistEditView').style.display = 'none';
             document.getElementById('watchlistTags').style.display = '';
             await loadWatchlist_siwhang();
@@ -7299,7 +7378,7 @@ function toggleAnalysisContextPanel() {
 
 async function loadAnalysisContext() {
     try {
-        const today = new Date().toISOString().slice(0, 10);
+        const today = _kstToday();
         document.getElementById('acpDate').textContent = today;
         const res = await fetch(`/api/analysis/context?date=${today}`, { credentials: 'same-origin' });
         const r = await res.json();
@@ -8019,6 +8098,13 @@ let _liveAllPicks = [];
 let _liveSlotPicks = [];
 let _liveActiveSlot = 'current';
 let _liveActiveVersion = 'all';  // 'all' | 'siwhang' | 'siwhang_v2'
+let _liveActiveGate = 'all';     // 'all' | 'pass' | 'block' (v2 picks 한정 — catalyst의 [Gate XXX]로 판정)
+
+function _extractGateStatus(catalyst) {
+    if (!catalyst) return null;
+    const m = catalyst.match(/\[Gate\s+(PASS|WARN|BLOCK|NO_DATA)/i);
+    return m ? m[1].toUpperCase() : null;
+}
 let _liveCarouselIdx = 0;
 const _liveChartLoaded = {};  // pickId → true (차트 로드 완료 여부)
 
@@ -8055,16 +8141,30 @@ function _runAtToNearestSlot(run_at) {
     return past.length ? past[past.length - 1] : _LIVE_SLOTS[0];
 }
 
+// hhmm "HH:MM" → 가장 가까운 정형 슬롯 (절대값 차이 최소)
+function _hhmmToNearestSlot(hhmm) {
+    if (!hhmm) return null;
+    if (_LIVE_SLOTS.includes(hhmm)) return hhmm;
+    const toMin = s => { const [h,m] = s.split(':').map(Number); return h*60+m; };
+    const target = toMin(hhmm);
+    let best = _LIVE_SLOTS[0], bestDiff = Math.abs(toMin(best) - target);
+    for (const s of _LIVE_SLOTS) {
+        const d = Math.abs(toMin(s) - target);
+        if (d < bestDiff) { best = s; bestDiff = d; }
+    }
+    return best;
+}
+
 async function loadLive() {
     try {
         const res = await fetch('/api/live/picks', { credentials: 'same-origin' });
         const r = await res.json();
         if (!r.success) { showToast(r.error || '로드 실패', 'error'); return; }
 
-        // siwhang_results 기반 — slot_time이 없으면 run_at에서 추정
+        // siwhang_results 기반 — slot_time이 정형 슬롯(09:15/09:45/...)이 아니면 가장 가까운 이전 정형 슬롯으로 매핑
         _liveAllPicks = (r.data || []).map(p => ({
             ...p,
-            _slotKey: p.slot_time || _runAtToNearestSlot(p.run_at) || '기타',
+            _slotKey: _hhmmToNearestSlot(p.slot_time) || _runAtToNearestSlot(p.run_at) || '기타',
             _runKst: _runAtToSlot(p.run_at),
         }));
 
@@ -8119,8 +8219,17 @@ function filterLiveVersion(ver) {
     _renderLive();
 }
 
+function filterLiveGate(g) {
+    _liveActiveGate = g;
+    document.querySelectorAll('#liveVersionBar .slot-btn[data-gate]').forEach(b =>
+        b.classList.toggle('active', b.dataset.gate === g));
+    _liveCarouselIdx = 0;
+    Object.keys(_liveChartLoaded).forEach(k => delete _liveChartLoaded[k]);
+    _renderLive();
+}
+
 function _highlightLiveVersionBtn(ver) {
-    document.querySelectorAll('#liveVersionBar .slot-btn').forEach(b =>
+    document.querySelectorAll('#liveVersionBar .slot-btn[data-ver]').forEach(b =>
         b.classList.toggle('active', b.dataset.ver === ver));
 }
 
@@ -8142,10 +8251,20 @@ function _renderLive() {
     const versionFiltered = _liveActiveVersion === 'all'
         ? _liveAllPicks
         : _liveAllPicks.filter(p => p._version === _liveActiveVersion);
-    // 2단계: 슬롯 필터
-    _liveSlotPicks = _liveActiveSlot === 'all'
+    // 2단계: Gate 필터 (v2 picks에만 적용 — v1 picks는 항상 통과)
+    const gateFiltered = _liveActiveGate === 'all'
         ? versionFiltered
-        : versionFiltered.filter(p => p._slotKey === _liveActiveSlot);
+        : versionFiltered.filter(p => {
+            if (p._version !== 'siwhang_v2') return true;  // v1은 게이트 무관
+            const gs = _extractGateStatus(p.catalyst);
+            if (_liveActiveGate === 'pass')  return gs === 'PASS' || gs === 'WARN';
+            if (_liveActiveGate === 'block') return gs === 'BLOCK';
+            return true;
+        });
+    // 3단계: 슬롯 필터
+    _liveSlotPicks = _liveActiveSlot === 'all'
+        ? gateFiltered
+        : gateFiltered.filter(p => p._slotKey === _liveActiveSlot);
 
     const isMobile = window.innerWidth <= 768;
     const carouselWrapper = document.getElementById('liveCarouselWrapper');
@@ -8228,13 +8347,9 @@ function renderLivePickCard(p) {
         if (pas) {
             const sigTime = (() => {
                 if (p.received_at) {
-                    try {
-                        const utcStr = p.received_at.replace(' ', 'T') + 'Z';
-                        const d = new Date(utcStr);
-                        const h = String(d.getUTCHours() + 9).padStart(2,'0');
-                        const m = String(d.getUTCMinutes()).padStart(2,'0');
-                        return `${h}:${m}`;
-                    } catch(e) {}
+                    // KST 문자열 그대로 — "YYYY-MM-DD HH:MM:SS" 또는 "HH:MM:SS"에서 HH:MM 추출
+                    const m = String(p.received_at).match(/(\d{2}):(\d{2})/);
+                    if (m) return `${m[1]}:${m[2]}`;
                 }
                 return '수신시';
             })();
@@ -9077,7 +9192,7 @@ function clearMode2DateFilter() {
 async function loadReentrySignals() {
     const container = document.getElementById('liveReentryList');
     if (!container) return;
-    const today = new Date().toISOString().slice(0, 10);
+    const today = _kstToday();
     try {
         const res = await fetch(`/api/reentry/signals?date=${today}`, { credentials: 'same-origin' });
         const r = await res.json();
@@ -9210,7 +9325,7 @@ async function confirmDraftWatchlist(wid, code, name, buyPrice, exitPrice, buyDa
 async function _liveLoadS3Signals() {
     const container = document.getElementById('liveReentryList');
     if (!container) return;
-    const today = new Date().toISOString().slice(0, 10);
+    const today = _kstToday();
     try {
         const res = await fetch(`/api/reentry/signals?date=${today}`, { credentials: 'same-origin' });
         const r = await res.json();
@@ -9494,7 +9609,7 @@ function msFocusSearchKeyNav(e) {
 async function _liveLoadMorningSignals() {
     const container = document.getElementById('liveS3MorningContainer');
     if (!container) return;
-    const today = new Date().toISOString().slice(0, 10);
+    const today = _kstToday();
     container.innerHTML = '<p style="color:#868e96;font-size:13px;text-align:center;padding:12px;">로딩 중...</p>';
     try {
         const res = await fetch(`/api/reentry/morning-signals?date=${today}`, { credentials: 'same-origin' });

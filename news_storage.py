@@ -4,9 +4,16 @@
 import json
 import logging
 import sqlite3
-from datetime import datetime, date
+from datetime import datetime, date, timezone, timedelta
 from pathlib import Path
 from typing import Optional, List, Dict
+
+KST = timezone(timedelta(hours=9))
+
+
+def _today_kst() -> date:
+    """서버 시계 무관 KST 기준 오늘 날짜."""
+    return datetime.now(KST).date()
 
 logger = logging.getLogger(__name__)
 
@@ -272,6 +279,7 @@ class NewsStorage:
                 ("price_at_signal", "REAL"),   # [SS/VI] 메시지 수신 시점 3분봉 종가
                 ("prev_close", "REAL"),         # 전일 종가 (등락률 기준)
                 ("today_open", "REAL"),         # 당일 시가 (등락률 기준)
+                ("received_at", "TEXT"),        # 트리거 메시지 수신 시각 KST ("YYYY-MM-DD HH:MM:SS")
             ]:
                 try:
                     conn.execute(f"ALTER TABLE backtest_picks ADD COLUMN {col} {definition}")
@@ -341,7 +349,7 @@ class NewsStorage:
     def save_message(self, source_chat_id: int, message_id: int, text: str) -> Optional[int]:
         """수신 메시지 저장 (필터링 전 전체). 중복이면 기존 id 반환."""
         source_type = _get_source_type(source_chat_id)
-        today = date.today().isoformat()
+        today = _today_kst().isoformat()
         try:
             with self._conn() as conn:
                 cur = conn.execute(
@@ -379,7 +387,7 @@ class NewsStorage:
     def get_messages(self, target_date: Optional[str] = None, source_type: Optional[str] = None, until_utc: Optional[str] = None) -> List[Dict]:
         """메시지 조회. target_date 없으면 오늘. until_utc: received_at <= until_utc 필터 (ISO UTC)."""
         if target_date is None:
-            target_date = date.today().isoformat()
+            target_date = _today_kst().isoformat()
         query = "SELECT * FROM messages WHERE date=?"
         params: list = [target_date]
         if source_type:
@@ -399,7 +407,7 @@ class NewsStorage:
     def get_filtered_messages(self, target_date: Optional[str] = None, source_type: Optional[str] = None) -> List[Dict]:
         """필터링된 메시지 조회."""
         if target_date is None:
-            target_date = date.today().isoformat()
+            target_date = _today_kst().isoformat()
         query = """
             SELECT m.*, f.dest_chat_id, f.matched_keywords, f.forwarded_at
             FROM filtered_messages f
@@ -610,7 +618,7 @@ class NewsStorage:
         """시황체크 분석 결과 배치 저장. 저장된 건수 반환."""
         if not results:
             return 0
-        today = date.today().isoformat()
+        today = _today_kst().isoformat()
         saved = 0
         try:
             with self._conn() as conn:
@@ -643,7 +651,7 @@ class NewsStorage:
     def get_siwhang_results(self, target_date: Optional[str] = None) -> List[Dict]:
         """시황체크 분석 결과 조회."""
         if target_date is None:
-            target_date = date.today().isoformat()
+            target_date = _today_kst().isoformat()
         with self._conn() as conn:
             rows = conn.execute(
                 "SELECT * FROM siwhang_results WHERE date=? ORDER BY run_at DESC",
@@ -692,12 +700,14 @@ class NewsStorage:
                            note_source: Optional[str] = None,
                            price_at_signal: Optional[float] = None,
                            prev_close: Optional[float] = None,
-                           today_open: Optional[float] = None) -> Optional[int]:
+                           today_open: Optional[float] = None,
+                           received_at: Optional[str] = None) -> Optional[int]:
         """
         sources: [{"type":"hotstock"|"news"|"google"|"dart", "time":"HH:MM KST", "text":"..."}]
         price_at_signal: [SS/VI] 메시지 수신 시점 3분봉 종가
         prev_close: 전일 종가 (등락률 기준)
         today_open: 당일 시가 (등락률 기준)
+        received_at: 트리거 메시지 수신 시각 KST ("YYYY-MM-DD HH:MM:SS")
         """
         sources_json = json.dumps(sources, ensure_ascii=False) if sources else None
         try:
@@ -707,12 +717,12 @@ class NewsStorage:
                        (session_id, slot_time, stock_code, stock_name, tag_type, theme,
                         price_at_slot, analysis_text, confidence, catalyst, sources_json,
                         source_message_id, note_source,
-                        price_at_signal, prev_close, today_open)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        price_at_signal, prev_close, today_open, received_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (session_id, slot_time, stock_code, stock_name, tag_type, theme,
                      price_at_slot, analysis_text, confidence, catalyst, sources_json,
                      source_message_id, note_source,
-                     price_at_signal, prev_close, today_open),
+                     price_at_signal, prev_close, today_open, received_at),
                 )
                 return cur.lastrowid
         except Exception as e:
@@ -819,7 +829,7 @@ class NewsStorage:
     def get_analysis_context(self, context_date: Optional[str] = None) -> Dict:
         """당일 분석 컨텍스트 조회. 없으면 빈 구조 반환."""
         if context_date is None:
-            context_date = date.today().isoformat()
+            context_date = _today_kst().isoformat()
         with self._conn() as conn:
             row = conn.execute(
                 "SELECT * FROM analysis_context WHERE context_date=?", (context_date,)
@@ -843,7 +853,7 @@ class NewsStorage:
 
     def save_morning_report(self, morning_report: dict, context_date: Optional[str] = None) -> bool:
         if context_date is None:
-            context_date = date.today().isoformat()
+            context_date = _today_kst().isoformat()
         try:
             with self._conn() as conn:
                 conn.execute(
@@ -861,7 +871,7 @@ class NewsStorage:
 
     def save_next_instruction(self, instruction: Optional[str], context_date: Optional[str] = None) -> bool:
         if context_date is None:
-            context_date = date.today().isoformat()
+            context_date = _today_kst().isoformat()
         try:
             with self._conn() as conn:
                 conn.execute(
@@ -881,7 +891,7 @@ class NewsStorage:
     def update_interval_context(self, interval_context: dict, context_date: Optional[str] = None) -> bool:
         """슬롯 분석 완료 후 누적 테마 컨텍스트 업데이트."""
         if context_date is None:
-            context_date = date.today().isoformat()
+            context_date = _today_kst().isoformat()
         try:
             with self._conn() as conn:
                 conn.execute(
@@ -900,7 +910,7 @@ class NewsStorage:
     def consume_next_instruction(self, context_date: Optional[str] = None) -> Optional[str]:
         """next_instruction 읽고 used 처리. 스킬 실행 시 1회 호출."""
         if context_date is None:
-            context_date = date.today().isoformat()
+            context_date = _today_kst().isoformat()
         try:
             with self._conn() as conn:
                 row = conn.execute(
@@ -923,7 +933,7 @@ class NewsStorage:
     def set_analysis_request(self, context_date: Optional[str] = None) -> bool:
         """분석 요청 플래그 세팅. poll_trigger.py가 감지해 /siwhang 실행."""
         if context_date is None:
-            context_date = date.today().isoformat()
+            context_date = _today_kst().isoformat()
         requested_at = datetime.utcnow().isoformat()
         try:
             with self._conn() as conn:
@@ -943,7 +953,7 @@ class NewsStorage:
     def get_and_clear_analysis_request(self, context_date: Optional[str] = None) -> Optional[str]:
         """pending 요청 읽고 즉시 null로 클리어. poll_trigger.py 전용."""
         if context_date is None:
-            context_date = date.today().isoformat()
+            context_date = _today_kst().isoformat()
         try:
             with self._conn() as conn:
                 row = conn.execute(
@@ -1211,7 +1221,7 @@ class NewsStorage:
                    FROM reentry_signals
                    WHERE source='morning' AND signal_date=?
                    ORDER BY stock_code, signal_time""",
-                (signal_date or date.today().isoformat(),)
+                (signal_date or _today_kst().isoformat(),)
             ).fetchall()
         grouped: dict = {}
         for r in rows:

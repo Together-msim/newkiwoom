@@ -821,7 +821,7 @@
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                         <h3 style="margin: 0; font-size: 15px;">⭐ 관심종목 <span id="watchlistCount" style="font-weight: normal; color: #868e96; font-size: 13px;"></span></h3>
                         <div style="display: flex; gap: 8px; align-items: center;">
-                            <input type="text" id="watchlistInput" placeholder="종목코드, comma-separated" style="padding: 5px 10px; border: 1px solid #dee2e6; border-radius: 6px; font-size: 13px; width: 260px;">
+                            <input type="text" id="watchlistInput" placeholder="종목코드 또는 종목명 (쉼표 구분, 예: 005930, 삼성전자, 카카오)" style="padding: 5px 10px; border: 1px solid #dee2e6; border-radius: 6px; font-size: 13px; width: 320px;">
                             <button class="btn btn-primary" style="font-size: 12px; padding: 5px 10px;" onclick="addWatchlistItems()">+ 추가</button>
                             <button class="btn btn-secondary" style="font-size: 12px; padding: 5px 10px;" onclick="toggleWatchlistEdit()">✏️ 편집</button>
                         </div>
@@ -832,7 +832,7 @@
                     </div>
                     <!-- 편집 뷰 (숨김) -->
                     <div id="watchlistEditView" style="display:none; margin-top:8px;">
-                        <textarea id="watchlistEditArea" style="width:100%;height:100px;padding:8px;border:1px solid #dee2e6;border-radius:6px;font-size:13px;resize:vertical;" placeholder="수동 추가 종목코드를 한 줄에 하나씩 또는 comma로 구분하여 입력&#10;예: 005930&#10;066570, 035720"></textarea>
+                        <textarea id="watchlistEditArea" style="width:100%;height:100px;padding:8px;border:1px solid #dee2e6;border-radius:6px;font-size:13px;resize:vertical;" placeholder="종목코드 또는 종목명을 한 줄에 하나씩 또는 콤마로 구분 입력&#10;숫자만 → 종목코드 / 그 외 → 종목명으로 검색&#10;예:&#10;005930&#10;삼성전자, 카카오&#10;NAVER"></textarea>
                         <div style="display:flex;gap:8px;margin-top:6px;">
                             <button class="btn btn-primary" style="font-size:12px;padding:5px 12px;" onclick="saveWatchlistEdit()">저장</button>
                             <button class="btn btn-secondary" style="font-size:12px;padding:5px 12px;" onclick="cancelWatchlistEdit()">취소</button>
@@ -1234,10 +1234,16 @@
                 </div>
 
                 <!-- 버전 탭 행 (v1/v2 A/B 비교) -->
-                <div id="liveVersionBar" class="backtest-slot-bar" style="display:none;gap:6px;margin-bottom:4px;">
+                <div id="liveVersionBar" class="backtest-slot-bar" style="display:none;gap:6px;margin-bottom:4px;align-items:center;flex-wrap:wrap;">
                     <button class="slot-btn active" data-ver="all"       onclick="filterLiveVersion('all')">전체</button>
                     <button class="slot-btn"         data-ver="siwhang"  onclick="filterLiveVersion('siwhang')">📊 v1</button>
                     <button class="slot-btn"         data-ver="siwhang_v2" onclick="filterLiveVersion('siwhang_v2')">🔬 v2 (Gate)</button>
+                    <span style="margin-left:auto;display:flex;gap:4px;align-items:center;font-size:0.85em;">
+                        <span style="color:#888;">v2 Gate:</span>
+                        <button class="slot-btn active" data-gate="all"  onclick="filterLiveGate('all')" title="모든 종목">전체</button>
+                        <button class="slot-btn"         data-gate="pass" onclick="filterLiveGate('pass')" title="Gate 통과(PASS+WARN)만">✅ 통과만</button>
+                        <button class="slot-btn"         data-gate="block" onclick="filterLiveGate('block')" title="BLOCK만">🚫 BLOCK만</button>
+                    </span>
                 </div>
 
                 <!-- 슬롯 탭 행 -->
@@ -1833,10 +1839,12 @@
                     <div style="background: #f8f9fa; padding: 12px; border-radius: 6px; font-family: monospace; font-size: 12px; color: #495057; margin-bottom: 12px;">
                         종목코드,매수타점,1차지지,1차저항,2차지지,2차저항,섹션명<br>
                         488280,20000,19500,20100,19000,22000,오늘 보자<br>
-                        412350,7500,7000,8000,,9000,<br>
+                        해성옵틱스,7500,7000,8000,,9000,<br>
                         242040,5000,4800,5200,4500,5500,미분류
                     </div>
                     <ul style="margin: 0; padding-left: 20px; font-size: 13px; color: #868e96;">
+                        <li>첫 컬럼: <b>종목코드(숫자)</b> 또는 <b>종목명</b> 입력 가능 (종목명은 자동으로 코드 조회)</li>
+                        <li>종목명이 정확히 일치하지 않거나 후보 여러 개면 실패 처리 → 결과 목록에 표시</li>
                         <li>값이 없으면 비워두기 (예: ,,)</li>
                         <li>섹션명 없으면 "미분류" 섹션에 등록</li>
                         <li>이미 등록된 종목은 자동 스킵</li>
@@ -1845,7 +1853,7 @@
                 </div>
                 <textarea id="bulkAddInput" placeholder="종목코드,매수타점,1차지지,1차저항,2차지지,2차저항,섹션명
 488280,20000,19500,20100,19000,22000,오늘 보자
-412350,7500,7000,8000,,9000," style="width: 100%; min-height: 300px; padding: 12px; border: 1px solid #ced4da; border-radius: 6px; font-family: monospace; font-size: 13px; resize: vertical;"></textarea>
+해성옵틱스,7500,7000,8000,,9000," style="width: 100%; min-height: 300px; padding: 12px; border: 1px solid #ced4da; border-radius: 6px; font-family: monospace; font-size: 13px; resize: vertical;"></textarea>
                 <div id="bulkAddResult" style="margin-top: 16px; display: none;"></div>
             </div>
             <div class="modal-footer">

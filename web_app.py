@@ -1624,15 +1624,21 @@ def get_watchlist():
         mode2_mgr = Mode2Manager()
         m2_watchers = mode2_mgr.get_all_watchers()
         m2_codes = {w['code'] for w in m2_watchers}
+        corp_map = _load_corp_code_map()
+        def _resolve_name(code, fallback):
+            # name이 비어있거나 code와 동일(레거시 데이터)이면 corp_map으로 보정
+            if not fallback or fallback == code:
+                return (corp_map.get(code) or {}).get('corp_name') or code
+            return fallback
         result = []
         # Mode2 종목 먼저
         for w in m2_watchers:
             origin = 'both' if w['code'] in manual_codes else 'mode2'
-            result.append({'code': w['code'], 'name': w.get('name', w['code']), 'origin': origin})
+            result.append({'code': w['code'], 'name': _resolve_name(w['code'], w.get('name')), 'origin': origin})
         # manual 전용 종목
         for item in manual:
             if item['code'] not in m2_codes:
-                result.append({'code': item['code'], 'name': item.get('name', item['code']), 'origin': 'manual'})
+                result.append({'code': item['code'], 'name': _resolve_name(item['code'], item.get('name')), 'origin': 'manual'})
         return jsonify({'success': True, 'data': result})
     except Exception as e:
         logger.error(f"get_watchlist 실패: {e}")
@@ -1649,17 +1655,23 @@ def add_watchlist():
     try:
         manual = _load_manual_watchlist()
         existing = {item['code'] for item in manual}
+        corp_map = _load_corp_code_map()
         added = 0
+        new_items = []
         for part in raw.split(','):
             part = part.strip()
             if not part:
                 continue
             code = normalize_stock_code(part) if part.isdigit() or (len(part) <= 6 and part.isalnum()) else part
             if code not in existing:
-                manual.append({'code': code, 'name': code})
+                name = (corp_map.get(code) or {}).get('corp_name') or code
+                manual.append({'code': code, 'name': name})
                 existing.add(code)
+                new_items.append((code, name))
                 added += 1
         _save_manual_watchlist(manual)
+        if new_items:
+            _sync_morning_watchlist_add(new_items)
         return jsonify({'success': True, 'added': added})
     except Exception as e:
         logger.error(f"add_watchlist 실패: {e}")
@@ -1675,17 +1687,27 @@ def bulk_set_watchlist():
     if not isinstance(codes, list):
         return jsonify({'success': False, 'error': 'codes 배열 필요'}), 400
     try:
+        before_codes = {it['code'] for it in _load_manual_watchlist()}
         items = []
         seen = set()
+        corp_map = _load_corp_code_map()
         for code in codes:
             code = code.strip()
             if not code:
                 continue
             normalized = normalize_stock_code(code) if (code.isdigit() or (len(code) <= 6 and code.isalnum())) else code
             if normalized not in seen:
-                items.append({'code': normalized, 'name': normalized})
+                name = (corp_map.get(normalized) or {}).get('corp_name') or normalized
+                items.append({'code': normalized, 'name': name})
                 seen.add(normalized)
         _save_manual_watchlist(items)
+        # morning_watchlist 동기화: 추가된 종목 add, 제거된 종목 remove
+        added = [(it['code'], it['name']) for it in items if it['code'] not in before_codes]
+        removed = before_codes - seen
+        if added:
+            _sync_morning_watchlist_add(added)
+        for code in removed:
+            _sync_morning_watchlist_remove(code)
         return jsonify({'success': True, 'count': len(items)})
     except Exception as e:
         logger.error(f"bulk_set_watchlist 실패: {e}")
@@ -1702,6 +1724,7 @@ def delete_watchlist(code):
         if len(manual) == before:
             return jsonify({'success': False, 'error': '해당 종목이 없거나 Mode2 종목입니다'}), 404
         _save_manual_watchlist(manual)
+        _sync_morning_watchlist_remove(code)
         return jsonify({'success': True})
     except Exception as e:
         logger.error(f"delete_watchlist 실패: {e}")
@@ -1728,10 +1751,55 @@ def _get_morning_settings_path() -> Path:
 def _load_morning_watchlist():
     if _MORNING_WATCHLIST_PATH.exists():
         try:
-            return json.loads(_MORNING_WATCHLIST_PATH.read_text(encoding='utf-8'))
-        except Exception:
+            items = json.loads(_MORNING_WATCHLIST_PATH.read_text(encoding='utf-8'))
+        except Exception as e:
+            logger.error(f"_load_morning_watchlist 실패: {e}")
             return []
+        for it in items:
+            if not it.get('source'):
+                it['source'] = 'manual'
+        return items
     return []
+
+
+def _save_morning_watchlist(items):
+    _MORNING_WATCHLIST_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _MORNING_WATCHLIST_PATH.write_text(
+        json.dumps(items, ensure_ascii=False, indent=2), encoding='utf-8'
+    )
+
+
+def _sync_morning_watchlist_add(codes_with_names):
+    """시황체크 등록 → morning_watchlist에 source='watchlist'로 upsert.
+    이미 manual로 등록돼 있으면 source는 그대로 두고 통과 (양쪽 등록 종목 보호)."""
+    try:
+        items = _load_morning_watchlist()
+        existing = {it['code']: it for it in items}
+        for code, name in codes_with_names:
+            code = normalize_stock_code(code)
+            if not code:
+                continue
+            if code in existing:
+                # 이미 있으면 source 변경 안 함 (manual 우선 보존)
+                continue
+            items.append({'code': code, 'name': name or code, 'source': 'watchlist'})
+        _save_morning_watchlist(items)
+    except Exception as e:
+        logger.error(f"_sync_morning_watchlist_add 실패: {e}")
+
+
+def _sync_morning_watchlist_remove(code):
+    """시황체크 제거 → morning_watchlist에서 source='watchlist' 항목만 제거.
+    manual로 직접 추가한 종목은 보존."""
+    try:
+        items = _load_morning_watchlist()
+        target = normalize_stock_code(code)
+        before = len(items)
+        items = [it for it in items if not (it['code'] == target and it.get('source') == 'watchlist')]
+        if len(items) != before:
+            _save_morning_watchlist(items)
+    except Exception as e:
+        logger.error(f"_sync_morning_watchlist_remove 실패: {e}")
 
 
 def _load_morning_settings() -> dict:
@@ -1769,9 +1837,15 @@ def get_morning_watchlist():
 def set_morning_watchlist():
     """전체 교체. body: {"items": [{"code": "005930", "name": "삼성전자"}, ...]}
     또는 CSV 텍스트: {"csv": "종목코드,종목명\\n005930,삼성전자\\n..."}
+
+    source 처리: 페이로드에 source 명시 없으면 'manual' 디폴트.
+    기존 morning_watchlist에 source='watchlist' 항목이 있고 신규 페이로드에 같은 코드가 있으면
+    기존 source 유지 (시황체크 동기화 흐름 보존).
     """
     try:
         data = request.get_json(force=True) or {}
+        existing_sources = {it['code']: it.get('source', 'manual') for it in _load_morning_watchlist()}
+
         if 'csv' in data:
             items = []
             for line in data['csv'].splitlines():
@@ -1780,15 +1854,18 @@ def set_morning_watchlist():
                     code = parts[0].lstrip("'").strip()
                     name = parts[1].strip()
                     if code and code.isdigit():
-                        items.append({'code': normalize_stock_code(code), 'name': name})
+                        c = normalize_stock_code(code)
+                        items.append({'code': c, 'name': name, 'source': existing_sources.get(c, 'manual')})
         else:
             raw = data.get('items', [])
-            items = [
-                {'code': normalize_stock_code(str(it['code']).lstrip("'")), 'name': str(it.get('name', ''))}
-                for it in raw if it.get('code')
-            ]
-        _MORNING_WATCHLIST_PATH.parent.mkdir(parents=True, exist_ok=True)
-        _MORNING_WATCHLIST_PATH.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding='utf-8')
+            items = []
+            for it in raw:
+                if not it.get('code'):
+                    continue
+                c = normalize_stock_code(str(it['code']).lstrip("'"))
+                src = it.get('source') or existing_sources.get(c, 'manual')
+                items.append({'code': c, 'name': str(it.get('name', '')), 'source': src})
+        _save_morning_watchlist(items)
         return jsonify({'success': True, 'count': len(items)})
     except Exception as e:
         logger.error(f"set_morning_watchlist 실패: {e}")
@@ -2505,6 +2582,7 @@ def save_backtest_picks():
                 price_at_signal=p.get('price_at_signal'),
                 prev_close=p.get('prev_close'),
                 today_open=p.get('today_open'),
+                received_at=p.get('received_at'),
             )
             if pid:
                 saved_ids.append(pid)
@@ -2644,8 +2722,8 @@ def get_live_picks():
     ?date=YYYY-MM-DD 로 날짜 지정 가능. 기본값: 오늘.
     stock_code 없는 항목은 stock_name_map으로 자동 보완.
     """
-    from datetime import date as _date
-    target_date = request.args.get('date') or _date.today().isoformat()
+    from news_storage import _today_kst as _date
+    target_date = request.args.get('date') or _date().isoformat()
     ns = _get_news_storage()
 
     # 오늘 날짜 세션 조회 — backtest 세션 우선, siwhang/siwhang_v2 세션 picks를 합산
@@ -2708,11 +2786,12 @@ def get_live_picks():
 @auth.login_required
 def save_live_picks_backtest():
     """장마감 백테스트 결과 저장. live-backtest 스킬에서 호출."""
+    from news_storage import _today_kst
     data = request.get_json()
     if not data:
         return jsonify({'success': False, 'error': 'no body'}), 400
     ns = _get_news_storage()
-    backtest_date = data.get('date') or date.today().isoformat()
+    backtest_date = data.get('date') or _today_kst().isoformat()
     results = data.get('results', [])
     saved = 0
     for r in results:
@@ -2738,8 +2817,8 @@ def save_live_picks_backtest():
 @auth.login_required
 def get_live_picks_backtest():
     """날짜별 장마감 백테스트 결과 조회."""
-    from datetime import date as _date
-    target_date = request.args.get('date') or _date.today().isoformat()
+    from news_storage import _today_kst as _date
+    target_date = request.args.get('date') or _date().isoformat()
     ns = _get_news_storage()
     data = ns.get_live_pick_backtest_by_date(target_date)
     return jsonify({'success': True, 'data': data, 'date': target_date})
@@ -2864,8 +2943,8 @@ def fix_backtest_stock_codes():
 
 def _dart_financial(corp_code: str) -> dict:
     """DART fnlttSinglAcntAll: 부채비율, 유동비율 계산용 재무제표 조회."""
-    from datetime import date as _date
-    year = _date.today().year - 1  # 작년 사업보고서
+    from news_storage import _today_kst as _date
+    year = _date().year - 1  # 작년 사업보고서
     url = (f'https://opendart.fss.or.kr/api/fnlttSinglAcntAll.json'
            f'?crtfc_key={_DART_KEY}&corp_code={corp_code}'
            f'&bsns_year={year}&reprt_code=11011&fs_div=CFS')
@@ -3124,9 +3203,9 @@ def add_stock_siwhang_history(stock_code):
 
 def _dart_financial_quarterly(corp_code: str):
     """DART 1분기 보고서 2개 연도 조회: (올해1Q, 작년1Q) → (dict, dict)."""
-    from datetime import date as _date
+    from news_storage import _today_kst as _date
     results = []
-    for year in [_date.today().year, _date.today().year - 1]:
+    for year in [_date().year, _date().year - 1]:
         url = (f'https://opendart.fss.or.kr/api/fnlttSinglAcntAll.json'
                f'?crtfc_key={_DART_KEY}&corp_code={corp_code}'
                f'&bsns_year={year}&reprt_code=11014&fs_div=CFS')
@@ -3378,7 +3457,8 @@ def reorder_watchlist_groups():
 @auth.login_required
 def export_watchlist_notes_csv():
     """당일(또는 since 날짜 이후) 노트 수정 종목을 CSV로 반환."""
-    since = request.args.get('date', date.today().isoformat())
+    from news_storage import _today_kst
+    since = request.args.get('date', _today_kst().isoformat())
     ns = _get_news_storage()
     items = ns.get_note_updated_items(since)
     import io, csv as _csv
@@ -4103,8 +4183,8 @@ def seeking_signal_reentry_check():
             elif minute_bars and len(minute_bars) >= 3:
                 raw_sigs = scan_style3_signals(minute_bars, buy_target_price, resistance_1_price, resistance_2_price, support_price)
                 last_close = minute_bars[-1].get('close', 0)
-                from datetime import date as _date
-                today_str = _date.today().strftime('%Y-%m-%d')
+                from news_storage import _today_kst as _date
+                today_str = _date().strftime('%Y-%m-%d')
                 for s in raw_sigs:
                     st = s.get('signal_time', '')
                     signals.append({

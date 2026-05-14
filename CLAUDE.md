@@ -1262,3 +1262,343 @@ Mode2 감시종목 카드에서 종목명 hover 시 팝업.
 
 **포함되지 않는 것**: morning_watchlist 130종목, trade_watchlist(발라먹기 watching)
 → `[SS]` 필터 통과 여부는 위 2개 소스 기준. manual_focus는 별도 경로로 추가됨.
+
+---
+
+## 2026-05-12 작업 — Lessons Learned
+
+### siwhang v1/v2 cron 분리 + 메시지 헤더 개선
+
+**현상**: cron `14,44 * * 1-5`로 v2 자동 실행 중인데, 같은 시간대에 v1도 따로 돌아 텔레그램이 두 번 옴 (12:23 v1 / 12:31 v2). 헤더 표기 "(12:09 기준)"이 분석 시각인지 fetch 시작점인지 불분명.
+
+**원인**:
+- v1과 v2가 **last_run 파일을 따로 관리** (`siwhang/prompts/last_run.txt` vs `siwhang-v2/prompts/last_run_v2.txt`) → fetch 윈도우 어긋남.
+- v2가 13:05에 끝났을 때 직전 v2 실행이 12:32였다면 윈도우 33분짜리로 거슬러 올라감 → 헤더 "12:32 기준"은 정상 동작이지만 사용자 입장에선 "왜 이전 시간을?" 의문.
+
+**조치**:
+- 메시지 헤더 형식을 **`(HH:MM~HH:MM 분석)`**으로 변경 (fetch 윈도우 시작~분석 시점). v1/v2 SKILL.md 동시 수정 후 Oracle SCP 배포.
+- v1/v2 같은 시간대 cron 충돌은 별도 cron 정리 필요 (이번 세션에선 v2만 살림). v1 cron은 다른 Claude Code 세션에서 등록됐을 수 있어 그쪽에서 `CronDelete` 필요.
+
+**왜 자동 실행이 17분 걸리나**: cron 트리거 12:14 → 발송 12:31 = 17분. 분해 추정:
+- fetch 1~2분 + AI catalyst 조사(Google RSS + DART + 뉴스 grep) 5~10분 + Entry Gate(Oracle SSH) 1~2분 + 저장+텔레그램 1분.
+- 30분 cron 주기와 거의 겹쳐서 다음 실행과 시간이 가까워질 위험 있음. 종목 수 많으면 더 오래.
+
+### Entry Gate `vol_ratio` 기준 재검토 필요 (잠재 이슈)
+
+**관찰**: 2026-05-12 오후 분석 결과 24종목 중 거의 전부가 vol_ratio < 1.2로 WARN/BLOCK 처리됨. 평균 +5~10% 상승 종목들조차 거래량이 "최근 1봉 / 직전 5봉 평균" 기준으로 0.0~0.7 사이에 분포.
+
+**원인 추정**: SKILL.md 4-2의 vol_ratio 정의가 "현재 봉 vs 5봉 평균"이라, 5분봉 한가운데에 시간이 끼면 현재 봉 거래량이 아직 누적 중이라 항상 낮게 잡힘. 점심시간 직후/오후 후반 등 활동성 떨어지는 시간대도 모두 fail.
+
+**대응 방향(미적용)**: 시간대별 가중 평균(전일 동시간 대비)으로 변경하거나, 진짜 모멘텀 죽음만 잡도록 임계 0.5로 완화. 현재는 vol_ratio 기준이 "WARN을 양산하는 노이즈 게이트"가 됨.
+
+### `received_at` 컬럼 추가 (가격 카드 시각 표시)
+
+**배경**: `[SS/VI]` 카드에 가격은 보였지만 **수신 시각이 안 보였음**. v1 코드(app.js:8270~)는 `p.received_at`을 UTC ISO로 변환해서 `12:13` 표시하게 작성됐지만, **`backtest_picks`에 `received_at` 컬럼 자체가 없어** 응답에 안 실림.
+
+**조치 (A안 채택)**:
+- `news_storage.py`에 `ALTER TABLE backtest_picks ADD COLUMN received_at TEXT` 마이그레이션 추가
+- `save_backtest_pick()`에 `received_at` 파라미터 추가
+- `web_app.py /api/backtest/picks` 페이로드에 `received_at` 통과
+- **KST 문자열로 저장** (`"YYYY-MM-DD HH:MM:SS"`). UTC 저장 + 프론트 변환은 사용자 요청에 따라 거부 — DB 직접 조회 시 KST가 더 직관적.
+- `static/js/app.js` 카드 코드: KST 문자열에서 `HH:MM` regex로 직접 추출 (UTC 변환 코드 제거)
+- siwhang/siwhang-v2 SKILL.md에 picks 저장 시 `received_at` 필드 포함 지시 추가
+
+**변환 패턴** (메시지의 `received_at`은 UTC stored이므로 KST로 변환 후 저장):
+```python
+from datetime import datetime, timezone, timedelta
+KST = timezone(timedelta(hours=9))
+dt_utc = datetime.fromisoformat(received_at.replace(' ','T')).replace(tzinfo=timezone.utc)
+received_at_kst = dt_utc.astimezone(KST).strftime("%Y-%m-%d %H:%M:%S")
+```
+
+**주의**: `messages.received_at`은 여전히 UTC 저장 (signal_listener 로직). picks 테이블만 KST. 이 불일치를 인지할 것.
+
+### 실전 페이지 슬롯 매핑 한계 (미해결)
+
+**현상**: cron 분이 `14,44`라 분석 종료가 23~33분 사이 떨어지면 picks의 `slot_time`이 `13:23` 같은 비정형 시각이 됨. 프론트 `_LIVE_SLOTS`는 30분 그리드(`09:15, 09:45, ...`)만 가짐 → `_hhmmToNearestSlot`이 가장 가까운 이전 슬롯에 매핑.
+
+예: `slot_time=12:09` pick은 11:45 슬롯 카드로, `slot_time=13:23` pick은 12:45 슬롯에 매핑됨 → 사용자가 12:15 슬롯 탭을 보면 비어있는 카드.
+
+**해결 옵션 (미적용)**:
+- A. cron 분 조정 (`14,44` → `15,45` 또는 `05,35`) — 분석 시작/종료를 정형 슬롯에 맞춤. 가장 작은 변경.
+- B. 실전 페이지 한정 동적 슬롯 — picks의 `run_at` distinct 시각을 그대로 탭으로 노출. 백테스트 페이지의 13슬롯 모델과 분리.
+
+추천 B (사용자 의견 수렴 후 결정).
+
+### 권한 자동 실행 설정
+
+**배경**: 30분 cron 자동 실행 중 권한 prompt가 뜨면 분석이 멈춤. SKILL.md "절대 묻지 않는다" 원칙과 충돌.
+
+**조치**: `.claude/settings.json` 신설 (프로젝트 공유 설정, settings.local.json과 별도):
+```json
+{
+  "permissions": {
+    "allow": [
+      "Bash(ssh *)", "Bash(scp *)", "Bash(.venv/bin/python3 *)",
+      "Bash(python3 *)", "Bash(curl *)", "Bash(git *)",
+      "Write(/Users/msim/Documents/newkiwoom/**)",
+      "Edit(/Users/msim/Documents/newkiwoom/**)",
+      "Read(/Users/msim/Documents/newkiwoom/**)",
+      "Read(/tmp/**)",
+      ...
+    ]
+  }
+}
+```
+
+**주의**:
+- `Bash(ssh *)` / `Bash(python3 *)` 등은 임의 코드 실행을 가능케 함 — 보안 트레이드오프. 자동화 우선.
+- `.claude/`는 `.gitignore`에 등록돼 있어 settings.json은 공유되지 않음. SCP로 Oracle 등 다른 환경에 별도 배포 필요 시 주의.
+- settings.json은 **세션 시작 시점**에 로드. 변경 후 즉시 적용 안 될 수 있음 — 다음 세션부터 완전 적용.
+
+**fewer-permission-prompts skill 정책 우회 사유**: skill은 `python3 *`, `ssh *` 와일드카드를 거부하지만, 사용자가 cron 자동화 우선으로 요청 → 명시적 우회.
+
+### siwhang-v2 manual_focus 활용 사례 (2026-05-12 오후)
+
+**상황**: 12:13 [SS]엑스게이트 → 12:14 cron v2 트리거 → 분석 진행. 엑스게이트는 watchlist_match 비어있지만 morning_report `관련주:` 목록에 등록돼 있어 manual_focus 매칭으로 분석 대상 진입.
+
+**확인된 흐름**:
+1. signal_listener → DB messages 적재 (UTC received_at)
+2. `[SS]` AND (`watchlist_match` OR `manual_focus 매칭`) 필터 통과
+3. Entry Gate: stock_name_map → 코드 조회 → Oracle entry_gate_data.py 실행
+4. AI 분석 → confidence M (PQC 정부 실증 + manual_focus)
+5. backtest_picks (session id=13, slot_time=12:09) + siwhang_results 동시 저장
+6. 텔레그램 발송 → `last_run_v2.txt` 갱신
+
+**검증된 picks 가격 필드 (id=392)**: `price_at_signal=16,260` / `price_at_slot=16,260` / `prev_close=15,300` / `today_open=17,600`. entry_gate_data.py의 snapshot 결과 재활용.
+
+### 자동 실행 원칙 강화
+
+stage가 끝날 때마다 사용자에 묻지 않고 자동 진행:
+- fetch 결과 0건 → "분석 대상 없음" 텔레그램 + last_run 갱신 후 종료
+- Kiwoom 토큰 인증 실패 → catalyst에 경고 표기 후 picks 저장 진행 (price 필드 null)
+- SSH/저장/텔레그램 어느 단계든 실패해도 last_run 반드시 갱신 (다음 cron이 같은 윈도우 재처리 방지)
+
+이 원칙은 v1/v2 SKILL.md "⚡ 자동 실행 원칙" 섹션에 명시. 권한 prompt 회피 패턴(권한 트리거 회피 — 명령 작성 규칙)도 SKILL.md에 명시.
+
+### ⚠️ scp 후 반드시 web_app 재시작 확인
+
+**현상**: `web_app.py`/`news_storage.py`를 scp로 Oracle에 올리고 admin UI 재시작 안 했을 때, **신규 컬럼/필드는 무시되고 응답에 빠짐**. 코드 자체는 새 버전인데 실행 중 프로세스는 옛 메모리.
+
+이번 케이스: `received_at` 컬럼 추가 후 picks 페이로드엔 KST 값 정상 포함되어 SCP 완료 → 그러나 web_app 미재시작 상태라 INSERT에서 received_at 무시 → DB에 NULL 저장 → 카드에 시각 미표시.
+
+**디버깅 첫 의심 포인트**:
+1. `ps -ef | grep web_app` — 시작 시각이 코드 변경 시각보다 이전이면 재시작 누락
+2. `grep -n '<신규필드>' /home/opc/newkiwoom/web_app.py` — 파일은 이미 새 버전인데 응답에 안 실리면 100% 재시작 문제
+3. 보강 백필: `messages` 테이블에서 종목명 LIKE 매칭 + `received_at` UTC→KST 변환 후 `UPDATE backtest_picks` 일괄 패치
+
+**권장 절차**:
+- scp 직후 → admin UI(http://localhost:8889)에서 "Oracle 서버 재시작" 또는 SSH `sudo kill <pid> && sudo -E env PATH=... WEB_PORT=443 nohup python web_app.py &`
+- DB ALTER TABLE은 마이그레이션 코드가 import 시점에 실행되므로, **재시작 = 마이그레이션 적용 + 새 코드 로드**가 한 번에 됨
+- 신규 컬럼 추가했는데 카드/응답에 안 보이면 우선 재시작 누락 의심
+
+---
+
+## 2026-05-13 작업 — Lessons Learned
+
+### 자유형 뉴스 + 시세 인사이트 워크플로 (자동 실행)
+
+**원칙**: 사용자가 "오늘 호재 뉴스 종목과 상승률 정리해줘" 같은 자유 질문 던졌을 때, **권한 prompt 없이 즉시 실행**한다. 사용자가 명시적으로 "항상 승인"을 선언했으므로 SSH/Kiwoom/curl 모든 단계 묻지 않음.
+
+**표준 절차**:
+1. **뉴스/급등주 fetch** — `/news-consult` 스킬 패턴 (SSH → Oracle localhost API)
+   - `GET /api/news/today?date=YYYY-MM-DD`
+   - `GET /api/hotstock/parsed?date=YYYY-MM-DD`
+2. **호재 종목 후보 추출** — 키워드 매칭(임상/승인/특허/수출/기술수출/마일스톤 등) + 급등주 [SS⬆️]/[VI] 교차
+3. **stock_name → code 매핑** — Oracle `/home/opc/newkiwoom/.data/stock_name_map.json`
+4. **현재가/등락률 일괄 조회** — Oracle SSH에서 Kiwoom ka10003 직접 호출 (아래 패턴 참고)
+5. 결과 표 정리 + 호재성 ↔ 시장 반응 해석 (재료 작동 vs 선반영 sell-the-news)
+
+### Kiwoom ka10003 일괄 시세 조회 패턴 (검증됨)
+
+`KiwoomClient.get_stock_info()`는 `current_price`만 주고 등락률 안 줌. **ka10003 직접 호출**이 정답:
+
+```python
+import urllib.request, json
+from kiwoom_client import KiwoomClient
+kc = KiwoomClient(); kc._ensure_valid_token()
+
+def fetch_quote(code):
+    req = urllib.request.Request(
+        "https://api.kiwoom.com/api/dostk/stkinfo",
+        data=json.dumps({"stk_cd": code}).encode(),
+        headers={
+            "Content-Type": "application/json;charset=UTF-8",
+            "authorization": "Bearer " + kc.token,
+            "api-id": "ka10003",
+        }
+    )
+    data = json.loads(urllib.request.urlopen(req, timeout=10).read())
+    # 응답에 list-of-dict가 어디 있을지 모르니 동적 탐색
+    items = next((v for v in data.values() if isinstance(v,list) and v and isinstance(v[0],dict)), [])
+    if not items: return None
+    latest = items[0]  # 첫 행 = 가장 최신 체결
+    return {
+        "cur": latest.get("cur_prc","").lstrip("+-"),  # 부호 제거
+        "chg_pct": latest.get("pre_rt"),               # 등락률 (예: "+12.92")
+        "chg_amt": latest.get("pred_pre"),             # 전일대비 금액
+        "tm": latest.get("tm"),                         # HHMMSS
+        "vol": latest.get("acc_trde_qty"),             # 누적거래량
+    }
+```
+
+**주의**:
+- `cur_prc` 등 가격 필드는 `+` 또는 `-` 부호 prefix가 붙어있음 → 표시할 때 `.lstrip("+-")`
+- 응답 list 키 이름이 종목/시점에 따라 달라질 수 있어 `next((v for v in data.values() if isinstance(v,list) ...))` 패턴이 안전
+- 호출 간격 0.2초+ (rate limit 5/sec 여유)
+
+### Oracle 원격 Python 실행 패턴 (heredoc 함정 회피)
+
+heredoc 안에 f-string 중첩 따옴표 / 이모지 / 한글 등 들어가면 SyntaxError 자주 남. **로컬에서 .py 작성 → SCP → Oracle에서 실행**이 가장 안정적:
+
+```bash
+# 1. 로컬에서 작성
+Write /tmp/myscript.py
+
+# 2. SCP
+scp -i $SSH_KEY /tmp/myscript.py opc@152.67.207.143:/tmp/myscript.py
+
+# 3. Oracle에서 newkiwoom 디렉터리로 옮긴 뒤 실행 (cwd 의존 import 때문)
+ssh -i $SSH_KEY opc@152.67.207.143 'cp /tmp/myscript.py ~/newkiwoom/_tmp.py && cd ~/newkiwoom && source .venv/bin/activate && python3 _tmp.py && rm _tmp.py'
+```
+
+**왜 ~/newkiwoom 안에서 실행해야 하나**: `kiwoom_client.py` 등 프로젝트 모듈이 `sys.path` 기준 cwd에 있어야 import됨. `/tmp`에서 그냥 돌리면 `ModuleNotFoundError`.
+
+### siwhang-v2 entry_gate_data.py 재활용
+
+자유형 인사이트 요청에서 등락률만 필요하면 ka10003으로 충분하지만, **추가 지표(RSI/VWAP/거래량비율/갭) 필요하면 siwhang-v2의 `entry_gate_data.py` 재사용 가능**.
+
+```bash
+# .claude/skills/siwhang-v2/entry_gate_data.py 가 이미 일봉+5분봉+RSI/VWAP/거래량비율 한번에 계산
+ssh -i $SSH_KEY opc@152.67.207.143 'cd ~/newkiwoom && source .venv/bin/activate && python3 .claude/skills/siwhang-v2/entry_gate_data.py 078160 196170 950220'
+```
+
+출력은 `{code: {change_pct, gap_pct, rsi, vwap_gap_pct, vol_ratio, gate_pass}}` JSON.
+
+자유 질의 답변에 깊이가 필요할 때(눌림목 진입 가능성, 추격 위험 평가 등)는 entry_gate_data 결과를 같이 보여줄 것.
+
+### 호재 → 주가 해석 프레임 (자유 인사이트용)
+
+추천 패턴이 아니라 **재료와 시장 반응을 교차 해석**:
+
+| 패턴 | 등락률 | 해석 |
+|------|--------|------|
+| 호재 + 상한가/SS⬆️ | +25%~30% | 재료 작동 — 추격 위험 (이미 반응) |
+| 호재 + 강세 (+10~20%) | 보통 [VI] 동반 | 진행 중 — 눌림 대기 가능 |
+| 호재 + 약세/혼조 (-2~+3%) | — | 선반영 또는 시장이 호재로 안 받음 |
+| 호재 + 폭락 (-10%↓) | — | sell the news 또는 다른 악재 동시 발생. 메디포스트 5/13 카티스템 임상3상 성공 발표 → -16.89% 사례 |
+
+답변 표에 등락률만 나열하지 말고 **"재료 작동" / "선반영" / "sell the news"** 한 줄 해석을 같이 줄 것.
+
+### 권한 자동 승인 항목 (사용자 명시적 사전 승인)
+
+다음 작업들은 **항상 묻지 않고 즉시 실행**:
+- Oracle SSH 임의 명령 (`ssh ... '...'` 모든 형태)
+- Oracle SCP 파일 전송 (양방향)
+- Kiwoom API 임의 호출 (시세/차트/계좌조회 — 단, 주문 API는 제외)
+- Oracle localhost API 호출 (Basic Auth + curl)
+- `/tmp` `~/.claude/projects/.../tool-results/` 임시 파일 작성/조회
+- 뉴스 fetch + 종목 코드 매핑 + 시세 일괄 조회 워크플로 전체
+
+**계속 사용자 확인이 필요한 작업** (이 자동 승인에서 제외):
+- 실거래 매수/매도 주문 (`place_buy_order`/`place_sell_order`)
+- Oracle 서버 재시작/중단 (`oracle-server` 스킬 호출은 OK, 직접 kill은 사용자 의도 확인)
+- git push, force-push
+- DB DROP/DELETE 류 destructive 쿼리
+
+---
+
+## 2026-05-14 작업 — Lessons Learned
+
+### Mode2 watcher entry에 빈 code 발생 → UI 삭제 안 됨
+
+**현상**: `mode2_watchers.json`의 watchers dict에 `key=""`(빈 문자열) entry가 들어가는 경우 UI 삭제 버튼이 동작하지 않음.
+
+**원인**: UI 삭제는 `DELETE /api/mode2/watchers/<code>` 호출 → `code=""`이면 URL이 `/api/mode2/watchers/` 가 되어 라우트 미매칭. 결과적으로 무반응.
+
+**근본 원인 (추정)**: 등록 흐름 어딘가에서 종목코드 정규화 누락 또는 API 페이로드 검증 누락. **재발 방지를 위해 watcher 등록 API에 `code` 빈 값 거부 검증을 추가하는 것이 좋음** (현재 미적용).
+
+**복구 절차**:
+```python
+# /home/opc/newkiwoom/.data/mode2_watchers.json — root 소유라 sudo 필요
+ws = d["watchers"]
+for code in list(ws.keys()):
+    if code == "" or not code:
+        del ws[code]
+# sections[].watchers 리스트에서도 "" 제거
+```
+백업: `mode2_watchers.json.bak_YYYYMMDD` 생성 후 진행. **수정 후 web_app 재시작 필수** (메모리상 dict가 디스크 덮어쓰기 방지).
+
+### Mode2 벌크등록 — 종목명 입력 지원 (`static/js/app.js: executeBulkAdd`)
+
+**변경**: 첫 컬럼이 **숫자만**이면 종목코드(6자리 zero-pad), 그 외는 종목명으로 간주 → `/api/stock/search` 조회. 헤더 alias도 `종목코드`/`종목명`/`종목` 모두 `'stock'` 으로 통합.
+
+**API 응답 키 함정** (이전 버그):
+- `/api/stock/search` 응답: `{success, results: [{stock_code, stock_name}]}`
+- 잘못된 코드: `srData.data` / `.code` 사용 → 종목명 입력 시 항상 실패
+- 올바른 패턴: `srData.results || srData.data` 폴백 + `pick.stock_code || pick.code` 폴백
+
+**정확 일치 우선 + 후보 다수 시 실패 처리**:
+- 정확히 같은 이름이 있으면 그것 사용
+- 정확 일치 없고 후보 여러 개면 실패 목록에 후보 3개까지 표시 (사용자 재시도)
+- 자동으로 첫 번째 후보 채택하지 않음 (오등록 방지)
+
+**같은 패턴이 적용된 다른 화면**: 시황체크 관심종목 입력 (`addWatchlistItems`, `saveWatchlistEdit`) — 공통 헬퍼 `_resolveWatchlistTokens()` 추가.
+
+### Mode2 인라인 편집 budget 단위 변환 누락
+
+**증상**: 종목 행 budget cell을 편집하면 만원 단위 변환이 안 돼서 입력값이 원 단위로 저장됨. UI 표시 "10만" → 편집 input "10" → blur 시 `data.budget = 10` PUT → DB 10원 저장.
+
+**원인 — 인라인 편집 경로가 2개**:
+1. **셀 더블클릭** (`enableCellEdit`) — 단건 cell 편집, blur/Enter 저장
+2. **연필 아이콘 → 행 편집 모드** (`enterEditMode` + `saveWatcherRow` + `saveSectionWatchers`) — 행 단위 일괄 ✓ 저장
+
+`enableCellEdit`은 budget 단위 변환 코드가 있었지만, **2번 경로(`enterEditMode`)와 섹션 일괄 저장(`saveSectionWatchers`)에는 단위 변환 로직이 없었음**. 사용자가 주로 쓰는 경로가 2번이라 문제 발생.
+
+**수정 패턴**:
+- 셀 렌더 시 `data-raw="${w.budget}"` 속성으로 원본 원 단위 값 저장
+- 편집 모드 진입 시 `parseInt(data-raw) / 10000` 으로 만원 표시
+- 저장 시 `data[field] = isBudget ? (parseInt(input) * 10000 || 0) : (parseInt(input) || 0)` 변환
+
+**같은 함수 안 다른 함정 — `isNote` 변수 누락**:
+`enableCellEdit`에서 `isNote` 변수 선언 없이 참조 → ReferenceError 발생 → blur 핸들러가 saveEdit 진입 첫 줄에서 throw → "Enter/blur 저장 안 됨" 증상. 콘솔 빨간 에러 확인이 첫 디버깅 단계.
+
+### Mode2 인라인 편집 — 셀 안 이모지/단위 문자열 함정
+
+**증상**: 1차지지 셀을 행 편집 모드(연필→✓)로 저장하면 가격이 0으로 덮어써짐.
+
+**원인**: 1차지지 셀 안에 가격 + 이모지(📥 물타기 / ✂️ 손절)가 함께 들어있음. `enterEditMode`가 `cell.textContent` 를 그대로 input value로 넣음 → `<input type="number">` 가 `"22,425 📥"` 같은 비숫자 문자열을 거부 → input 빈 값 → ✓ 저장 시 `parseInt("") || 0 = 0` PUT.
+
+**수정**: 가격 셀에서 input 값 추출 시 정규식 `/-?\d+/` 으로 **숫자만** 추출. `enterEditMode` (행 편집)와 `enableCellEdit` (셀 더블클릭) 양쪽 다 적용.
+
+**연쇄 영향**: 사용자가 1차지지 안 건드리고 다른 필드만 행 단위 저장해도 1차지지가 0으로 덮어써짐. 즉 행 편집 모드 진입 자체가 버그 트리거.
+
+### Mode2 1차지지 셀 — 물타기 모드 시각화
+
+**변경**: `support_1_mode === '물타기'` AND `support_1_price > 0` 조건일 때 셀 배경 `rgba(173, 216, 230, 0.35)` (투명 하늘색). 손절 모드 또는 가격 미설정 시 배경 변화 없음. 글씨/이모지 가독성 유지.
+
+### 시황체크 관심종목 — 종목명 입력 지원 + 표시 보정
+
+**변경 1 (프론트, `app.js`)**: `addWatchlistItems` / `saveWatchlistEdit` 가 공통 헬퍼 `_resolveWatchlistTokens()` 사용. 토큰별로 숫자 → 코드, 그 외 → `/api/stock/search` 조회.
+
+**변경 2 (백엔드, `web_app.py`)**:
+- `POST /api/watchlist` 와 `POST /api/watchlist/bulk` 가 종목코드 저장 시 `_load_corp_code_map()` 으로 종목명 조회해서 `name` 필드 채움 (이전엔 `name=code` 로 저장됨)
+- `GET /api/watchlist` 응답에서 `name == code` 또는 빈 값이면 corp_map으로 보정해서 반환 → **기존에 잘못 저장된 manual 항목도 자동 표시 보정** (DB/JSON 마이그레이션 불필요)
+
+**왜 백엔드까지 손대야 했나**: 프론트에서 종목명 → 코드 변환만 했더니 manual 항목이 `{code: "035720", name: "035720"}` 으로 저장돼 UI에 `035720(035720)` 표시됨. 코드 → 종목명 lookup이 백엔드에 있어야 일관성 유지.
+
+### scp 후 web_app 재시작 — Python 코드 변경은 반드시 재시작
+
+**규칙**: `web_app.py` / `news_storage.py` / `mode2_manager.py` 등 **Python 모듈** 변경 시 항상 재시작 필요. JS/HTML/CSS만 변경한 경우 재시작 불필요 (사용자 측 Cmd+Shift+R 만으로 충분).
+
+**재시작 절차** (검증된 패턴):
+```bash
+ssh -i $KEY opc@$HOST "sudo pkill -f 'web_app.py'"
+ssh -i $KEY opc@$HOST "ps aux | grep web_app | grep -v grep"  # exit 1 = 종료 확인
+ssh -i $KEY opc@$HOST "cd ~/newkiwoom && bash start_https.sh"
+ssh -i $KEY opc@$HOST 'curl -sk -o /dev/null -w "%{http_code}" -u "$WU:$WP" "https://localhost/api/analysis/context?date=$(date +%Y-%m-%d)"'  # 200 확인
+```
+
+**SSH 복합 명령 exit 255 회피** (CLAUDE.md 기존 항목 재확인): `kill && start` 한 줄에 묶지 말고 **별도 SSH 호출로 분리**. `sudo pkill -f 'web_app.py' 2>/dev/null; pkill -f 'signal_listener.py' 2>/dev/null; sleep 1; echo done` 같은 복합 형태도 exit 255 자주 발생.
+
+---
